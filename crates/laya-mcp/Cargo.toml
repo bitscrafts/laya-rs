@@ -14,6 +14,7 @@ name = "laya-mcp"
 path = "src/main.rs"
 
 [dependencies]
+laya-store = { path = "../laya-store" }
 laya-abi = { path = "../laya-abi" }
 laya-core = { path = "../laya-core" }
 laya-backbone = { path = "../laya-backbone" }

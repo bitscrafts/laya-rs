@@ -184,6 +184,9 @@ pub struct ServerState {
     /// The roots `ask_file`/`ask_files` may read. Resolved ONCE at construction, so the
     /// boundary cannot change between two calls that appear to use the same server.
     pub read_scope: laya_core::ask_file::Scope,
+    /// Where this process appends its decision records. A DIRECTORY, not a store handle:
+    /// F8 says a server never writes the shared store, and a directory cannot be opened as one.
+    pub ledger_dir: Option<std::path::PathBuf>,
 }
 
 impl ServerState {
@@ -204,6 +207,7 @@ impl ServerState {
             readiness: std::sync::Mutex::new(ReadinessCache::new()),
             sidecar: socket,
             read_scope: laya_core::ask_file::Scope::new(Vec::new()),
+            ledger_dir: resolve_ledger_dir(std::env::var(LEDGER_DIR_ENV).ok().as_deref()),
         }
     }
 
@@ -420,6 +424,15 @@ pub fn to_result(outcome: ToolOutcome) -> Result<CallToolResult, McpError> {
     }
 }
 
+/// The `invalid_params` error for a missing required argument, or `None` when all are present.
+///
+/// Every implemented arm needs the same three lines; keeping them in one place is what stops
+/// `handle` from being a wall of near-identical blocks.
+fn require(tool: &str, args: &RawArgs) -> Option<McpError> {
+    missing_required(tool, args)
+        .map(|missing| McpError::invalid_params(format!("`{tool}` requires `{missing}`"), None))
+}
+
 /// The shared entry point for every tool: **check readiness, then dispatch**.
 ///
 /// One place, so no tool can invent its own (weaker) down behaviour. This is the
@@ -484,56 +497,44 @@ pub fn handle(
     // receive the argument. So the unimplemented check comes first for those.
     match tool {
         "gate" => {
-            if let Some(missing) = missing_required(tool, args) {
-                return Err(McpError::invalid_params(
-                    format!("`{tool}` requires `{missing}`"),
-                    None,
-                ));
+            if let Some(err) = require(tool, args) {
+                return Err(err);
             }
             gate_via_sidecar(args, state)
         }
         "decide" => {
-            if let Some(missing) = missing_required(tool, args) {
-                return Err(McpError::invalid_params(
-                    format!("`{tool}` requires `{missing}`"),
-                    None,
-                ));
+            if let Some(err) = require(tool, args) {
+                return Err(err);
             }
             decide_via_sidecar(args, state)
         }
         "ask_file" => {
-            if let Some(missing) = missing_required(tool, args) {
-                return Err(McpError::invalid_params(
-                    format!("`{tool}` requires `{missing}`"),
-                    None,
-                ));
+            if let Some(err) = require(tool, args) {
+                return Err(err);
             }
             ask_file_via_sidecar(args, state)
         }
         "ask_files" => {
-            if let Some(missing) = missing_required(tool, args) {
-                return Err(McpError::invalid_params(
-                    format!("`{tool}` requires `{missing}`"),
-                    None,
-                ));
+            if let Some(err) = require(tool, args) {
+                return Err(err);
             }
             ask_files_via_sidecar(args, state)
         }
         "ask" => {
-            if let Some(missing) = missing_required(tool, args) {
-                return Err(McpError::invalid_params(
-                    format!("`{tool}` requires `{missing}`"),
-                    None,
-                ));
+            if let Some(err) = require(tool, args) {
+                return Err(err);
             }
             ask_via_sidecar(args, state)
         }
+        "ledger" => {
+            if let Some(err) = require(tool, args) {
+                return Err(err);
+            }
+            ledger_via_sidecar(args, state)
+        }
         "should_compact" => {
-            if let Some(missing) = missing_required(tool, args) {
-                return Err(McpError::invalid_params(
-                    format!("`{tool}` requires `{missing}`"),
-                    None,
-                ));
+            if let Some(err) = require(tool, args) {
+                return Err(err);
             }
             should_compact_via_sidecar(args, state)
         }
@@ -672,6 +673,127 @@ fn judge_command(
             }
         },
     )
+}
+
+/// The ledger directory this server appends to, from the environment.
+///
+/// **Unset means NO ledgering**, and that is deliberate. A decision layer whose bookkeeping
+/// silently started writing files somewhere unexpected — an agent's cwd, a read-only mount —
+/// would be worse than one that records nothing. The absence is visible in the startup banner.
+#[must_use]
+pub fn resolve_ledger_dir(raw: Option<&str>) -> Option<std::path::PathBuf> {
+    let raw = raw.map(str::trim).filter(|s| !s.is_empty())?;
+    Some(std::path::PathBuf::from(raw))
+}
+
+/// Append one ledger row for a decision, and never fail the decision because of it.
+///
+/// Returns a short note when the record could not be written, so the caller can surface it. The
+/// DECISION is not affected: a decision layer that refused to decide because its bookkeeping was
+/// broken would trade the whole function for the log. But it is reported rather than swallowed,
+/// because a ledger that has silently stopped recording is worse than one that never did —
+/// every "the latency budget is fine" claim would keep reading as measured.
+fn record_decision(
+    state: &ServerState,
+    tool: &str,
+    question_id: &str,
+    question_type: &str,
+    payload: &serde_json::Value,
+    latency_ms: u64,
+    state_sha256: &str,
+) -> Option<String> {
+    let dir = state.ledger_dir.as_ref()?;
+    let band = payload
+        .get("band")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let row = laya_store::DecisionRow {
+        ts: now_rfc3339(),
+        ts_nanos: now_nanos(),
+        tool: tool.to_string(),
+        run_id: None,
+        node_id: None,
+        question_id: question_id.to_string(),
+        question_type: question_type.to_string(),
+        label: payload
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        confidence: payload
+            .get("confidence")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0),
+        band: band.to_string(),
+        margin: payload.get("margin").and_then(serde_json::Value::as_f64),
+        near_tie: payload
+            .get("near_tie")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        probabilities: payload.get("probabilities").cloned(),
+        saturated: payload
+            .get("saturated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        laya_version: LAYA_VERSION.to_string(),
+        state_sha256: state_sha256.to_string(),
+        head_sha256: None,
+        backbone_sha256: None,
+        bucket_clamped: payload
+            .get("saturated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        latency_ms,
+    };
+    match laya_store::append_segment(dir, &laya_store::Record::Decision(row)) {
+        Ok(_) => None,
+        Err(e) => Some(format!("the decision was not recorded: {e}")),
+    }
+}
+
+/// The pinned Laya version, recorded in every row for provenance.
+pub const LAYA_VERSION: &str = "0.3.5";
+
+/// A hash of the decided state. **Never the state itself** — a state can hold a file, and a
+/// file can hold a secret.
+#[must_use]
+pub fn state_sha256(state: &serde_json::Value) -> String {
+    // blake3 is not a dependency here, so this is a stable 64-bit FNV-1a in hex. It is
+    // sufficient for the job the field does — noticing that two decisions were made about the
+    // SAME input — and the weaker guarantee is stated rather than implied.
+    let text = state.to_string();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Monotonic nanoseconds — the ordering key, immune to a clock step.
+#[must_use]
+pub fn now_nanos() -> u64 {
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_nanos()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+/// The process start, so `now_nanos` is monotonic and starts near zero.
+static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// A wall-clock timestamp, for a human reading the ledger.
+#[must_use]
+pub fn now_rfc3339() -> String {
+    // No chrono dependency: seconds since the epoch is unambiguous and machine-readable, and a
+    // human can convert it. Deliberately not a hand-rolled calendar, which is where date code
+    // goes wrong.
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    format!("epoch+{secs}")
 }
 
 /// The `ask` tool (L10): the CALLER writes the questions.
@@ -1022,8 +1144,115 @@ fn ask_files_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallTool
     to_result(ToolOutcome::Ok(body.to_string()))
 }
 
+/// The `ledger` tool: query the decision ledger (stats, tail).
+///
+/// ## Two constraints, both from measurements rather than caution
+///
+/// 1. **The store is opened per call and dropped immediately.** redb's read-only handle takes
+///    the file lock (`a_held_reader_blocks_a_writer_so_a_server_must_not_hold_one`), so a
+///    server that cached a reader would make `laya ledger compact` fail with `AlreadyOpen` for
+///    as long as it lived — that is, forever.
+/// 2. **An absent store is not an error.** Before the first compaction there is no
+///    `ledger.redb`, and that is the normal state of a fresh install. Reporting it as a failure
+///    would make the tool look broken exactly when the system is working correctly.
+///
+/// Outcomes are never written here: appending is a WRITE, and a server does not write the
+/// store. `laya ledger outcome` does that.
+///
+/// # Errors
+/// An [`McpError`] when no ledger directory is configured, or the store exists but cannot be
+/// read.
+fn ledger_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let Some(dir) = state.ledger_dir.as_ref() else {
+        return Err(McpError::invalid_params(
+            "laya-mcp: no ledger directory is configured, so there is nothing to query. \
+             Set LAYA_LEDGER_DIR (the server appends its segments there, and \
+             `laya ledger compact` builds the store from them)",
+            None,
+        ));
+    };
+    let store = dir.join(laya_store::STORE_FILE);
+    if !store.exists() {
+        // The honest answer, and not an error: nothing has been compacted yet.
+        return to_result(ToolOutcome::Ok(
+            json!({
+                "decisions": 0,
+                "outcomes": 0,
+                "store": store.display().to_string(),
+                "note": "no store yet — nothing has been compacted. Segment files, if any, are \
+                         in the ledger directory; run `laya ledger compact` to merge them",
+            })
+            .to_string(),
+        ));
+    }
+
+    // Open, read, DROP. The reader is a temporary, not a field.
+    let reader = laya_store::Ledger::read_only(&store).map_err(|e| {
+        McpError::internal_error(
+            format!("laya-mcp: the ledger store could not be read: {e}"),
+            None,
+        )
+    })?;
+
+    let body = match args.op.as_deref() {
+        None | Some("stats") => {
+            let s = reader
+                .stats()
+                .map_err(|e| McpError::internal_error(format!("laya-mcp: {e}"), None))?;
+            json!({
+                "decisions": s.decisions,
+                "outcomes": s.outcomes,
+                "saturated": s.saturated,
+                "near_ties": s.near_ties,
+                "by_band": s.by_band,
+                "latency_ms": {
+                    "p50": s.latency_p50_ms,
+                    "p95": s.latency_p95_ms,
+                    "max": s.latency_max_ms,
+                },
+                // Stated, not implied. ECE needs (confidence, correct) pairs, and with no
+                // outcomes there are none — a number computed here would look authoritative
+                // and mean nothing.
+                "calibrated": s.outcomes > 0,
+                "note": if s.outcomes > 0 {
+                    "outcomes are recorded; calibration has raw material"
+                } else {
+                    "NO OUTCOMES RECORDED — nothing here can be calibrated. Record one with \
+                     `laya ledger outcome <id> --correct --source test`"
+                },
+            })
+        }
+        Some("tail") => {
+            let n = args
+                .context_tokens
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(10)
+                .min(100);
+            let records = reader
+                .tail(n)
+                .map_err(|e| McpError::internal_error(format!("laya-mcp: {e}"), None))?;
+            json!({
+                "records": records,
+                "count": records.len(),
+                "note": "newest first",
+            })
+        }
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!("laya-mcp: unknown ledger op `{other}`; use `stats` or `tail`"),
+                None,
+            ));
+        }
+    };
+    drop(reader);
+    to_result(ToolOutcome::Ok(body.to_string()))
+}
+
 /// The `decide` tool: typed questions -> route-shaped payloads.
 fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    // The real-path clock for this call, started BEFORE the model is asked, so the recorded
+    // latency covers the whole decision rather than only the bookkeeping after it.
+    let call_started = std::time::Instant::now();
     // The caller supplies the questions as Laya's own shape in this POC; a typed
     // `laya_abi::Question` array is the next step and the adapter above is ready for
     // it. Accepting Laya's shape here keeps the POC honest about what is proven.
@@ -1080,9 +1309,42 @@ fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolRes
         }
     }
 
-    to_result(ToolOutcome::Ok(
-        json!({ "payloads": payloads, "answers": answers }).to_string(),
-    ))
+    // Record every payload this call produced. One row per question, so the ledger can be
+    // joined per decision rather than per request.
+    let mut ledger_note: Option<String> = None;
+    // THIS CALL's latency, from `call_started` at the top of this handler.
+    //
+    // The first version used the process-start `Instant` and published `0` — a number that
+    // looks measured and is not, which is the exact defect NF3 exists to prevent. `stats`
+    // reported `latency p50: 0 ms` for a real model call, and only the end-to-end proof
+    // caught it, because the field was present, well-formed and plausible.
+    let elapsed_ms = u64::try_from(call_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    for (id, payload) in &payloads {
+        let question_type = questions
+            .get(id)
+            .and_then(|q| q.get("type"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("noul");
+        if let Some(note) = record_decision(
+            state,
+            "decide",
+            id,
+            question_type,
+            payload,
+            elapsed_ms,
+            &state_sha256(&state_value),
+        ) {
+            ledger_note = Some(note);
+        }
+    }
+
+    let mut body = json!({ "payloads": payloads, "answers": answers });
+    if let (Some(obj), Some(note)) = (body.as_object_mut(), ledger_note) {
+        // Reported, not swallowed: a ledger that has silently stopped recording is worse than
+        // one that never did, because every claim about it keeps reading as measured.
+        obj.insert("ledger".into(), json!(note));
+    }
+    to_result(ToolOutcome::Ok(body.to_string()))
 }
 
 /// The first argument `tool` declares as required and did not receive.
@@ -1387,6 +1649,9 @@ impl ServerHandler for LayaMcpServer {}
 /// silently defaults to the whole filesystem is a tool nobody can reason about.
 pub const READ_ROOTS_ENV: &str = "LAYA_READ_ROOTS";
 
+/// The env var naming where this server appends its ledger segments.
+pub const LEDGER_DIR_ENV: &str = "LAYA_LEDGER_DIR";
+
 /// Resolve the configured read scope.
 ///
 /// Colon-separated (`:`), matching `PATH`. An entry that does not exist is dropped and
@@ -1609,21 +1874,27 @@ mod tests {
         // `ask_file` and `ask_files` are IMPLEMENTED now, so they are not in this list.
         // Leaving them here would assert the opposite of the truth — and this is exactly
         // how a "not implemented" claim outlives the implementation.
-        // `ask_file`, `ask_files`, `should_compact` and `ask` are all IMPLEMENTED now. Only
-        // `ledger` remains — it needs `laya-store`, and it needs an outcome-recording path
-        // before it can mean anything (see spec 05).
-        //
-        // Six of the seven tools are real; this test exists so that the SEVENTH cannot
-        // silently become a success.
-        {
-            let tool = "ledger";
+        // EVERY tool is implemented now. This test is inverted from its original purpose —
+        // it used to prove that the unimplemented ones SAID SO rather than faking success.
+        // That property still matters, so it is asserted positively: no tool may be reported
+        // as unimplemented, because none is.
+        for tool in [
+            "decide",
+            "gate",
+            "ask_file",
+            "ask_files",
+            "should_compact",
+            "ask",
+            "ledger",
+        ] {
             let out = handle(tool, &ready(), &no_args(), &test_state());
+            let unimplemented = out
+                .err()
+                .is_some_and(|e| e.message.contains("not implemented"));
             assert!(
-                out.is_err(),
-                "{tool} has no implementation, so it must be an ERROR"
+                !unimplemented,
+                "`{tool}` must no longer report itself unimplemented"
             );
-            let msg = format!("{:?}", out.err().unwrap_or_default());
-            assert!(msg.contains("not implemented"), "{tool}: {msg}");
         }
     }
 

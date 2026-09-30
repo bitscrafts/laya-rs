@@ -3,7 +3,9 @@
 //! Implemented: `laya doctor`, the readiness check (spec 05). Exits **0** when Laya
 //! is usable and **1** when it is not, printing the actionable diagnostic on stderr.
 //!
-//! Not implemented: `decide`, `ledger`. Those print that they are unimplemented and
+//! Implemented: `laya ledger compact|stats|tail|outcome` — the only writer of the store.
+//!
+//! Not implemented here: `decide`. The CLI prints that it is unimplemented and
 //! exit non-zero — a command that appears to work while doing nothing is the class
 //! of defect this project's rules exist to prevent, and `doctor` is the one command
 //! whose entire job is to report state accurately.
@@ -115,9 +117,17 @@ fn doctor(endpoint: &str) -> ExitCode {
 }
 
 /// Parse the arguments into `(command, endpoint)`.
-fn parse_args(args: &[String]) -> Result<(Option<String>, String), String> {
+/// Parse the command word and the endpoint, and pass everything else through untouched.
+///
+/// `rest` carries the arguments of a **subcommand** (`laya ledger compact --dir X`). They are
+/// collected verbatim rather than validated here: this parser knows about the top-level
+/// shape only, and each subcommand decides what it accepts. Validating a subcommand's
+/// arguments in the top-level parser is how a flag gets rejected by code that has no idea
+/// what it means — which is exactly what happened to `laya ledger compact`.
+fn parse_args(args: &[String]) -> Result<(Option<String>, String, Vec<String>), String> {
     let mut command: Option<String> = None;
     let mut endpoint = DEFAULT_ENDPOINT.to_string();
+    let mut rest: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         match args.get(i).map(String::as_str) {
@@ -132,38 +142,244 @@ fn parse_args(args: &[String]) -> Result<(Option<String>, String), String> {
                 command = Some(other.to_string());
                 i += 1;
             }
-            Some(other) => return Err(format!("unexpected argument `{other}`")),
+            // Everything after the command word belongs to the command.
+            Some(other) => {
+                rest.push(other.to_string());
+                i += 1;
+            }
             None => break,
         }
     }
-    Ok((command, endpoint))
+    Ok((command, endpoint, rest))
+}
+
+// ---------------------------------------------------------------------------
+// `laya ledger` — the single writer
+// ---------------------------------------------------------------------------
+
+/// Where the segments and the store live.
+///
+/// One env var, one default, and the SAME resolution used by the server, so the writer and the
+/// readers cannot disagree about which directory they are talking about. A mismatch there would
+/// look exactly like "the ledger is empty", which is the failure this avoids.
+#[must_use]
+pub fn ledger_dir(explicit: Option<&str>) -> std::path::PathBuf {
+    explicit.map_or_else(
+        || {
+            std::env::var(LEDGER_DIR_ENV).map_or_else(
+                |_| std::path::PathBuf::from(DEFAULT_LEDGER_DIR),
+                std::path::PathBuf::from,
+            )
+        },
+        std::path::PathBuf::from,
+    )
+}
+
+/// The env var naming the ledger directory.
+pub const LEDGER_DIR_ENV: &str = "LAYA_LEDGER_DIR";
+
+/// The default ledger directory.
+pub const DEFAULT_LEDGER_DIR: &str = ".laya";
+
+/// `laya ledger <sub>` — a dispatcher, deliberately thin.
+///
+/// Each subcommand is its own function: the dispatcher stays readable, and a reader looking for
+/// what `compact` does does not have to hold four unrelated behaviours in their head at once.
+fn ledger(args: &[String]) -> ExitCode {
+    let Some(sub) = args.first().map(String::as_str) else {
+        eprintln!(
+            "usage: laya ledger <compact|stats|tail|outcome> [args]\n\
+             \x20 compact              merge segment files into the store (the only writer)\n\
+             \x20 stats                counts, latency percentiles, saturation rate\n\
+             \x20 tail [N]             the most recent N records (default 10)\n\
+             \x20 outcome <id> --correct|--wrong --source S [--note T]"
+        );
+        return ExitCode::FAILURE;
+    };
+
+    let dir = ledger_dir(option_value(args, "--dir").as_deref());
+    let store = dir.join(laya_store::STORE_FILE);
+
+    match sub {
+        "compact" => ledger_compact(&dir, &store),
+        "stats" => ledger_stats(&store),
+        "tail" => ledger_tail(&store, args),
+        "outcome" => ledger_outcome(&store, args),
+        other => {
+            eprintln!("laya: unknown ledger subcommand `{other}`");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `laya ledger compact` — merge segments into the store. THE ONLY WRITER.
+fn ledger_compact(dir: &std::path::Path, store: &std::path::Path) -> ExitCode {
+    match laya_store::compact(dir, store) {
+        Ok(report) => {
+            println!(
+                "segments read:    {}\nrecords seen:     {}\ninserted:         {}\n\
+                 already present:  {}\ningested into:    {}",
+                report.segments_read,
+                report.records_seen,
+                report.records_inserted,
+                report.records_duplicate,
+                report.ingested_into.display()
+            );
+            println!(
+                "\n(The segments were MOVED to {}, not deleted: the merge is re-runnable and \
+                 the raw evidence stays.)",
+                laya_store::INGESTED_DIR
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("laya: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `laya ledger stats` — and it says plainly when there is nothing to calibrate.
+fn ledger_stats(store: &std::path::Path) -> ExitCode {
+    match laya_store::Ledger::open_writer(store).and_then(|l| l.stats()) {
+        Ok(s) => {
+            println!("decisions:      {}", s.decisions);
+            println!("outcomes:       {}", s.outcomes);
+            println!("saturated:      {}", s.saturated);
+            println!("near ties:      {}", s.near_ties);
+            for (band, n) in &s.by_band {
+                println!("band {band:<10} {n}");
+            }
+            println!("latency p50:    {} ms", show_ms(s.latency_p50_ms));
+            println!("latency p95:    {} ms", show_ms(s.latency_p95_ms));
+            println!("latency max:    {} ms", show_ms(s.latency_max_ms));
+            if s.outcomes == 0 {
+                // Stated plainly, because the alternative is a reader assuming a calibration
+                // exists. ECE needs (confidence, correct) pairs and there are none.
+                println!(
+                    "\nNO OUTCOMES RECORDED — nothing here can be calibrated yet. Record one \
+                     with:\n  laya ledger outcome <id> --correct --source test"
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("laya: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `laya ledger tail [N]` — the most recent records, newest first.
+fn ledger_tail(store: &std::path::Path, args: &[String]) -> ExitCode {
+    let n = args
+        .get(1)
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(10);
+    match laya_store::Ledger::open_writer(store).and_then(|l| l.tail(n)) {
+        Ok(records) => {
+            for r in records {
+                println!("{}", serde_json::to_string(&r).unwrap_or_default());
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("laya: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `laya ledger outcome <id> --correct|--wrong --source S [--note T]`.
+///
+/// The record that does not exist anywhere else in the system, and the reason this command is
+/// worth having at all: `calibrate` needs `(confidence, correct)` pairs, and the ledger
+/// otherwise knows only what was decided, never whether it was right.
+fn ledger_outcome(store: &std::path::Path, args: &[String]) -> ExitCode {
+    let Some(decision) = args.get(1).filter(|a| !a.starts_with("--")) else {
+        eprintln!("laya: `ledger outcome` needs the decision id as its first argument");
+        return ExitCode::FAILURE;
+    };
+    let correct = args.iter().any(|a| a == "--correct");
+    let wrong = args.iter().any(|a| a == "--wrong");
+    if correct == wrong {
+        // Exactly one: an outcome with no verdict, or with two, is not a judgement.
+        eprintln!("laya: pass exactly one of --correct or --wrong");
+        return ExitCode::FAILURE;
+    }
+    let Some(source) = option_value(args, "--source") else {
+        // Required, not defaulted. An outcome whose author is unknown cannot be weighed
+        // against another, and "unknown" would quietly become a third class.
+        eprintln!("laya: --source is required (test | human | later-run | …)");
+        return ExitCode::FAILURE;
+    };
+
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let outcome = laya_store::OutcomeRow {
+        ts: format!("{}", elapsed.as_secs()),
+        // `as_nanos` is u128; the ledger key is u64. Saturate rather than truncate: a wrapped
+        // timestamp would sort an outcome BEFORE the decision it judges.
+        ts_nanos: u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX),
+        decision: decision.clone(),
+        correct,
+        source,
+        note: option_value(args, "--note"),
+    };
+    match laya_store::Ledger::open_writer(store).and_then(|l| l.record_outcome(&outcome)) {
+        Ok(()) => {
+            let verdict = if correct { "correct" } else { "wrong" };
+            println!("recorded: {decision} is {verdict}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("laya: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The value following an option, if present.
+#[must_use]
+pub fn option_value(args: &[String], name: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+}
+
+/// Render a latency, or say it is unknown rather than printing a zero we never measured.
+fn show_ms(value: Option<u64>) -> String {
+    value.map_or_else(|| "unknown".to_string(), |v| v.to_string())
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (command, endpoint) = match parse_args(&args) {
+    let (command, endpoint, rest) = match parse_args(&args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("laya: {e}\nusage: laya doctor [--url URL]");
+            eprintln!("laya: {e}\nusage: laya <doctor|ledger> [--url URL]");
             return ExitCode::FAILURE;
         }
     };
 
     match command.as_deref() {
         Some("doctor") => doctor(&endpoint),
-        Some(other @ ("decide" | "ledger")) => {
+        Some("ledger") => ledger(&rest),
+        Some("decide") => {
             eprintln!(
-                "laya: `{other}` is not implemented yet (spec 04).\n\
-                 \x20 implemented today: `laya doctor`"
+                "laya: `decide` is not implemented as a CLI command (spec 04).\n\
+                 \x20 use the MCP server: hermes mcp list shows `laya` with a `decide` tool"
             );
             ExitCode::FAILURE
         }
         Some(other) => {
-            eprintln!("laya: unknown command `{other}`\nusage: laya doctor [--url URL]");
+            eprintln!("laya: unknown command `{other}`\nusage: laya <doctor|ledger> [--url URL]");
             ExitCode::FAILURE
         }
         None => {
-            eprintln!("usage: laya doctor [--url URL]");
+            eprintln!("usage: laya <doctor|ledger> [--url URL]");
             ExitCode::FAILURE
         }
     }
@@ -181,15 +397,19 @@ mod tests {
 
     #[test]
     fn a_bare_command_defaults_to_no_command_and_the_default_endpoint() {
-        let (c, e) = parse_args(&args(&[])).unwrap_or((None, String::new()));
+        let (c, e, r) = parse_args(&args(&[])).unwrap_or((None, String::new(), Vec::new()));
         assert!(c.is_none());
+        assert!(r.is_empty());
         assert_eq!(e, DEFAULT_ENDPOINT);
     }
 
     #[test]
     fn the_url_flag_overrides_the_endpoint() {
-        let (c, e) =
-            parse_args(&args(&["doctor", "--url", "http://x:1"])).unwrap_or((None, String::new()));
+        let (c, e, _r) = parse_args(&args(&["doctor", "--url", "http://x:1"])).unwrap_or((
+            None,
+            String::new(),
+            Vec::new(),
+        ));
         assert_eq!(c.as_deref(), Some("doctor"));
         assert_eq!(e, "http://x:1");
     }
@@ -203,8 +423,22 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_command_is_an_error() {
-        assert!(parse_args(&args(&["doctor", "extra"])).is_err());
+    fn arguments_after_the_command_belong_to_the_command() {
+        // This test used to assert that `doctor extra` is an ERROR, which conflated two things:
+        // an argument the top-level parser does not understand, and a SUBcommand's own
+        // arguments. `laya ledger compact --dir X` is exactly the second kind, and that
+        // conflation is what made every `laya ledger` invocation fail with
+        // "unexpected argument `compact`".
+        //
+        // The top-level parser now collects them verbatim; each subcommand validates its own.
+        let (_c, _e, rest) = parse_args(&args(&["ledger", "compact", "--dir", "/tmp/x"]))
+            .unwrap_or_else(|e| panic!("must parse: {e}"));
+        assert_eq!(rest, vec!["compact", "--dir", "/tmp/x"]);
+
+        // And an unknown COMMAND is still the caller's problem — checked at dispatch, not here.
+        let (c, _e, r) = parse_args(&args(&["nosuchcommand"])).unwrap_or_default();
+        assert_eq!(c.as_deref(), Some("nosuchcommand"));
+        assert!(r.is_empty());
     }
 
     #[test]

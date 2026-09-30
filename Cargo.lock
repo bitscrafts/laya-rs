@@ -521,6 +521,8 @@ version = "0.1.0"
 dependencies = [
  "laya-backbone",
  "laya-core",
+ "laya-store",
+ "serde_json",
  "ureq",
 ]
 
@@ -550,6 +552,7 @@ dependencies = [
  "laya-abi",
  "laya-backbone",
  "laya-core",
+ "laya-store",
  "rmcp",
  "serde",
  "serde_json",
@@ -562,6 +565,9 @@ dependencies = [
 name = "laya-store"
 version = "0.1.0"
 dependencies = [
+ "redb",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
@@ -678,6 +684,15 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "redb"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de6c3b63e007e90ce536ec2ae4690826136a20ec8dbbbb400daef1bb999d2e36"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "ref-cast"

@@ -14,6 +14,8 @@ name = "laya"
 path = "src/main.rs"
 
 [dependencies]
+laya-store = { path = "../laya-store" }
+serde_json = { workspace = true }
 laya-core = { path = "../laya-core" }
 laya-backbone = { path = "../laya-backbone" }
 ureq = { workspace = true }
