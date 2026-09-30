@@ -1,0 +1,494 @@
+{
+  "meta": {
+    "generator": "scripts/make-decide-fixture.py",
+    "source": "the reference's own clamp_temperature / temp_bucket / confidence_from_probs",
+    "qtypes": {
+      "choice": 0,
+      "score": 1,
+      "noul": 2
+    },
+    "temp_bucket_of_choice_11": "choice:11+",
+    "temp_bucket_of_choice_2": "choice:2",
+    "deliberate_divergence": "reported numbers are NOT rounded to 4 dp, unlike the reference"
+  },
+  "cases": [
+    {
+      "label": "choice_k2_clear",
+      "logits": [
+        3.5,
+        -1.25
+      ],
+      "qtype": 0,
+      "k": 2,
+      "configured_temperature": 1.0,
+      "temperature_used": 1.0,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": false,
+      "bucket": "choice:2",
+      "probabilities": [
+        0.991422514586288,
+        0.008577485413711986
+      ],
+      "confidence": 0.9287921225656073,
+      "value": 0,
+      "entropy_confidence": 0.9287921225656073,
+      "raw_logit_gap": 4.75
+    },
+    {
+      "label": "choice_k2_near_tie",
+      "logits": [
+        0.9001,
+        0.9
+      ],
+      "qtype": 0,
+      "k": 2,
+      "configured_temperature": 1.0,
+      "temperature_used": 1.0,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": false,
+      "bucket": "choice:2",
+      "probabilities": [
+        0.5000249999999792,
+        0.4999750000000209
+      ],
+      "confidence": 1.8033687876339854e-09,
+      "value": 0,
+      "entropy_confidence": 1.8033687876339854e-09,
+      "raw_logit_gap": 9.999999999998899e-05
+    },
+    {
+      "label": "choice_k3_even",
+      "logits": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "qtype": 0,
+      "k": 3,
+      "configured_temperature": 1.0,
+      "temperature_used": 1.0,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": false,
+      "bucket": "choice:3-5",
+      "probabilities": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ],
+      "confidence": 2.220446049250313e-16,
+      "value": 0,
+      "entropy_confidence": 2.220446049250313e-16,
+      "raw_logit_gap": 0.0
+    },
+    {
+      "label": "choice_k5_one_zero_prob",
+      "logits": [
+        12.0,
+        -12.0,
+        -12.0,
+        -12.0,
+        -12.0
+      ],
+      "qtype": 0,
+      "k": 5,
+      "configured_temperature": 1.0,
+      "temperature_used": 1.0,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": false,
+      "bucket": "choice:3-5",
+      "probabilities": [
+        0.9999999998489946,
+        3.775134543709032e-11,
+        3.775134543709032e-11,
+        3.775134543709032e-11,
+        3.775134543709032e-11
+      ],
+      "confidence": 0.999999997654377,
+      "value": 0,
+      "entropy_confidence": 0.999999997654377,
+      "raw_logit_gap": 24.0
+    },
+    {
+      "label": "choice_k11_clamped_bucket",
+      "logits": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.4
+      ],
+      "qtype": 0,
+      "k": 11,
+      "configured_temperature": 0.10058,
+      "temperature_used": 0.5,
+      "temperature_was_clamped": true,
+      "temperature_from_bucket": true,
+      "bucket": "choice:11+",
+      "probabilities": [
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.09707612335311663,
+        0.029238766468833687
+      ],
+      "confidence": 0.012739889837345086,
+      "value": 0,
+      "entropy_confidence": 0.012739889837345086,
+      "raw_logit_gap": 0.0
+    },
+    {
+      "label": "choice_k11_unclamped_same_logits",
+      "logits": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.4
+      ],
+      "qtype": 0,
+      "k": 11,
+      "configured_temperature": 1.0,
+      "temperature_used": 1.0,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": false,
+      "bucket": "choice:11+",
+      "probabilities": [
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.09479740794483237,
+        0.05202592055167631
+      ],
+      "confidence": 0.004448279347020079,
+      "value": 0,
+      "entropy_confidence": 0.004448279347020079,
+      "raw_logit_gap": 0.0
+    },
+    {
+      "label": "choice_k6_real_type_temp",
+      "logits": [
+        2.0,
+        1.0,
+        0.5,
+        -0.5,
+        -1.0,
+        -2.0
+      ],
+      "qtype": 0,
+      "k": 6,
+      "configured_temperature": 1.6369030475616455,
+      "temperature_used": 1.6369030475616455,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": true,
+      "bucket": "choice:6-10",
+      "probabilities": [
+        0.415493840849817,
+        0.2255536530701938,
+        0.16618526074435708,
+        0.09021479733766051,
+        0.0664691944221924,
+        0.03608325357577932
+      ],
+      "confidence": 0.15382396752057925,
+      "value": 0,
+      "entropy_confidence": 0.15382396752057925,
+      "raw_logit_gap": 1.0
+    },
+    {
+      "label": "choice_k10_by_options",
+      "logits": [
+        0.3,
+        -0.2,
+        1.4,
+        0.0,
+        0.0,
+        2.2,
+        -1.1,
+        0.7,
+        0.1,
+        -0.9
+      ],
+      "qtype": 0,
+      "k": 10,
+      "configured_temperature": 1.6369030475616455,
+      "temperature_used": 1.6369030475616455,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": false,
+      "bucket": "choice:6-10",
+      "probabilities": [
+        0.08606101247933187,
+        0.06340873492459125,
+        0.1685204649185869,
+        0.07164931350018218,
+        0.07164931350018218,
+        0.27472895144836923,
+        0.03659028870026953,
+        0.10988346382485532,
+        0.07616290597997175,
+        0.04134555072365978
+      ],
+      "confidence": 0.08352684335882143,
+      "value": 5,
+      "entropy_confidence": 0.08352684335882143,
+      "raw_logit_gap": 0.8000000000000003
+    },
+    {
+      "label": "score_k3",
+      "logits": [
+        1.1,
+        0.4,
+        -0.7
+      ],
+      "qtype": 1,
+      "k": 3,
+      "configured_temperature": 1.2514300346374512,
+      "temperature_used": 1.2514300346374512,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": true,
+      "bucket": "score:3-5",
+      "probabilities": [
+        0.5528244005408866,
+        0.31598044691282284,
+        0.13119515254629072
+      ],
+      "confidence": 0.1278389471686857,
+      "value": 0.5783707520054042,
+      "entropy_confidence": 0.1278389471686857,
+      "raw_logit_gap": 0.7000000000000001
+    },
+    {
+      "label": "score_k5",
+      "logits": [
+        -0.3,
+        0.2,
+        0.9,
+        1.7,
+        -1.2
+      ],
+      "qtype": 1,
+      "k": 5,
+      "configured_temperature": 1.2514300346374512,
+      "temperature_used": 1.2514300346374512,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": true,
+      "bucket": "score:3-5",
+      "probabilities": [
+        0.09495671903986187,
+        0.14159404291591068,
+        0.24772622059346897,
+        0.46946457635765415,
+        0.04625844109310418
+      ],
+      "confidence": 0.1654236531194626,
+      "value": 2.2304739775482276,
+      "entropy_confidence": 0.1654236531194626,
+      "raw_logit_gap": 0.7999999999999999
+    },
+    {
+      "label": "score_k2",
+      "logits": [
+        0.0,
+        0.0
+      ],
+      "qtype": 1,
+      "k": 2,
+      "configured_temperature": 1.2514300346374512,
+      "temperature_used": 1.2514300346374512,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": true,
+      "bucket": "score:2",
+      "probabilities": [
+        0.5,
+        0.5
+      ],
+      "confidence": 0.0,
+      "value": 0.5,
+      "entropy_confidence": 0.0,
+      "raw_logit_gap": 0.0
+    },
+    {
+      "label": "noul_k2_yes_leaning",
+      "logits": [
+        0.25,
+        1.75
+      ],
+      "qtype": 2,
+      "k": 2,
+      "configured_temperature": 1.983399510383606,
+      "temperature_used": 1.983399510383606,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": true,
+      "bucket": "noul:2",
+      "probabilities": [
+        0.3194550526775088,
+        0.6805449473224912
+      ],
+      "confidence": 0.6805449473224912,
+      "value": 0.6805449473224912,
+      "entropy_confidence": 0.09621213698770814,
+      "raw_logit_gap": 1.5
+    },
+    {
+      "label": "noul_k2_no_leaning",
+      "logits": [
+        1.75,
+        0.25
+      ],
+      "qtype": 2,
+      "k": 2,
+      "configured_temperature": 1.983399510383606,
+      "temperature_used": 1.983399510383606,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": true,
+      "bucket": "noul:2",
+      "probabilities": [
+        0.6805449473224912,
+        0.3194550526775088
+      ],
+      "confidence": 0.6805449473224912,
+      "value": 0.3194550526775088,
+      "entropy_confidence": 0.09621213698770814,
+      "raw_logit_gap": 1.5
+    },
+    {
+      "label": "noul_k2_dead_even",
+      "logits": [
+        0.0,
+        0.0
+      ],
+      "qtype": 2,
+      "k": 2,
+      "configured_temperature": 1.983399510383606,
+      "temperature_used": 1.983399510383606,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": true,
+      "bucket": "noul:2",
+      "probabilities": [
+        0.5,
+        0.5
+      ],
+      "confidence": 0.5,
+      "value": 0.5,
+      "entropy_confidence": 0.0,
+      "raw_logit_gap": 0.0
+    },
+    {
+      "label": "choice_k4_huge_logits",
+      "logits": [
+        3000.0,
+        2999.5,
+        1500.0,
+        0.0
+      ],
+      "qtype": 0,
+      "k": 4,
+      "configured_temperature": 1.0,
+      "temperature_used": 1.0,
+      "temperature_was_clamped": false,
+      "temperature_from_bucket": false,
+      "bucket": "choice:3-5",
+      "probabilities": [
+        0.6224593312018546,
+        0.37754066879814546,
+        0.0,
+        0.0
+      ],
+      "confidence": 0.5218567303096355,
+      "value": 0,
+      "entropy_confidence": 0.5218567303096355,
+      "raw_logit_gap": 0.5
+    }
+  ],
+  "f10": [
+    {
+      "temperature_configured": 0.5,
+      "temperature_used": 0.5,
+      "probabilities": [
+        0.3781104099277153,
+        0.25345498738930056,
+        0.1390990463053129,
+        0.22933555637767142
+      ],
+      "value": 0
+    },
+    {
+      "temperature_configured": 0.75,
+      "temperature_used": 0.75,
+      "probabilities": [
+        0.3337921007602907,
+        0.2556608290945748,
+        0.17137457872818512,
+        0.2391724914169494
+      ],
+      "value": 0
+    },
+    {
+      "temperature_configured": 1.0,
+      "temperature_used": 1.0,
+      "probabilities": [
+        0.3121038041307311,
+        0.2555289825944564,
+        0.18930052621823484,
+        0.24306668705657775
+      ],
+      "value": 0
+    },
+    {
+      "temperature_configured": 1.6369030475616455,
+      "temperature_used": 1.6369030475616455,
+      "probabilities": [
+        0.2873448326385627,
+        0.25429653732388285,
+        0.21171227016537086,
+        0.2466463598721835
+      ],
+      "value": 0
+    },
+    {
+      "temperature_configured": 2.5,
+      "temperature_used": 2.5,
+      "probabilities": [
+        0.2742216923896109,
+        0.25313852677865756,
+        0.22451373272046482,
+        0.2481260481112667
+      ],
+      "value": 0
+    },
+    {
+      "temperature_configured": 5.0,
+      "temperature_used": 5.0,
+      "probabilities": [
+        0.2619957174697419,
+        0.2517227184480638,
+        0.2370635285318,
+        0.24921803555039423
+      ],
+      "value": 0
+    }
+  ]
+}

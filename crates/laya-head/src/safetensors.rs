@@ -574,7 +574,14 @@ pub struct HeadConfig {
     pub head_max_len: usize,
     /// The most option markers allowed.
     pub max_prefixes: usize,
-    /// Per-question-type temperatures, indexed by `noul`/`score`/`choice`.
+    /// Per-question-type temperatures, indexed by **`QTYPES`**: `[choice, score, noul]`.
+    ///
+    /// The deployed array is `[1.6369, 1.2514, 1.9834]` = `[choice, score, noul]`. This doc
+    /// previously read "indexed by `noul`/`score`/`choice`", which describes the array BACKWARDS:
+    /// `laya.common.QTYPES` is `{'choice': 0, 'score': 1, 'noul': 2}` and the reference indexes
+    /// `temperature[qt]` with it. Reading it as documented swaps `choice` with `noul`, whose
+    /// temperatures differ by 0.35 — a different reported confidence for every answer, and nothing
+    /// would fail.
     pub temperature: Vec<f64>,
     /// Per-bucket temperature overrides, keyed `"<type>:<size>"`.
     pub temperature_by_options: BTreeMap<String, f64>,

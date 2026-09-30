@@ -43,6 +43,15 @@ pub enum HeadError {
         /// How many the pass needs.
         want: usize,
     },
+    /// A question produced no option markers, so there is no distribution to report.
+    ///
+    /// Carries the question's id because the caller asked about a specific question, and
+    /// "something had no markers" is not actionable while "question `q3` had no markers" is.
+    #[error("question `{question}` produced no option markers, so there is nothing to decide")]
+    NoMarkers {
+        /// The caller's question id.
+        question: String,
+    },
     /// The hidden state does not match the dimensions the weights imply.
     #[error("hidden state is {got} elements, expected seq*{d} = {want} (seq is derived from it)")]
     BadHidden {

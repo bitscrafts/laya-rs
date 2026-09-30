@@ -51,6 +51,17 @@ byteorder = "1.5"
 tokio = { version = "1.53", default-features = false }
 rmcp = { version = "3.2", features = ["server", "transport-io"] }
 ureq = { version = "3", default-features = false, features = ["json"] }
+# --- added for the pure-Rust tokenizer (laya-head). Each carries its reason at the
+# --- point of use in `crates/laya-head/Cargo.toml`; recorded here with the others so a
+# --- reader sees the whole dependency surface in one place. ---
+# A negative LOOKAHEAD in the ByteLevel split pattern. `regex` cannot express lookaround,
+# so a `regex`-only port cannot reproduce the split. Used for that single pattern.
+fancy-regex = "0.17"
+# NFC normalisation, with the offsets-tracking iterators `tokenizers` itself uses.
+unicode-normalization-alignments = "0.1"
+# `sha256` for the tokenizer-file provenance check. The fixture records SHA-256
+# (`hashlib.sha256`), so `blake3` cannot check it.
+sha2 = "0.10"
 
 # --- lints: a strict bar. ZERO, not "below baseline". ---
 [workspace.lints.rust]

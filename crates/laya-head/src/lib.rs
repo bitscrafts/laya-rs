@@ -31,10 +31,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod decide;
 pub mod forward;
 pub mod math;
 
 pub mod safetensors;
+pub mod tokenizer;
 
 /// The temperature clamp Laya applies to its own config, which a faithful port
 /// must reproduce (blocker B2).

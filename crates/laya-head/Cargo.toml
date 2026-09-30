@@ -14,11 +14,55 @@ description = "The 26.5M-parameter Laya decision head in pure Rust: safetensors 
 # length plus JSON, the obvious crates mmap (which needs `unsafe` and this crate forbids it),
 # and writing it means the exact semantics we depend on are asserted against the real
 # checkpoint rather than trusted to a version range.
-serde_json = { workspace = true }
+#
+# `preserve_order` is ON, and it is load-bearing rather than cosmetic: `build_sequence`
+# renders a `choice`'s options by iterating the criteria map in **insertion order**, and the
+# reference is Python, whose dicts preserve it. `serde_json`'s default `Map` is a `BTreeMap`,
+# so without this feature a choice's options are re-sorted alphabetically and the token
+# sequence changes — silently, and plausibly, which is the worst combination. The differential
+# fixture is written in insertion order precisely so that dropping this feature fails the test.
+serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
+
+# The GPT-2 byte-level pre-tokeniser split pattern
+# (`'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+`) uses a
+# NEGATIVE LOOKAHEAD. The `regex` crate cannot express lookaround at all (its whole guarantee
+# is linear time), so a port built on `regex` cannot reproduce the split — `\s+` would instead
+# swallow the space that ` ?` needs to re-attach to the following word, changing the token
+# boundaries for `"a   b"` and `"a\n\n\nb"`. `fancy-regex` adds a backtracking engine on top of
+# `regex`, and it is used for THIS ONE PATTERN ONLY.
+#
+# The pattern is linear in the input (a lookahead over a whitespace run), so the usual
+# catastrophic-backtracking worry does not apply, and that is MEASURED rather than argued:
+# the split engine was compared against the reference's Onig engine over 4007 fuzzed inputs
+# (whitespace/lookahead shapes plus 4000 random mixed-script strings) with **0 mismatches and
+# 0 backtracking errors**.
+fancy-regex = { workspace = true }
+
+# NFC normalisation, which the tokenizer's `normalizer` field requires before pre-tokenisation.
+# `unicode-normalization-alignments` is a fork of `unicode-normalization` carrying the
+# offset-tracking iterators `tokenizers` itself uses; we need only `nfc()`, so either would do,
+# but this is the one the reference's own dependency graph is built on and therefore the one
+# whose tables are known to agree with it. Both are in the offline registry — no network fetch.
+unicode-normalization-alignments = { workspace = true }
+
+# The shared ABI types (`Answer`, `Question`). `laya-abi` is a leaf crate — serde and serde_json
+# only — so this adds no cycle and no policy: the head PRODUCES an `Answer` and knows nothing
+# about thresholds, bands or routing, which stay in `laya-core`.
+laya-abi = { path = "../laya-abi" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# SHA-256, to verify the tokenizer file this test loads is the one the fixture was generated
+# from. Without that check a fixture built from a *different* tokenizer.json would fail with a
+# wall of token ids and no hint that the cause was the input file. The workspace already
+# depends on `blake3`, but the fixture records SHA-256 (the reference's `hashlib.sha256`), so
+# checking it with blake3 is not possible. Dev-only: it never enters the shipped binary.
+sha2 = { workspace = true }
+# The differential tests deserialise their fixtures into typed structs rather than indexing into a
+# `serde_json::Value`: a renamed or missing field then fails to compile instead of silently
+# reading as `null`, which is the failure mode that lets a broken fixture look like a passing test.
+serde = { workspace = true }
 
 [lints]
 workspace = true
