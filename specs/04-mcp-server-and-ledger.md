@@ -92,7 +92,8 @@ single-writer scheme (blocker B4), and `route` is **not** a tool (finding M6).
   (review M2). The claim "cheap enough for EVERY tool call" is **withdrawn**: the
   HTTP backbone path measured 608 ms, and cold load measured 23 s for the Python
   stack, so a hook lane needs a persistent server, not a per-call spawn.
-- NF4. redb pin: **4.2** (same major as `pi-improved`). Recorded because the
+- NF4. redb pin: **4.2** (matching the reference implementation `pi-improved`, which we only
+  READ). Recorded because the
   original claim about amem/pidag was half wrong (review F10).
 
 ## Architecture

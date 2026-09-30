@@ -148,3 +148,19 @@ verifies every relative link resolves — run it, do not hand-edit the index.
   anything in P1 or P4.**
 - Known-unmeasured: the Rust head's cold-load time (decides the hook lane), and
   llama.cpp determinism across thread counts/builds.
+
+## SCOPE — this project only; pi-improved is a REFERENCE
+
+**We do not work in `pi-improved`.** It is the example we read — for the `route`-node
+contract, for crate conventions, for prior art — and reading is all we do with it.
+
+- Never modify `pi-improved`: no edits, no commits, no "fix it while I am here".
+- Never take a dependency on it (`pii-graph` is not a dependency of anything here).
+- Never treat its state, its specs or its HEAD as ours.
+- The same applies to every other project in `/projects`: this project's files only.
+
+When the reference shows a contract we need, we **copy the shape into our own code** and cite it
+— we do not reach across and change it. Our `route_payload.rs` is exactly that: the contract
+restated in our own crate, so a change over there cannot move our behaviour silently.
+
+**A DAG runner belongs here, in `laya-rs`** — not in the project we borrowed the idea from.

@@ -41,10 +41,11 @@
 //!
 //! ## Pinned version
 //!
-//! `redb = 4.2` — the same major as `pi-improved`, the sibling this workspace most
-//! resembles. Recorded because the review found the original claim
-//! ("redb 2 — amem, pidag") was half wrong: `amem` pins 2, **`pidag` pins 1.0**, and
-//! the majors differ in lock/repair behaviour.
+//! `redb = 4.2` — chosen to match `pi-improved`'s major, which is the reference
+//! implementation we read for conventions (NOT a project we work in; it is not a
+//! dependency and must not become one). Recorded because the review found the
+//! original claim ("redb 2 — amem, pidag") was half wrong: `amem` pins 2,
+//! **`pidag` pins 1.0**, and the majors differ in lock/repair behaviour.
 
 #![forbid(unsafe_code)]
 
