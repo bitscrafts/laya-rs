@@ -33,7 +33,13 @@ single-writer scheme (blocker B4), and `route` is **not** a tool (finding M6).
   fail-open by accident).
 - F6. `gate` **fails closed**: if the decision source is unavailable, the answer is
   `ask`, never `allow`.
-- F7. Per-tool **least-privilege** scopes. `ask_file`/`ask_files` have a defined
+- F6a. `gate` **cannot allow a near tie** — the same fail-closed rule as an unreachable
+  head, applied to a reachable but undecided one. Added 2026-09-30.
+- F7. Per-tool **least-privilege** scopes. **The scope lives in `laya-core`, not
+  `laya-mcp`** (corrected 2026-09-30): the pure crate, so the rule deciding a refusal is
+  unit-testable without a server, and so a second copy cannot drift. Configured by
+  `LAYA_READ_ROOTS` (colon-separated); **unset means the process cwd, never `/`**, and the
+  resolved roots are printed at startup. `ask_file`/`ask_files` have a defined
   read scope (a configured root set), and refuse out-of-scope paths — not
   pii-mcp's blanket workspace-wide grant.
 - F8. Every decision is appended to a **per-process segment file**; the store

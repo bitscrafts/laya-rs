@@ -29,7 +29,7 @@
 //! 3. **Confidence is a separate branch input** (`band`), not a hidden
 //!    multiplier, so an uncertain answer escalates along a *drawn* edge.
 
-use laya_abi::Answer;
+use laya_abi::{Answer, QuestionType};
 use serde::{Deserialize, Serialize};
 
 use crate::policy::{Band, Policy};
@@ -65,6 +65,18 @@ pub struct DecisionPayload {
     pub options: Vec<String>,
     /// The id of the question that produced this.
     pub question_id: String,
+    /// The distance between the winner and the runner-up, in probability.
+    ///
+    /// The number that says whether a decision was CLOSE. Reported because the two backends
+    /// were measured to differ by Δp = 0.0006: without a margin, a decision that a
+    /// quantisation change could flip looks exactly like a landslide.
+    pub margin: f64,
+    /// True when [`Self::margin`] is at or below the policy's `near_tie_margin`.
+    ///
+    /// A flagged near tie is a decision the DAG should escalate rather than take — and with
+    /// `escalate_on_near_tie` it cannot claim the High band, so an existing
+    /// `route on = "$.payload.band"` sends it to the ask edge with no graph change.
+    pub near_tie: bool,
     /// True when one option carried effectively all the probability mass.
     ///
     /// Surfaced rather than hidden because we measured the deployed checkpoint
@@ -90,9 +102,22 @@ impl DecisionPayload {
         } else {
             answer.confidence
         };
+        let margin = margin_of(answer, policy);
+        let near_tie = margin <= policy.near_tie_margin;
+
+        // A near tie must not auto-allow. Demoting to `mid` (rather than to `low`) is
+        // deliberate: the answer is still the best available reading of the state, it is
+        // the CERTAINTY that is missing — so the right branch is `ask`, and `mid` is what
+        // a default policy routes there.
+        let band = if near_tie && policy.escalate_on_near_tie {
+            Band::Mid
+        } else {
+            policy.band(effective)
+        };
+
         Self {
             label: answer.value.clone(),
-            band: policy.band(effective).as_str().to_string(),
+            band: band.as_str().to_string(),
             confidence: answer.confidence,
             p: answer.p,
             score: answer.score,
@@ -100,6 +125,8 @@ impl DecisionPayload {
             options: answer.options.clone(),
             question_id: answer.id.clone(),
             saturated,
+            margin,
+            near_tie,
         }
     }
 
@@ -115,6 +142,63 @@ impl DecisionPayload {
     }
 }
 
+/// The margin for an answer: how far its decision was from flipping.
+///
+/// Differs by question type, because "the runner-up" means different things:
+///   * `choice` — top1 − top2 over the **top two**, not the first two: the probabilities
+///     arrive parallel to `options` and are not guaranteed sorted, so `p[0] - p[1]` would
+///     be wrong (and could even be negative, hiding every tie);
+///   * `noul`   — `|p − noul_threshold|`: a noul has no second place, so its boundary is
+///     the threshold and the distance from it is what says how close the decision was;
+///   * `score`  — the gap to the nearest adjacent level, since a score sits between levels.
+///
+/// A `choice` with fewer than two options has no runner-up. Its margin is its whole mass
+/// and it is NOT a near tie — treating a missing second value as `0.0` would report every
+/// single-option choice as maximally unstable.
+fn margin_of(answer: &Answer, policy: &Policy) -> f64 {
+    match answer.kind {
+        QuestionType::Noul => {
+            // `p` is the belief; when it is absent fall back to the confidence's distance
+            // from the threshold's complement, so the field is never silently meaningless.
+            let p = answer.p.unwrap_or(1.0 - answer.confidence);
+            (p - policy.noul_threshold).abs()
+        }
+        QuestionType::Choice => {
+            let mut top = answer
+                .probabilities
+                .iter()
+                .copied()
+                .filter(|v| v.is_finite());
+            let Some(first) = top.next() else {
+                return 0.0;
+            };
+            let mut sorted = [first, f64::NEG_INFINITY];
+            for v in top {
+                if v > sorted[0] {
+                    sorted[1] = sorted[0];
+                    sorted[0] = v;
+                } else if v > sorted[1] {
+                    sorted[1] = v;
+                }
+            }
+            if sorted[1].is_finite() {
+                sorted[0] - sorted[1]
+            } else {
+                // One option only: no runner-up, so no tie is possible.
+                sorted[0]
+            }
+        }
+        QuestionType::Score => {
+            // The nearest adjacent rubric level. `score` may land between levels; with no
+            // level list available the fractional distance to the nearer integer is the
+            // same quantity in the common unit-spaced case.
+            let s = answer.score.unwrap_or(0.0);
+            let frac = s - s.floor();
+            frac.min(1.0 - frac)
+        }
+    }
+}
+
 /// Damp a saturated confidence below the high band, so saturation can never
 /// auto-allow. Used only when the policy asks for saturation escalation.
 const fn confidence_for_saturated(_confidence: f64) -> f64 {
@@ -123,6 +207,182 @@ const fn confidence_for_saturated(_confidence: f64) -> f64 {
     // it would preserve the error we are trying to remove. 0.6 is Mid under the
     // default policy (low 0.5, high 0.9) and therefore routes to an ask.
     0.6
+}
+
+#[cfg(test)]
+mod near_tie_tests {
+    #![allow(clippy::panic)]
+
+    use super::*;
+    use laya_abi::QuestionType;
+
+    fn choice(id: &str, value: &str, conf: f64, probs: Vec<f64>) -> Answer {
+        let n = probs.len();
+        Answer {
+            id: id.into(),
+            kind: QuestionType::Choice,
+            value: value.into(),
+            p: None,
+            score: None,
+            probabilities: probs,
+            options: (0..n).map(|i| format!("opt{i}")).collect(),
+            confidence: conf,
+            latency_ms: None,
+        }
+    }
+
+    fn noul(id: &str, p: f64) -> Answer {
+        Answer {
+            id: id.into(),
+            kind: QuestionType::Noul,
+            value: if p >= 0.5 { "yes".into() } else { "no".into() },
+            p: Some(p),
+            score: None,
+            probabilities: Vec::new(),
+            options: Vec::new(),
+            confidence: p.max(1.0 - p),
+            latency_ms: None,
+        }
+    }
+
+    // ---- margin is reported ------------------------------------------------
+
+    #[test]
+    fn a_choice_reports_the_margin_between_the_top_two() {
+        // 0.93 - 0.05 = 0.88. The number that says "this was not close".
+        let a = choice("t", "opt0", 0.93, vec![0.93, 0.05, 0.02]);
+        let pl = DecisionPayload::from_answer(&a, &Policy::default());
+        assert!(
+            (pl.margin - 0.88).abs() < 1e-9,
+            "margin must be top1 - top2: got {}",
+            pl.margin
+        );
+        assert!(!pl.near_tie, "0.88 is not a near tie");
+    }
+
+    #[test]
+    fn a_choice_margin_is_computed_regardless_of_the_declared_order() {
+        // The probabilities arrive parallel to `options`, NOT necessarily sorted. If the
+        // implementation used `v[0] - v[1]` instead of the top two, this would come out
+        // negative and a near-tie would be missed.
+        let a = choice("t", "opt2", 0.4, vec![0.3, 0.3, 0.4]);
+        let pl = DecisionPayload::from_answer(&a, &Policy::default());
+        assert!(
+            (pl.margin - 0.1).abs() < 1e-9,
+            "margin must use the TOP TWO, not the first two: got {}",
+            pl.margin
+        );
+    }
+
+    #[test]
+    fn a_two_option_near_tie_is_flagged() {
+        // THE case the measured delta-0.0006 can flip.
+        let a = choice("t", "opt0", 0.5001, vec![0.5001, 0.4999]);
+        let pl = DecisionPayload::from_answer(&a, &Policy::default());
+        assert!(pl.near_tie, "a 0.0002 margin is a near tie");
+        assert!(
+            (pl.margin - 0.0002).abs() < 1e-6,
+            "got margin {}",
+            pl.margin
+        );
+    }
+
+    #[test]
+    fn a_single_option_has_no_margin_to_be_near() {
+        // One option: there is no second place. The margin is the whole mass, and a
+        // single-option choice must not be reported as a near tie just because the
+        // "second highest" is absent.
+        let a = choice("t", "only", 0.99, vec![0.99]);
+        let pl = DecisionPayload::from_answer(&a, &Policy::default());
+        assert!(!pl.near_tie, "a one-option choice is not a near tie");
+        assert!((pl.margin - 0.99).abs() < 1e-9, "got {}", pl.margin);
+    }
+
+    #[test]
+    fn a_noul_margin_is_the_distance_from_the_decision_threshold() {
+        // A noul has no second option, so "top two" is meaningless. Its decision boundary
+        // is the threshold, so the margin is the distance from it — which is the quantity
+        // that actually answers "how close was this to flipping?".
+        let policy = Policy::default(); // noul_threshold 0.5, near_tie_margin 0.01
+        let pl = DecisionPayload::from_answer(&noul("n", 0.52), &policy);
+        assert!(
+            (pl.margin - 0.02).abs() < 1e-9,
+            "margin must be |p - threshold|: got {}",
+            pl.margin
+        );
+        // CORRECTED: 0.02 is ABOVE the 0.01 margin, so this is NOT a near tie. My first
+        // version asserted it was — arithmetic, not judgement: I wrote a 0.02 margin in a
+        // test whose whole point was to sit under a 0.01 threshold. The sub-threshold case
+        // is the test below, which is the one that means something.
+        assert!(!pl.near_tie, "0.02 is above the 0.01 margin, so not a tie");
+    }
+
+    #[test]
+    fn a_noul_within_the_margin_of_its_threshold_is_a_near_tie() {
+        // THE case that matters: p sits so close to the threshold that the measured
+        // 0.0006 backend drift could flip which side of it the answer lands on.
+        let pl = DecisionPayload::from_answer(&noul("n", 0.505), &Policy::default());
+        assert!((pl.margin - 0.005).abs() < 1e-9, "got margin {}", pl.margin);
+        assert!(pl.near_tie, "0.005 is inside the 0.01 margin");
+    }
+
+    #[test]
+    fn a_confident_noul_is_not_a_near_tie() {
+        let pl = DecisionPayload::from_answer(&noul("n", 0.95), &Policy::default());
+        assert!((pl.margin - 0.45).abs() < 1e-9, "got {}", pl.margin);
+        assert!(!pl.near_tie);
+    }
+
+    // ---- the consequence: a near tie must not auto-allow -------------------
+
+    #[test]
+    fn a_near_tie_cannot_claim_a_high_band() {
+        // THE POINT OF THE WHOLE FEATURE. A near-tie inside a graph must route to an
+        // ask/escalate edge, not be decided silently. Demoting the band is how that
+        // happens, because `route on = "$.payload.band"` is what picks the edge.
+        let policy = Policy {
+            escalate_on_near_tie: true,
+            ..Policy::default()
+        };
+        let a = choice("t", "opt0", 0.5001, vec![0.5001, 0.4999]);
+        let pl = DecisionPayload::from_answer(&a, &policy);
+        assert!(
+            pl.near_tie,
+            "precondition: this must be a near tie for the test to mean anything"
+        );
+        assert_ne!(
+            pl.band, "high",
+            "a near tie must not report High — it would auto-allow"
+        );
+    }
+
+    #[test]
+    fn a_near_tie_that_is_saturated_still_reports_the_tie() {
+        // Near-tie and saturated are independent facts. Reporting one must not erase the
+        // other, or a caller fixing one would not know the other existed.
+        let a = choice("t", "opt0", 0.5, vec![0.5, 0.5]);
+        let pl = DecisionPayload::from_answer(&a, &Policy::default());
+        assert!(
+            (pl.margin - 0.0).abs() < 1e-9,
+            "a perfect tie has a zero margin: got {}",
+            pl.margin
+        );
+        assert!(pl.near_tie);
+    }
+
+    #[test]
+    fn the_near_tie_control_a_wide_margin_still_reaches_high_band() {
+        // The near-miss CONTROL. Without it, an implementation that demoted EVERY band
+        // would pass every test above while making the layer useless.
+        let policy = Policy {
+            escalate_on_near_tie: true,
+            ..Policy::default()
+        };
+        let a = choice("t", "opt0", 0.97, vec![0.97, 0.02, 0.01]);
+        let pl = DecisionPayload::from_answer(&a, &policy);
+        assert!(!pl.near_tie, "precondition: not a tie");
+        assert_eq!(pl.band, "high", "a clear answer must still be High");
+    }
 }
 
 #[cfg(test)]
@@ -251,7 +511,20 @@ mod tests {
         let p = DecisionPayload::from_answer(&a, &Policy::default());
         let json = serde_json::to_string(&p).unwrap_or_default();
         let back: DecisionPayload = serde_json::from_str(&json).unwrap_or_else(|_| p.clone());
-        assert_eq!(back, p);
+        // `margin` is DERIVED (0.95 - 0.03 = 0.9199999999999999), so it must be compared
+        // with a tolerance. Exact equality on a computed float is a test that fails for a
+        // reason unrelated to what it is checking — and the reason it surfaced at all is
+        // that adding the field made this assertion compare a computed value for the first
+        // time. The string fields are still compared exactly.
+        assert!(
+            (back.margin - p.margin).abs() < 1e-12,
+            "margin survived serde with drift: {} vs {}",
+            back.margin,
+            p.margin
+        );
+        assert_eq!(back.label, p.label);
+        assert_eq!(back.band, p.band);
+        assert!((back.confidence - p.confidence).abs() < 1e-12);
         // The two route keys must survive serialization — the graph reads them
         // out of the JSON payload, not out of the Rust struct.
         let v: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();

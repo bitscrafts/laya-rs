@@ -91,6 +91,9 @@ pub enum PolicyError {
         /// The high threshold.
         high: f64,
     },
+    /// The near-tie margin must be in `0.0..=0.5`.
+    #[error("near_tie_margin = {0} is outside 0.0..=0.5")]
+    NearTieMarginOutOfRange(f64),
     /// A `noul` threshold lies outside `0.0..=1.0`.
     #[error("noul_threshold = {0} is outside 0.0..=1.0")]
     NoulThresholdOutOfRange(f64),
@@ -138,6 +141,20 @@ pub struct Policy {
     /// `1.000/0.000/0.000` on a real `choice` — the same degenerate-softmax smell
     /// as the inert `act_probability` head.
     pub saturation_threshold: f64,
+    /// A margin at or below this is a **near tie**.
+    ///
+    /// The measured drift between the two backends is Δp = 0.0006, so a decision whose top
+    /// two probabilities are closer than this can flip when the backend, the quantisation
+    /// or the batch shape changes. Such a decision must not be made silently.
+    pub near_tie_margin: f64,
+    /// When true, a near tie cannot report the High band, so `route on =
+    /// "$.payload.band"` sends it to an ask/escalate edge instead of acting.
+    ///
+    /// **Default false, deliberately.** Demoting by default would change every existing
+    /// caller's routing without anything in their config changing — silent behaviour
+    /// change is the defect class this project keeps finding. Opt-in puts the change in a
+    /// diff. The `near_tie` flag is reported regardless, so nothing is hidden.
+    pub escalate_on_near_tie: bool,
     /// Whether to refuse to act on a saturated answer at all (`Ask` instead of
     /// acting), or merely record it. Default: record only.
     pub escalate_on_saturation: bool,
@@ -152,6 +169,10 @@ impl Default for Policy {
             noul_low_threshold: 0.5,
             noul_threshold: 0.5,
             saturation_threshold: 0.999,
+            // 0.01: an order of magnitude above the measured 0.0006 backend drift, so a
+            // decision has to be closer than that to be considered unstable.
+            near_tie_margin: 0.01,
+            escalate_on_near_tie: false,
             escalate_on_saturation: false,
         }
     }
@@ -187,6 +208,12 @@ impl Policy {
         // range check that would also cover it: `noul_threshold` is not a band
         // boundary, so a bad value deserves the narrower error that names it.
         // (Found by test: with it inside the loop, this variant was unreachable.)
+        // A near-tie margin of 0 or less would flag nothing (or everything below zero),
+        // and one above 0.5 would flag every possible two-option answer. Both are
+        // configuration errors that would otherwise be silent.
+        if !(0.0..=0.5).contains(&self.near_tie_margin) {
+            return Err(PolicyError::NearTieMarginOutOfRange(self.near_tie_margin));
+        }
         if !(0.0..=1.0).contains(&self.noul_threshold) {
             return Err(PolicyError::NoulThresholdOutOfRange(self.noul_threshold));
         }

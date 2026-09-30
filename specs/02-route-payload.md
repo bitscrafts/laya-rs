@@ -19,6 +19,15 @@ This spec records the wire contract so a change is made against a written standa
   from `Policy`, never by a `transform` node (blocker B5).
 - F3. The payload carries `confidence`, `probabilities`, `options`,
   `question_id` and `saturated`.
+- F3a. The payload carries **`margin`** (top1−top2 for a choice; |p −
+  `noul_threshold`| for a noul; gap to the nearest level for a score) and the derived
+  boolean **`near_tie`** (`margin <= near_tie_margin`). Reason: the two backends were
+  measured to differ by **Δp = 0.0006**, which can flip a 0.5001-vs-0.4999 decision, so a
+  near tie must be visible rather than decided silently.
+- F3b. With `escalate_on_near_tie` set, a near tie **cannot** report the `high` band, so an
+  existing `route on = "$.payload.band"` escalates it. The flag defaults **false** so the
+  behaviour change is opt-in and appears in a config diff, while `near_tie` is reported
+  either way.
 - F4. The payload serializes with `label` and `band` as **JSON members**, so
   `route on = "$.payload.label"` resolves from the JSON.
 - F5. For a `noul`, `p` is carried; for a `score`, `score` is carried.
@@ -27,6 +36,10 @@ This spec records the wire contract so a change is made against a written standa
 - F7. When `escalate_on_saturation` is set, a saturated answer is demoted so its
   band can never be `high` — a saturated answer must not auto-allow.
 - F8. `band_enum()` round-trips the string band to the typed `Band`.
+- F9. **`decide` RETURNS this payload** (added 2026-09-30). Until then `DecisionPayload` was
+  built and unit-tested but `decide` returned raw `answers`, so a graph author following
+  the documented `route on = "$.payload.label"` had nothing to match on. The MCP response
+  is `{"payloads": {<question_id>: <payload>}, "answers": {...}}`.
 
 ### Non-Functional
 - NF1. No I/O; the payload is built from an `Answer` and a `Policy`.

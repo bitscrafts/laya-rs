@@ -524,16 +524,25 @@ fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResul
     let questions = [laya_abi::Question::noul("safe", question)];
     let laya_q = questions_to_laya(&questions);
 
+    let policy = laya_core::Policy::default();
     let payload = match state.sidecar.predict(&json!({"action": action}), &laya_q) {
         Ok(answers) => {
             let entry = answers.get("safe").cloned().unwrap_or_else(|| json!({}));
-            let answer = answer_from_laya("safe", &entry, &[])
+            let answer = answer_from_laya(&policy, "safe", &entry, &[])
                 .map_err(|e| McpError::internal_error(format!("laya-mcp: {e}"), None))?;
-            let policy = laya_core::Policy::default();
             let dp = laya_core::DecisionPayload::from_answer(&answer, &policy);
             // The gate decision is derived from CONFIDENCE, never from the noul value
             // alone: "the answer says what, confidence says whether."
-            let decision = policy.gate(answer.confidence, irreversible, answer.saturated());
+            //
+            // A NEAR TIE cannot allow. A gate whose evidence is a coin flip must ask — that
+            // is the same rule as an unreachable head, applied to a reachable but
+            // undecided one. The measured 0.0006 backend drift can flip an answer this
+            // close, so `allow` here would be permission granted on noise.
+            let decision = if dp.near_tie {
+                laya_core::GateDecision::Ask
+            } else {
+                policy.gate(answer.confidence, irreversible, answer.saturated())
+            };
             serde_json::to_value(&dp).map_or_else(
                 |_| json!({}),
                 |mut v| {
@@ -615,13 +624,54 @@ fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolRes
         .map_or_else(|| json!({}), |s| json!({"input": s}));
     let questions = args.questions.clone().unwrap_or_else(|| json!({}));
 
-    match state.sidecar.predict(&state_value, &questions) {
-        Ok(answers) => to_result(ToolOutcome::Ok(json!({"answers": answers}).to_string())),
-        Err(e) => Err(McpError::internal_error(
-            format!("laya-mcp: the decision head is unavailable: {e}"),
-            None,
-        )),
+    let answers = match state.sidecar.predict(&state_value, &questions) {
+        Ok(a) => a,
+        Err(e) => {
+            return Err(McpError::internal_error(
+                format!("laya-mcp: the decision head is unavailable: {e}"),
+                None,
+            ));
+        }
+    };
+
+    // THE ROUTE-SHAPED PAYLOAD IS BUILT HERE, and it was NOT before.
+    //
+    // `decide` used to return the raw `answers` object. That meant `DecisionPayload` —
+    // with its `label`, `band`, `margin` and `near_tie` — was constructed and unit-tested
+    // but never REACHED BY A CALLER, so a graph author writing the documented
+    // `route on = "$.payload.label"` had nothing to match on. Spec 04 F3 requires the
+    // route-shaped payload; this is what makes that true rather than aspirational.
+    //
+    // The graph is handed `answers[<id>]` shaped as the payload, keyed by question id, so
+    // one response can feed several route nodes. The raw answers are kept alongside, since
+    // a caller debugging a decision needs the model's own output.
+    let policy = laya_core::Policy::default();
+    let mut payloads = serde_json::Map::new();
+    if let Some(map) = answers.as_object() {
+        for (id, entry) in map {
+            let kind = entry
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("noul");
+            let declared: Vec<String> = questions
+                .get(id)
+                .and_then(|q| q.get("criteria"))
+                .and_then(serde_json::Value::as_object)
+                .map(|c| c.keys().cloned().collect())
+                .unwrap_or_default();
+            if let Ok(answer) = answer_from_laya(&policy, id, entry, &declared) {
+                let dp = laya_core::DecisionPayload::from_answer(&answer, &policy);
+                if let Ok(v) = serde_json::to_value(&dp) {
+                    payloads.insert(id.clone(), v);
+                }
+            }
+            let _ = kind;
+        }
     }
+
+    to_result(ToolOutcome::Ok(
+        json!({ "payloads": payloads, "answers": answers }).to_string(),
+    ))
 }
 
 /// The first argument `tool` declares as required and did not receive.
@@ -721,6 +771,7 @@ pub fn questions_to_laya(questions: &[laya_abi::Question]) -> serde_json::Value 
 /// one of the declared options — the property the whole graph design depends on, so a
 /// violation is an error rather than a guess.
 pub fn answer_from_laya(
+    policy: &laya_core::Policy,
     id: &str,
     entry: &serde_json::Value,
     declared_options: &[String],
@@ -786,8 +837,12 @@ pub fn answer_from_laya(
         }
         QuestionType::Noul => {
             let noul = entry.get("noul").and_then(serde_json::Value::as_f64);
+            // The threshold comes from the POLICY, not from a literal here. It was
+            // hardcoded to 0.5 while `Policy::noul_threshold` was validated, configurable
+            // from TOML, and read only by its own tests — so a config change had no effect
+            // on the label a caller got. Passing `policy` in is what makes the config real.
             let value = match noul {
-                Some(v) if v >= 0.5 => "yes".to_string(),
+                Some(v) if policy.noul_is_true(v) => "yes".to_string(),
                 Some(_) => "no".to_string(),
                 None => "unknown".to_string(),
             };
@@ -1273,7 +1328,7 @@ mod tests {
             "technical".to_string(),
             "sales".to_string(),
         ];
-        let a = answer_from_laya("t", &entry, &declared)
+        let a = answer_from_laya(&laya_core::Policy::default(), "t", &entry, &declared)
             .unwrap_or_else(|e| panic!("conversion failed: {e}"));
         assert_eq!(a.value, "billing");
         assert_eq!(a.options, declared, "option order is the DECLARED order");
@@ -1287,7 +1342,7 @@ mod tests {
         let entry = json!({"type": "choice", "choice": "marketing", "confidence": 0.9,
                            "probabilities": {"billing": 0.5}});
         let declared = vec!["billing".to_string(), "technical".to_string()];
-        let r = answer_from_laya("t", &entry, &declared);
+        let r = answer_from_laya(&laya_core::Policy::default(), "t", &entry, &declared);
         assert!(r.is_err(), "an undeclared choice must be rejected");
         assert!(format!("{:?}", r.err()).contains("not one of the declared options"));
     }
@@ -1295,6 +1350,7 @@ mod tests {
     #[test]
     fn a_noul_answer_maps_to_yes_no_and_keeps_p() {
         let yes = answer_from_laya(
+            &laya_core::Policy::default(),
             "n",
             &json!({"type": "noul", "noul": 0.8, "confidence": 0.8}),
             &[],
@@ -1303,6 +1359,7 @@ mod tests {
         assert_eq!(yes.value, "yes");
         assert_eq!(yes.p, Some(0.8));
         let no = answer_from_laya(
+            &laya_core::Policy::default(),
             "n",
             &json!({"type": "noul", "noul": 0.2, "confidence": 0.8}),
             &[],
