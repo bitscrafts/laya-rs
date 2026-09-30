@@ -1,8 +1,28 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 (2) · **Status**: GREEN — 6 of 7 tools real, committed (`4b471e4`).
-`scripts/verify-all.sh` PASS · **227 tests** · clippy 0 · fmt clean · 54 doc links 0 broken ·
-audit vs baseline `new=0`.
+**Date**: 2026-09-30 (3) · **Status**: GREEN — **spec 04 COMPLETE, all 7 tools real**,
+committed (`faf30bc`). `scripts/verify-all.sh` PASS · **255 tests** · clippy 0 · fmt clean ·
+55 doc links 0 broken · doc-honesty 26 docs every citation resolves.
+
+## The ledger exists now, and `calibrate` is possible
+
+Spec 04's second half was a contract with no implementation. It is implemented:
+`crates/laya-store` (redb 4.2.0), the server's per-process segment writing (F8), and
+`laya ledger compact | stats | tail | outcome`. Proven end to end by `scripts/prove-ledger.py`.
+
+**The outcome path is the part that matters.** Nothing recorded whether a decision was RIGHT, so
+`calibrate` could never have meant anything — ECE needs `(confidence, correct)` pairs. An outcome
+is its own append-only record; `stats` prints **NO OUTCOMES RECORDED** while there are none, so
+the gap is visible rather than implied.
+
+**Four real bugs, none found by unit tests:**
+
+| what | how it was caught |
+|---|---|
+| `latency_ms` was always **0** — I measured the process's *uptime*, not the call | the e2e proof: `stats` showed `p50: 0 ms` for a real model call; now a real 173–436 ms |
+| `laya ledger compact` failed with *"unexpected argument `compact`"* | running it: the top-level parser rejected a subcommand's own arguments |
+| **a held READER blocks a WRITER** in redb (the opposite of my assumption) | my own test asserting the reverse failed — so `LedgerReader` is opened and DROPPED per call, and a test pins that |
+| `read_only` was written with `Database::open`, which takes the **write** lock | reading redb's source: a method named read-only that was not |
 
 ## SCOPE — THIS PROJECT ONLY (no association with any other project)
 

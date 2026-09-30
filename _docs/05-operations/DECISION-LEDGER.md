@@ -1,18 +1,20 @@
 # The decision ledger
 
-**Status**: DESIGN — the schema is settled; `laya-store` is not yet implemented
-(spec 04 owns it). This document is the contract that spec implements.
+**Status**: IMPLEMENTED (2026-09-30). `laya-store` implements this schema; the server appends a
+row per decision to its own segment file; `laya ledger compact` merges them. Proven end to end by
+`scripts/prove-ledger.py`.
 
-> ## What is in the store TODAY: NOTHING
+> ## What is in the store TODAY
 >
-> Verified 2026-09-30, not assumed: `laya-store` declares **no dependencies** ("NO DEPS YET, ON
-> PURPOSE"), it is in **neither** binary's dependency tree, `redb` is **absent from `Cargo.lock`**,
-> and **no `ledger.redb` or `ledger-*.jsonl` exists** for this project. All seven `laya-mcp` tools
-> are **stateless** — every answer is computed per call.
+> **Only what has been compacted.** A `laya-mcp` process appends to `ledger-<pid>.jsonl` in
+> `LAYA_LEDGER_DIR` (unset = no ledgering, deliberately); nothing reaches `ledger.redb` until
+> `laya ledger compact` runs. So "the ledger is empty" is the normal state of a fresh install, not
+> a fault — and `laya ledger stats` says so rather than reporting zeros as if they were measured.
 >
-> So this document is a contract for unwritten code, and **`calibrate` cannot mean anything yet**:
-> nothing records whether a decision was right (see the section below). Anyone reading a claim that
-> decisions are being recorded should treat it as a claim about the design, not about the system.
+> **`calibrate` still cannot run**, and the reason is now concrete rather than architectural: the
+> ledger records what was decided, and outcomes only arrive when someone records them with
+> `laya ledger outcome <id> --correct|--wrong --source <who>`. `stats` reports
+> `outcomes: 0` and prints **NO OUTCOMES RECORDED** while that is true.
 
 ---
 
