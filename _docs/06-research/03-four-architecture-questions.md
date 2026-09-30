@@ -513,6 +513,51 @@ the ledger has none yet.
 
 ---
 
+## Where the discussion stands — the settled set
+
+Recorded so a later session does not have to re-derive it. **Agreed and fixed:**
+
+| # | settled | evidence |
+|---|---|---|
+| 1 | Concurrency by **output-partitioning (C) and independent matmuls (D)**; **split-K (B) forbidden**; FMA must be exactness-tested | §1.1, the four sites |
+| 2 | The **pool is co-requisite with the executor**, and justified by ordering / backpressure / fault isolation — **not** throughput | §1.3, 8 calls = 121 ms |
+| 3 | The **priority queue is the pool's admission control**, pool before queue, and the `laya-mcp` forbidding test is the gate | §1.2 |
+| 4 | Pub/sub **never ingest, yes egress** — at-least-once from the ledger with a cursor | §1.5 |
+| 5 | Config **split by author**: text for human-authored, redb for machine-measured, **policy fingerprint in every ledger record** | §2.5 |
+| 6 | **No storage format speeds the load**; mmap works and is already the implementation; the ~24 s is the Python stack | §2.2 |
+| 7 | Flows: **JSON, text canonical, renderer before store**, starter library as **text + an import command** | §2.3, §2.4 |
+| 8 | The capability is **generic DAG execution**; **SDD+TDD is a flow, not a built-in** | §3.1 |
+| 9 | **Absorb standalone** — no dependency of any kind, and no change proposed to another project | §3.2 |
+| 10 | Parallel node execution is the **defining feature**, bounded fan-out, **fail fast + cancel siblings** | §3.4 |
+| 11 | **Composition**: expand at load, explicit arguments, hash the child, **reject cycles at load** | §3.6 |
+| 12 | Worktrees isolate **repo-editing** nodes only; nodes are classified by **whether they write** | §3.5 |
+| 13 | **Absorbing ≠ superseding** — we gain the capability; nothing outside is displaced | §4 |
+
+**Still open** (§6): cancellation; whether `calibrate` recommends or changes; text- vs
+redb-authoritative under an agent editor; bit-exactness across machines; how much of the
+decision field set belongs in the spec; and the fan-out width bound.
+
+### The executor we would build is generic by construction
+
+The point worth stating once, plainly, because it is the answer to *"does this make us a
+particular system's successor?"*:
+
+> **A generic DAG executor that is fed our own spec cannot be a successor to any specific
+> engine, because it is not specific to one.** It runs whatever flow it is given.
+
+That is the design working as intended, not a shortfall. And it is the sharper form of the
+§4 answer: **the capability generalises; a supersession claim does not.** Superseding names a
+particular system and requires its data; absorbing a generic capability names none.
+
+**What this means for the near term.** The executor is **not yet a spec** — the inventory in
+`specs/` runs 01–06 and has no graph-execution spec, and nothing in `crates/` can execute a
+graph today. It becomes the seventh, after the pieces that make it usable: the spec format
+and renderer (§2.3), and the decision-node contract that is already implemented.
+
+**Two corrections owed to earlier text, now made:** the executor's table includes an
+**agent node** (§3.2 — it spawns a process, so it is adoptable), and the load claim is
+storage-independent (§2.2).
+
 ## Corrections ledger
 
 Seven claims made in earlier rounds were wrong. They are kept here rather than deleted, because in each case
