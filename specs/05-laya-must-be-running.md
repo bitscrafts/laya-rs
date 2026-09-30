@@ -99,11 +99,11 @@ self-inflicted. **An unavailable gate must never mean permission.**
 | `doctor_exits_nonzero_when_not_ready` | a down endpoint | non-zero exit |
 
 ## Exit Criteria
-- [ ] `cd /projects/laya-rs && cargo test -p laya-core --lib readiness` — all pass
-- [ ] `cd /projects/laya-rs && cargo test -p laya-backbone` — all pass
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — zero
-- [ ] `cd /projects/laya-rs && cargo run -q -p laya-cli -- doctor --url http://127.0.0.1:1; test $? -ne 0`
-- [ ] `cd /projects/laya-rs && cargo run -q -p laya-cli -- doctor --url http://10.10.10.217:8083` — exit 0 while the container is up
+- [x] `cd /projects/laya-rs && cargo test -p laya-core --lib readiness` — all pass
+- [x] `cd /projects/laya-rs && cargo test -p laya-backbone` — all pass
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — zero
+- [x] `cd /projects/laya-rs && cargo run -q -p laya-cli -- doctor --url http://127.0.0.1:1; test $? -ne 0`
+- [x] `cd /projects/laya-rs && cargo run -q -p laya-cli -- doctor --url http://10.10.10.217:8083` — exit 0 while the container is up
 
 ## Guardrails
 - Do NOT start serving when Laya is unreachable. Refusing to start is the correct

@@ -40,6 +40,13 @@ echo "########## 6. SPECS PRESENT ##########"
 ls specs/*.md | sed 's/^/  /'
 echo
 
+echo "########## 6b. THE SPECS' OWN EXIT CRITERIA ##########"
+# Run every exit criterion from its OWN text. This is the check that would have caught a
+# criterion naming an example target the crate never had (spec 06 cited `queue_demo`, which
+# did not exist) — a spec can claim completion while its own check cannot run.
+python3 scripts/run-exit-criteria.py
+echo
+
 echo "########## 7. THE PAYLOAD CONTRACT — live ##########"
 cargo run -q -p laya-core --example payload_demo 2>&1 | head -30
 echo

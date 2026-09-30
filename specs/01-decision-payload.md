@@ -113,10 +113,10 @@ laya-abi                        laya-core
 | `payload_round_trips_and_omits_empty_fields` | payload | equal after round-trip; keys present in JSON |
 
 ## Exit Criteria
-- [ ] `cd /projects/laya-rs && cargo test -p laya-abi -p laya-core` — all pass
-- [ ] `cd /projects/laya-rs && cargo clippy -p laya-abi -p laya-core --all-targets -- -D warnings` — zero
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` — zero diffs
-- [ ] `cd /projects/laya-rs && cargo test -p laya-abi -p laya-core 2>&1 | grep -q 'test result: ok'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-abi -p laya-core` — all pass
+- [x] `cd /projects/laya-rs && cargo clippy -p laya-abi -p laya-core --all-targets -- -D warnings` — zero
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` — zero diffs
+- [x] `cd /projects/laya-rs && cargo test -p laya-abi -p laya-core 2>&1 | grep -q 'test result: ok'`
 
 ## Guardrails
 - Do NOT put a threshold inside a prompt or inside the model. Every number is a

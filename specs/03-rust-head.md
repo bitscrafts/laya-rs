@@ -212,9 +212,9 @@ pinned Python reference over a corpus.
 | `only_the_choice_11_plus_bucket_is_out_of_range` | the real config | exactly one clamped bucket, and it is flagged |
 
 ## Exit Criteria
-- [ ] `cd /projects/laya-rs && cargo test -p laya-head` — all pass, offline
-- [ ] `cd /projects/laya-rs && cargo clippy -p laya-head --all-targets -- -D warnings` — zero
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` — zero diffs
+- [x] `cd /projects/laya-rs && cargo test -p laya-head` — all pass, offline
+- [x] `cd /projects/laya-rs && cargo clippy -p laya-head --all-targets -- -D warnings` — zero
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` — zero diffs
 - [ ] the live corpus suite reports label agreement and its floor is met
 
 ## Guardrails

@@ -145,9 +145,9 @@ from every other tool on that surface.
   calibration that manufactured its own ground truth would be measuring itself.
 
 ## Exit Criteria
-- [ ] `cd /projects/laya-rs && cargo test -p laya-core --lib` — all pass
-- [ ] `cd /projects/laya-rs && cargo clippy -p laya-core --all-targets -- -D warnings` — zero
-- [ ] `cd /projects/laya-rs && python3 -c "import sys;sys.exit(0 if 'label' in open('crates/laya-core/src/route_payload.rs').read() else 1)"`
+- [x] `cd /projects/laya-rs && cargo test -p laya-core --lib` — all pass
+- [x] `cd /projects/laya-rs && cargo clippy -p laya-core --all-targets -- -D warnings` — zero
+- [x] `cd /projects/laya-rs && python3 -c "import sys;sys.exit(0 if 'label' in open('crates/laya-core/src/route_payload.rs').read() else 1)"`
 
 ## Guardrails
 - Do NOT compute `band` in a graph `transform` node — **impossible** in the expr
