@@ -1,8 +1,39 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 (3) · **Status**: GREEN — **spec 04 COMPLETE, all 7 tools real**,
-committed (`faf30bc`). `scripts/verify-all.sh` PASS · **255 tests** · clippy 0 · fmt clean ·
-55 doc links 0 broken · doc-honesty 26 docs every citation resolves.
+**Date**: 2026-09-30 (4) · **Status**: GREEN — **specs 01–06 pass their own exit criteria**
+(`EXIT CRITERIA: pass=21 fail=0 prose=3`), and **spec 03 is now proven offline**.
+`scripts/verify-all.sh` PASS · **303 tests** · clippy 0 · fmt clean · 61 doc links 0 broken ·
+doc-honesty 27 docs every citation resolves.
+
+## Spec 03 (P4): the head is reproduced against PyTorch itself
+
+Spec 04 is complete; spec 03 is the remaining one, and its offline half is now **proven** rather
+than asserted. The differential test is the point: it runs the **real** `nn.TransformerEncoderLayer`
+over synthetic hidden states and requires the Rust port to reproduce the logits.
+
+```
+crates/laya-head/src/math.rs       f32 primitives, per-branch MEASURED accuracy
+crates/laya-head/src/forward.rs    Head::load + Head::forward, pure (&self), no lock
+crates/laya-head/src/safetensors.rs the 36-tensor reader
+crates/laya-head/tests/forward_differential.rs
+        worst logit difference across 4 cases: 4.05e-6   (margin scale 1e-3, so 2 orders below)
+```
+
+**`erf` was wrong three times**, each version caught by a test with a known value rather than by
+review: a Lentz form returning -2.9e26; the Numerical Recipes approximation whose REAL error at
+x=2 is 3.1e-3 — the same scale as the near-tie margins — while its own doc claimed 1.2e-7; and a
+branch point at 2 where measurement showed the series is good to 4.2e-12 at x=4. The doc now
+carries the measured error table.
+
+**Three more bugs only the differential test could catch:** an off-by-one selecting the `qtype`
+row; an off-by-`n_heads` in the fused `in_proj` layout; and a fixture that was broken twice
+(`round()` perturbs an f32; `repr()` emits a JSON *string*, so Rust parsed NaN and both sides
+failed identically).
+
+**In progress:** the tokenizer and `build_sequence` (delegated), with the same differential-fixture
+acceptance test.
+
+## Earlier: the ledger, and `calibrate` is possible
 
 ## The ledger exists now, and `calibrate` is possible
 
