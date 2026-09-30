@@ -1,8 +1,8 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 · **Status**: GREEN — a working, supervised, documented POC.
-Two of the seven MCP tools are real (`decide`, `gate`); the remaining five return an
-honest `not implemented` error by design.
+**Date**: 2026-09-30 · **Status**: GREEN — reviewed, fixed, committed.
+The audit is baselined (`proven=10`, all accounted for in the review doc), so a
+NEW finding now fails the gate.
 
 ## Documentation: ONE folder (merged 2026-09-29)
 
@@ -90,7 +90,51 @@ laya: READY
 | `02-guides/INSTALL-IN-HERMES.md` | `hermes mcp add`; the new-session requirement and the stale-process tell; tool contracts; cost/latency |
 | `05-operations/SUPERVISION.md` | the host unit; why NOT in-container; the two approaches that do not work; the recovery test |
 
-## Next (ranked)
+## Code review + fixes (2026-09-30)
+
+`_docs/04-development/CODE-REVIEW-2026-09-30.md` — 10 ranked items, worked top-down.
+Its CORRECTION and CLOSURE sections matter as much as the findings: **one finding (H1)
+was wrong and is corrected in place**, and the two claims below were each wrong on first
+telling.
+
+**Three critical defects, all "wired into the build, inert in behaviour":**
+
+1. **The queue's fail-closed guard was unreachable.** `push`/`pop` sat in one lock scope,
+   so the queue could never fill and *"the work queue is full; a gate that cannot run must
+   fail closed"* could never fire. Root cause is architectural: this server is serial (one
+   client, current-thread runtime), so it has nothing to prioritise. Queue removed from
+   the server; `laya-core::queue` keeps its implementation and 16 tests. A regression
+   guard on the absence was written and **proven to fire** by injecting the symbol.
+2. **`laya-head` had no production caller** — the B2 temperature clamp, called only from
+   its own tests. Dep removed; the crate is P4 (spec 03) and its manifest now says so.
+3. **`main.rs` printed `laya-rs:`** — a stale prefix from before the binary rename, which
+   I had reported as fixed. It was not.
+
+**Also fixed:** `server_capabilities()` deleted (it duplicated what `#[tool_handler]`
+generates — my first conclusion that the capabilities were wrong was wrong);
+**26 → 0 unused dependencies**; `laya-store` out of both binaries; **`verify-all.sh` moved
+out of gitignored `_tmp/` into `scripts/`** (the project's gate was in scratch, so a fresh
+clone could not verify anything); 51 one-shot patch scripts archived with a do-not-re-run
+notice; **`git init` + first commit `4ad7dd2`** (previously nothing was reviewable as a
+diff).
+
+**Two methods notes worth carrying forward:**
+* Audit `crates/`, **not the repo root**: the root run silently skipped A3 and let `_tmp`
+  scratch files act as references, suppressing real findings.
+* A check missing from `by_check` is indistinguishable from a check that found nothing.
+  Both cases were observed on this tree. Cross-check `proven` against the baseline.
+
+## Next (ranked, unchanged)
+
+1. `ask_file` / `ask_files` — highest value; everything needed now exists.
+2. The **near-tie margin** in the payload (top1−top2), before P4: the measured
+   Δp = 0.0006 between backends can flip a near-tie, so it must escalate, not decide.
+3. `should_compact`, then `ledger` (needs an outcome path first).
+4. **P4** — the Rust head, which also wires `temperature_was_clamped` / `temp_tag` /
+   `with_criteria` or deletes them.
+
+## Next (ranked, superseded by the section above)
+
 
 1. **`ask_file` / `ask_files`** — the highest-value tools (a file judged without ever
    entering the agent's context). Everything needed to build them now exists.
