@@ -14,5 +14,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod decide;
+pub mod embedder;
+
+pub use decide::{DecideArgs, DecideOutput, decide};
+pub use embedder::{HttpEmbedder, parse_embedding};
 pub use laya_backbone::{DEFAULT_ENDPOINT, PROBE_TIMEOUT_MS};
 pub use laya_core::readiness::{Readiness, ReadinessFailure};

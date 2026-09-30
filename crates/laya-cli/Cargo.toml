@@ -15,9 +15,15 @@ path = "src/main.rs"
 
 [dependencies]
 laya-store = { path = "../laya-store" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 laya-core = { path = "../laya-core" }
 laya-backbone = { path = "../laya-backbone" }
+# The head, so `laya decide` is the whole path in one binary — tokenizer, embedding call, forward
+# pass, post-processing. This is what makes the live corpus parity harness possible: both sides are
+# driven from TEXT, not from a pre-computed hidden state.
+laya-head = { path = "../laya-head" }
+laya-abi = { path = "../laya-abi" }
 ureq = { workspace = true }
 
 [lints]

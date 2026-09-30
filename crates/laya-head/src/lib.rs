@@ -32,6 +32,7 @@
 #![forbid(unsafe_code)]
 
 pub mod decide;
+pub mod end_to_end;
 pub mod forward;
 pub mod math;
 

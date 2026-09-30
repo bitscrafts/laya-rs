@@ -116,6 +116,35 @@ fn doctor(endpoint: &str) -> ExitCode {
     }
 }
 
+/// `laya decide` — the whole path, text in and JSON out.
+///
+/// Prints the decision JSON on **stdout** and a one-line summary on stderr, so a harness can read
+/// stdout while a human sees the summary. Exit codes: 1 usage, 2 an artifact or the backbone is not
+/// usable, 3 the decision failed — documented on [`laya_cli::decide`].
+fn decide(rest: &[String], endpoint: &str) -> ExitCode {
+    let args = match laya_cli::DecideArgs::parse(rest, endpoint) {
+        Ok(a) => a,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return ExitCode::from(1);
+        }
+    };
+    match laya_cli::decide(&args) {
+        Ok(json) => {
+            println!("{json}");
+            // The summary is rebuilt from the same JSON, so it cannot drift from what was printed.
+            if let Ok(out) = serde_json::from_str::<laya_cli::DecideOutput>(&json) {
+                eprintln!("{}", laya_cli::decide::summarise(&out));
+            }
+            ExitCode::SUCCESS
+        }
+        Err((msg, code)) => {
+            eprintln!("{msg}");
+            ExitCode::from(code)
+        }
+    }
+}
+
 /// Parse the arguments into `(command, endpoint)`.
 /// Parse the command word and the endpoint, and pass everything else through untouched.
 ///
@@ -367,19 +396,15 @@ fn main() -> ExitCode {
     match command.as_deref() {
         Some("doctor") => doctor(&endpoint),
         Some("ledger") => ledger(&rest),
-        Some("decide") => {
+        Some("decide") => decide(&rest, &endpoint),
+        Some(other) => {
             eprintln!(
-                "laya: `decide` is not implemented as a CLI command (spec 04).\n\
-                 \x20 use the MCP server: hermes mcp list shows `laya` with a `decide` tool"
+                "laya: unknown command `{other}`\nusage: laya <doctor|decide|ledger> [--url URL]"
             );
             ExitCode::FAILURE
         }
-        Some(other) => {
-            eprintln!("laya: unknown command `{other}`\nusage: laya <doctor|ledger> [--url URL]");
-            ExitCode::FAILURE
-        }
         None => {
-            eprintln!("usage: laya <doctor|ledger> [--url URL]");
+            eprintln!("usage: laya <doctor|decide|ledger> [--url URL]");
             ExitCode::FAILURE
         }
     }

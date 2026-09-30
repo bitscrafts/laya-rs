@@ -602,9 +602,12 @@ dependencies = [
 name = "laya-cli"
 version = "0.1.0"
 dependencies = [
+ "laya-abi",
  "laya-backbone",
  "laya-core",
+ "laya-head",
  "laya-store",
+ "serde",
  "serde_json",
  "ureq",
 ]

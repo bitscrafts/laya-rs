@@ -84,6 +84,24 @@ the LIVE corpus criterion below.
   right-side state truncation.
 - F8. Produce the same `Answer` shape as the Python path: `value`, `probabilities`,
   `confidence`, and — per blocker B1 — the **`margin`** (top1 − top2 logit gap).
+
+  > **CORRECTION (2026-09-30, measured).** This requirement conflicts with what was built, and the
+  > disagreement is kept rather than papered over. The implemented
+  > `DecisionPayload::margin_of` in `laya-core` computes the margin **in probability space**, and
+  > that is the value the near-tie band acts on. Two quantities named `margin` — one logit, one
+  > probability — is exactly how a near-tie rule ends up reading the wrong one, so the two are now
+  > named apart:
+  >
+  > * **`Decision::logit_gap`** (in `laya-head`) is this requirement: the top1 − top2 gap over the
+  >   RAW LOGITS, pinned by `the_logit_gap_is_the_raw_top1_minus_top2` against the reference's own
+  >   `raw_logit_gap`.
+  > * **`DecisionPayload::margin`** (in `laya-core`) stays a probability-space distance, per
+  >   question type (`noul` measures distance from the threshold, `score` the gap to the nearest
+  >   adjacent level, and a single-option `choice` its whole mass).
+  >
+  > So F8 is satisfied in substance and renamed in form. The reason the probability form is the one
+  > the band uses: it is the quantity a caller can reason about against a threshold, while a logit
+  > gap's meaningful scale depends on the temperature the bucket applies — which varies by bucket.
 - F9. Carry provenance: the head's sha256 and the backbone's sha256, so a
   mismatched artifact fails loudly instead of silently deciding differently.
 - F10. **Temperature must NOT move the label.** The reference applies temperature and *then*
@@ -235,7 +253,24 @@ pinned Python reference over a corpus.
 - [x] `cd /projects/laya-rs && cargo test -p laya-head` — all pass, offline
 - [x] `cd /projects/laya-rs && cargo clippy -p laya-head --all-targets -- -D warnings` — zero
 - [x] `cd /projects/laya-rs && cargo fmt --all --check` — zero diffs
-- [ ] the live corpus suite reports label agreement and its floor is met
+- [x] `cd /projects/laya-rs && python3 scripts/live-corpus-parity.py` — **MEASURED 2026-09-30:
+  label agreement 16/16 = 1.0000** (floor 0.9), 0 errors, worst probability difference 4.978e-05
+  against the reference's own 4-dp rounding resolution of 5e-05.
+
+  The corpus spreads across both axes that could hide a difference: every question type, every
+  temperature bucket boundary (2, 3-5, 6-10, 11+), unicode, a single-option choice, options in
+  non-alphabetical order, and a **460-token state** that crosses the head's ~192-token window and
+  approaches the backbone's 512. The logit-gap histogram is reported with it, and 1 of 16 cases sits
+  at a gap below 0.1 — so the corpus is not uniformly easy, which is what would let a 100% rate mean
+  nothing.
+
+  **Both sides are driven from TEXT** (the reference over its socket, the Rust path through
+  `laya decide`), which is the point: a comparison starting from a pre-computed hidden state would
+  skip the tokenizer, the sequence builder and the embedding call — the parts most likely to differ.
+
+  The criterion is gated in `scripts/verify-all.sh` as step 7b: when the backbone or the reference
+  sidecar is down it prints **UNMEASURED** and says why, rather than either failing the build or
+  quietly passing.
 
 ## Guardrails
 - Do NOT apply a raw config temperature. Clamp first — B2 is exactly this bug, and

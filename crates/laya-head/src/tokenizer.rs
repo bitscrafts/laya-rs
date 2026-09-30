@@ -52,6 +52,12 @@
 
 use fancy_regex::Regex;
 use serde_json::{Map, Value};
+
+// The ABI question, aliased because this module has its OWN `Question` (the reference's internal
+// shape) and the two must not be confused: one is the caller's contract, the other is what
+// `build_sequence` renders. `from_abi` is the single documented bridge between them.
+use laya_abi::Question as AbiQuestion;
+use laya_abi::QuestionType as AbiQuestionType;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -111,6 +117,17 @@ pub enum TokenizerError {
     /// A sequence could not be laid out.
     #[error("cannot build sequence: {0}")]
     Sequence(String),
+    /// The question cannot be rendered at all, so no sequence can be built for it.
+    ///
+    /// Distinct from [`TokenizerError::Sequence`], which is a sequence that was attempted and came
+    /// out wrong; this one is refused up front for a reason the caller can act on.
+    #[error("question `{id}` is not renderable: {why}")]
+    BadQuestion {
+        /// The caller's question id.
+        id: String,
+        /// What is wrong with it.
+        why: String,
+    },
 }
 
 /// One entry of `added_tokens`, mirroring the reference's field names.
@@ -296,6 +313,71 @@ pub struct Sequence {
     pub ids: Vec<u32>,
     /// For each option, the position of its `[MASK]` token, filtered to `< max_len`.
     pub markers: Vec<usize>,
+}
+
+impl Question {
+    /// Convert an ABI [`laya_abi::Question`] into this module's internal shape, reproducing the
+    /// reference's `_to_internal` (`agent.py:255-263`).
+    ///
+    /// Two rules, both of which change the token sequence if they are missed:
+    ///
+    /// * a `choice` whose criteria arrive as a **list** becomes an object mapping each criterion to
+    ///   `None` — so the options are `name: None`, rendered as the bare name. Keeping it a list
+    ///   would fail to render at all.
+    /// * `instructions` that is not a string is `json.dumps`ed rather than stringified, so a
+    ///   structured instruction renders as JSON instead of a Python repr.
+    ///
+    /// The ABI carries options as a flat `Vec<String>` (that is the MCP contract), and the
+    /// reference carries criteria as a mapping — so the flat list becomes `{option: None}`, which is
+    /// exactly what `_to_internal` does with a list. `"other"` is NOT invented here: if the caller
+    /// wants a declared exit, it declares one, as the reference's own docs say.
+    ///
+    /// # Errors
+    /// [`TokenizerError`] if a `score` question has no levels, since a rubric with no levels cannot
+    /// produce a sequence.
+    pub fn from_abi(question: &AbiQuestion) -> Result<Self, TokenizerError> {
+        let kind = match question.kind {
+            AbiQuestionType::Choice => QuestionType::Choice,
+            AbiQuestionType::Score => QuestionType::Score,
+            AbiQuestionType::Noul => QuestionType::Noul,
+        };
+        let criteria = match kind {
+            QuestionType::Choice => {
+                let mut map = Map::new();
+                for option in &question.options {
+                    map.insert(option.clone(), Value::Null);
+                }
+                Value::Object(map)
+            }
+            QuestionType::Score => {
+                if question.options.is_empty() {
+                    return Err(TokenizerError::BadQuestion {
+                        id: question.id.clone(),
+                        why: "a `score` question needs its levels as options, and it has none, so \
+                              there is no rubric to render"
+                            .to_string(),
+                    });
+                }
+                Value::Array(
+                    question
+                        .options
+                        .iter()
+                        .cloned()
+                        .map(Value::String)
+                        .collect(),
+                )
+            }
+            // A noul's criteria are `{false: ..., true: ...}`; the ABI carries no separate criteria
+            // for it, and `render_options` falls back to its own wording when they are absent —
+            // which is what the reference does with `crit = None`.
+            QuestionType::Noul => Value::Null,
+        };
+        Ok(Self {
+            kind,
+            instructions: question.text.clone(),
+            criteria,
+        })
+    }
 }
 
 /// The pure-Rust tokenizer.

@@ -51,6 +51,26 @@ echo "########## 7. THE PAYLOAD CONTRACT — live ##########"
 cargo run -q -p laya-core --example payload_demo 2>&1 | head -30
 echo
 
+echo "########## 7b. THE LIVE CORPUS — Rust vs the Python reference ##########"
+# Spec 03's last criterion, and the ONLY check here that needs a live backbone and the Python
+# reference. It is deliberately gated rather than always-on: both dependencies are outside this
+# repo, so an unavailable one must be reported as UNMEASURED, not as a failure of the code.
+#
+# The gate is explicit and prints WHY. A silent skip would be a check that cannot fail, which is the
+# failure mode this repo has already paid for twice.
+if ! curl -sf -m 5 http://10.10.10.217:8083/v1/models > /dev/null 2>&1; then
+  echo "  UNMEASURED: the backbone at :8083 is not reachable, so the live corpus cannot run."
+  echo "  This is NOT a pass — run it when the backbone is up:"
+  echo "    python3 scripts/live-corpus-parity.py"
+elif [ ! -S "${LAYA_SIDECAR_SOCKET:-/run/laya/sidecar.sock}" ]; then
+  echo "  UNMEASURED: the Python reference sidecar is not up at ${LAYA_SIDECAR_SOCKET:-/run/laya/sidecar.sock}."
+  echo "  This is NOT a pass — the reference is the oracle and there is nothing to compare against."
+  echo "    scripts/laya-sidecar.py   (see the sidecar's own docs to start it)"
+else
+  python3 scripts/live-corpus-parity.py --json /tmp/laya-parity.json 2>&1 | tail -14
+fi
+echo
+
 echo "########## 8. THE TREE ##########"
 find . -path ./target -prune -o -type f \( -name '*.md' -o -name '*.rs' -o -name '*.toml' \) -print | sort | sed 's/^/  /'
 echo

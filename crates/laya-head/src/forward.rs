@@ -417,6 +417,17 @@ impl Head {
         out
     }
 
+    /// One head's slice out of a token's fused qkv row, or an empty slice if the row is short.
+    ///
+    /// A free function rather than a method because it is pure slice arithmetic, and returning
+    /// `&[]` rather than panicking keeps the `zip`s total in the impossible case that the
+    /// checkpoint's `in_proj` disagrees with the config — the shape check at load is what rules that
+    /// out, and this is the belt to that braces.
+    fn head_slice(row: &[f32], piece: usize, head_dim: usize) -> &[f32] {
+        row.get(piece * head_dim..(piece + 1) * head_dim)
+            .unwrap_or(&[])
+    }
+
     /// Bidirectional multi-head self-attention with the fused `in_proj`.
     fn self_attention(&self, weights: &Block, x: &[f32], seq: usize) -> Vec<f32> {
         let dim = self.d;
@@ -442,48 +453,55 @@ impl Head {
         #[allow(clippy::cast_precision_loss)]
         let scale = 1.0 / (head_dim as f32).sqrt();
         let mut attended = vec![0.0_f32; seq * dim];
+        // Slice each token's projected row ONCE, outside the loops.
+        //
+        // This is not a micro-optimisation, it is the difference between usable and unusable. The
+        // first version selected q/k/v inside the inner loops with `chunks_exact(..).nth(..)`, which
+        // is a LINEAR scan per call — so the attention, already O(seq^2 * head_dim) of arithmetic,
+        // became O(seq^3) of ITERATING as well. Measured: a 512-token sequence spent over four
+        // minutes CPU-bound under that version, where the reference answers in seconds.
+        //
+        // A row is `[q_0..q_{d-1}, k..., v...]` chunked into `3 * n_heads` pieces, so q head h is
+        // piece h, k head h is piece `n_heads + h`, and v head h is piece `2 * n_heads + h`. Those
+        // offsets are computed once per head instead of searched for per element. (The offsets were
+        // also the site of an off-by-`n_heads` that the differential test caught on its first case.)
+        let rows: Vec<&[f32]> = qkv.chunks_exact(3 * dim).collect();
         for head in 0..n_heads {
-            for query in 0..seq {
+            let (q_at, k_at, v_at) = (head, n_heads + head, 2 * n_heads + head);
+            for (query, row) in rows.iter().enumerate() {
+                let q_head = Self::head_slice(row, q_at, head_dim);
                 let mut scores = vec![0.0_f32; seq];
                 for (key, score) in scores.iter_mut().enumerate() {
                     let mut acc = 0.0_f32;
-                    // A token's projected row is `[q_0..q_{d-1}, k..., v...]`, so chunking it by
-                    // `head_dim` yields 3*n_heads pieces: q heads first, then k, then v. Head h of
-                    // k is therefore at `n_heads + h`. Reading `1 + head` there was an
-                    // off-by-n_heads that the differential test caught on the first case.
-                    let q_head = qkv
-                        .chunks_exact(3 * dim)
-                        .nth(query)
-                        .and_then(|r| r.chunks_exact(head_dim).nth(head))
-                        .unwrap_or(&[]);
-                    let k_head = qkv
-                        .chunks_exact(3 * dim)
-                        .nth(key)
-                        .and_then(|r| r.chunks_exact(head_dim).nth(n_heads + head))
-                        .unwrap_or(&[]);
+                    let k_head = rows
+                        .get(key)
+                        .map_or(&[][..], |r| Self::head_slice(r, k_at, head_dim));
                     for (lhs, rhs) in q_head.iter().zip(k_head) {
                         acc += lhs * rhs;
                     }
                     *score = acc * scale;
                 }
                 let probs = softmax(&scores);
+                // `attended` is `seq * dim` with `head_dim` per head, so this range always exists;
+                // `get_mut` keeps the access TOTAL rather than relying on that arithmetic holding.
+                // The early return is unreachable by construction (the buffer is sized `seq * dim`
+                // and both indices are bounded by `seq`), and returning what has been computed beats
+                // panicking in a function whose whole job is to be checkable against a reference.
+                let Some(dst) = attended
+                    .get_mut(query * dim + head * head_dim..)
+                    .and_then(|rest| rest.get_mut(..head_dim))
+                else {
+                    return attended;
+                };
                 for (key, &prob) in probs.iter().enumerate() {
                     if prob == 0.0 {
                         continue;
                     }
-                    let v_head = qkv
-                        .chunks_exact(3 * dim)
-                        .nth(key)
-                        .and_then(|r| r.chunks_exact(head_dim).nth(2 * n_heads + head))
-                        .unwrap_or(&[]);
-                    if let Some(dst) = attended
-                        .chunks_exact_mut(dim)
-                        .nth(query)
-                        .and_then(|r| r.chunks_exact_mut(head_dim).nth(head))
-                    {
-                        for (slot, &v) in dst.iter_mut().zip(v_head) {
-                            *slot += prob * v;
-                        }
+                    let v_head = rows
+                        .get(key)
+                        .map_or(&[][..], |r| Self::head_slice(r, v_at, head_dim));
+                    for (slot, &v) in dst.iter_mut().zip(v_head) {
+                        *slot += prob * v;
                     }
                 }
             }
