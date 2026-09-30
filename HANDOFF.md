@@ -1,8 +1,84 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 · **Status**: GREEN — reviewed, fixed, committed.
-The audit is baselined (`proven=10`, all accounted for in the review doc), so a
-NEW finding now fails the gate.
+**Date**: 2026-09-30 (2) · **Status**: GREEN — 6 of 7 tools real, committed (`4b471e4`).
+`scripts/verify-all.sh` PASS · **227 tests** · clippy 0 · fmt clean · 54 doc links 0 broken ·
+audit vs baseline `new=0`.
+
+## SCOPE — this project only; `pi-improved` is a REFERENCE
+
+**We do not work in `pi-improved`** (user, 2026-09-30). It is the example we read — for the
+`route`-node contract, crate conventions, prior art. Never modify it, never depend on it, never
+treat its state as ours. Same for every other project in `/projects`.
+
+The reference's graph engine is `/projects/pi-improved/crates/pii-graph` (3,281 lines: `node.rs`,
+`nodes.rs`, `expr.rs`, `validate.rs`, `sched/*`, `run/*`). **`laya-rs` has NO graph
+implementation** — only `route_payload.rs`, the contract restated in our own crate so a change
+over there cannot move our behaviour silently. A DAG runner belongs HERE if we build one.
+
+## Six tools are real now (was 3 of 7)
+
+| tool | state |
+|---|---|
+| `decide` | real — typed questions -> route-shaped payloads (`label`, `band`, `margin`, `near_tie`) |
+| `gate` | real — **TWO signals**; see the safety finding below |
+| `ask_file` | real — a judgement about a file, never the file |
+| `ask_files` | real — globs expanded, capped at 64, `hits` ranked by belief |
+| `should_compact` | real — L7, four judgements in one call |
+| `ask` | real — L10, the CALLER writes the questions |
+| `ledger` | **stub** — needs `laya-store`, which is unwritten |
+
+## THE SAFETY DEFECT THAT WAS FIXED (do not regress it)
+
+The `ask` e2e proof caught the gate **allowing `rm -rf <dir>` and the command running**. The
+check that caught it was an **effect** check — the protected file had to still exist afterwards —
+not a message check.
+
+Two root causes: the model's verdict was the **only** signal, and `Policy::gate`'s `irreversible`
+flag was **decorative** (`Band::Mid if irreversible => Ask` and `Band::Mid => Ask` had identical
+bodies; it defaulted `false` and nothing ever inferred it).
+
+**Measured, on commands with known answers:**
+
+| what was tried | result |
+|---|---|
+| `"Is this action safe?"` as a noul | **6/12** — `ls -la /tmp` 0.83, `rm -rf <dir>` 0.89 |
+| six consequence phrasings | **every one NEGATIVE separation** — no threshold can work |
+| a `choice` over declared effects | **13/18** — still missed `: > file`, `dd if=` |
+
+**Now `allow` requires BOTH signals clear:** no destructive effect pattern matched, AND the model
+reached the high band. A pattern match can never be allowed through. The response reports
+`model_decision`, `destructive_signals` (matched text + why) and `irreversible`, so a refusal is
+auditable. Spec 04 F6c/F6d.
+
+**Honest limit:** this is two signals, **not a sandbox**. It never executes a command it refuses;
+that is not the same as containing one.
+
+## THE FINDING THAT EXPLAINS FOUR DEFECTS
+
+**This head CLASSIFIES CONTENT. It does not REASON ABOUT CONSEQUENCES.**
+
+* `mid_edit`'s first phrasing (**"spans more than one step AND would be broken"**) -> **1/6**;
+  rewritten to a single concrete question -> **6/6**.
+* the gate's "is this safe?" -> **6/12**, a coin flip.
+* but **"is there a bug?"** -> **0.8044, correct**.
+
+So: **ask it to classify content; never ask it to reason about a consequence.** Two independent
+phrasings reaching 6/6 is corroboration. Small samples — recorded as large unambiguous
+improvements, not calibrated rates.
+
+## The head reads a PREFIX, not the whole state
+
+A signal at the START scored **exactly 0.788 at 3,975 / 15,943 / 63,951 / 199,951 bytes** —
+invariant across a 50x range, only possible if the tail is not read. The same signal at the END
+survived at 984 bytes and was **gone at 3,976** (0.087 = the no-signal control 0.0873). The exact
+boundary could NOT be pinned, so `FULL_ATTENTION_BYTES = 1024` sits conservatively below the
+smallest observed failure, and both file tools return `bytes` + a `warning` above it.
+
+## What goes to redb: NOTHING (asked and verified this session)
+
+`laya-store` declares **no dependencies** ("NO DEPS YET, ON PURPOSE"), is in neither binary's tree,
+`redb` is **absent from `Cargo.lock`**, and **no `.redb` / `ledger-*.jsonl` exists anywhere** for
+this project. All seven tools are stateless. Every `.redb` on the machine is agent-memory's.
 
 ## Documentation: ONE folder (merged 2026-09-29)
 
