@@ -16,7 +16,7 @@ Specs are the **implementation contract**, not documentation. Each one carries:
 |---|---|---|
 | [`01-decision-payload.md`](01-decision-payload.md) | P1 | **IMPLEMENTED** — policy, per-type bands, composite scoring, payload |
 | [`02-route-payload.md`](02-route-payload.md) | P1 | **IMPLEMENTED** — the route-shaped wire contract |
-| [`03-rust-head.md`](03-rust-head.md) | P4 | **NOT STARTED** — the 26.5M head in pure Rust (`clamp_temperature` already landed). The only spec left. |
+| [`03-rust-head.md`](03-rust-head.md) | P4 | **COMPLETE** — the 26.5M head in pure Rust, reproduced against PyTorch (4.05e-6), the reference tokenizer (exact), and the reference's post-processing (5.55e-17). Live corpus label agreement **16/16 = 1.0000**. |
 | [`04-mcp-server-and-ledger.md`](04-mcp-server-and-ledger.md) | P1 | **COMPLETE (2026-09-30)** — the stdio server (all 7 tools) + the redb ledger |
 | [`05-laya-must-be-running.md`](05-laya-must-be-running.md) | P1 | **IMPLEMENTED** — judgement + probe parsers + `laya doctor`, all tested |
 | [`06-priority-queue.md`](06-priority-queue.md) | P1 | **IMPLEMENTED** — the bounded priority queue, 16 tests |
@@ -27,7 +27,11 @@ including the doc-citation check.
 
 ## What is left
 
-**Only spec 03 (P4).** Everything else is implemented and proven:
+**Nothing outstanding — every spec 01–06 is done.** (`EXIT CRITERIA: pass=22 fail=0 prose=3`, and no
+unchecked box remains anywhere in `specs/`.) What comes next is a NEW spec, not remaining work on
+these: the generic graph executor (`_docs/03-reference/GRAPH-SPEC.md`), which is spec 07 and is
+deliberately not written yet — absorbing a DAG executor is our own capability, not a gap in P4.
+Everything else is implemented and proven:
 
 - P1 is complete. The MCP server exposes all seven tools, the redb ledger is written by
   `laya ledger compact` and nothing else, and `scripts/prove-ledger.py` proves the whole

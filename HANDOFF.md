@@ -1,9 +1,39 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 (4) · **Status**: GREEN — **specs 01–06 pass their own exit criteria**
-(`EXIT CRITERIA: pass=21 fail=0 prose=3`), and **spec 03 is now proven offline**.
-`scripts/verify-all.sh` PASS · **303 tests** · clippy 0 · fmt clean · 61 doc links 0 broken ·
-doc-honesty 27 docs every citation resolves.
+**Date**: 2026-09-30 (5) · **Status**: GREEN — **SPEC 03 IS COMPLETE, every spec 01–06 done.**
+`EXIT CRITERIA: pass=22 fail=0 prose=3` — **no unchecked box remains anywhere in `specs/`**.
+`scripts/verify-all.sh` PASS · **344 tests** · clippy 0 workspace-wide · fmt clean ·
+61 doc links 0 broken · doc-honesty 27 docs every citation resolves.
+
+## Spec 03's live criterion, MEASURED
+
+The last unchecked box was the live corpus, and measuring it required building the end-to-end
+path rather than asserting one:
+
+```
+python3 scripts/live-corpus-parity.py
+LABEL AGREEMENT: 16/16 = 1.0000   (floor 0.9)   0 errors
+worst probability difference 4.978e-05   vs the reference's own 4-dp rounding (5e-05)
+logit-gap histogram: min 0.0158  p10 0.1102  median 2.6461  max 6.2077
+near-ties (gap < 0.1): 1/16
+```
+
+Both sides are driven **from text** — the reference over its socket, the Rust path through
+`laya decide` — because a comparison starting from a pre-computed hidden state would skip the
+tokenizer, the sequence builder and the embedding call, which are the parts most likely to differ.
+
+**`laya decide` now exists** (`--state/--question`, or `-` to stream JSON): text in, the decision
+as JSON on stdout, a summary on stderr, exit codes 1 usage / 2 artifact-or-backbone / 3 decision
+failed. That is what makes the port reachable and the criterion runnable.
+
+**Two bugs only the live run could find:**
+1. llama.cpp returns `embedding` as a list of **ROWS**, not a flat list. The Python sidecar hid it
+   (`torch.tensor(r[0]["embedding"])` accepts nested lists as 2-D), so a port copying that line
+   read lists where it expected numbers.
+2. **The attention was O(seq^3).** A clippy-driven de-indexing put `chunks_exact().nth()` inside
+   the inner loops, and `nth` is a linear scan — a 460-token sequence was still CPU-bound after
+   four minutes. Offsets computed once per head: **~12 s release**. A debug build is ~10x slower,
+   which the harness now documents.
 
 ## Spec 03 (P4): the head is reproduced against PyTorch itself
 

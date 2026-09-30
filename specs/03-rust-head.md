@@ -6,15 +6,20 @@ Replace the Python decision path with a pure-Rust implementation of Laya's
 and no torch** — which also removes the `tokenizers`/`transformers` version
 conflict that already bit us once.
 
-**Status: IN PROGRESS (2026-09-30, updated).** The offline-testable path is now **proven**:
+**Status: COMPLETE (2026-09-30).** Every exit criterion passes, including the live corpus, which
+measured **label agreement 16/16 = 1.0000** against the Python reference over a 16-case corpus
+driven from text on both sides. The component-wise results, each against its own oracle:
 
 * the **safetensors reader** against the real 36-tensor file (36 tensors, every shape);
 * the **math primitives** with per-branch MEASURED accuracy (`erf` was wrong three times);
 * the **forward pass**, reproduced against **PyTorch itself** — a differential fixture generated
   by running the real `nn.TransformerEncoderLayer`, matching to a **worst logit difference of
   4.05e-6** against a margin scale of 1e-3;
-* the **tokenizer and `build_sequence`** — in progress (delegated), with the differential fixture
-  as the acceptance test.
+* the **tokenizer and `build_sequence`** — reproduced **exactly**: 91 corpus strings / 2207 ids and
+  707 sequence cases / 83411 ids / 2705 markers, no tolerance, because tokenization is discrete and
+  any mismatch is a real bug;
+* the **end-to-end path** (`Head::run` + `laya decide`), text in and a decision out, which is what
+  the live criterion drives.
 
 **What the port learned that this spec did not say**, and which is now recorded because it is the
 kind of thing that is silently wrong rather than loudly wrong:
@@ -28,8 +33,9 @@ kind of thing that is silently wrong rather than loudly wrong:
 * `type_emb` is added **before** the blocks; the attention is bidirectional (no causal mask);
   and the act features come from the **detached** softmax.
 
-**Not yet done:** wiring the tokenizer to a live backbone call (P4's remaining integration), and
-the LIVE corpus criterion below.
+**Complete.** The two bugs the live run found — the nested `/embedding` shape and an O(seq^3)
+attention from a linear scan inside the inner loops — are recorded in the exit criterion below,
+because they are the kind that only a live run surfaces.
 
 > ### MEASURED FACTS THAT CORRECT THIS SPEC (2026-09-30)
 >
