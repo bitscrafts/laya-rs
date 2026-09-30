@@ -66,7 +66,7 @@ laya-abi                        laya-core
                                 └───────────────┬───────────────┘
                                                 │ JSON
                                     ┌───────────▼────────────┐
-                                    │ pii-graph `route` node │
+                                    │  graph `route` node  │
                                     │ on = "$.payload.label" │
                                     │ rules = [{eq, port},   │
                                     │          {port}]  ←catch-all

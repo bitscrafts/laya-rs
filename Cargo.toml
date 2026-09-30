@@ -16,7 +16,7 @@ exclude = [
 ]
 
 # NOTE: standalone Cargo workspace, deliberately NOT a member of any parent
-# workspace (the same choice amem made). Every crate lives under `crates/`, and
+# workspace (a deliberate choice, not a default). Every crate lives under `crates/`, and
 # the *crate directory name* is the short role (`core`, `mcp`, `store`) while the
 # package name keeps the full `laya-*` prefix, so both `cargo -p laya-core` and a
 # directory listing stay meaningful.
@@ -29,7 +29,6 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/pi-improved/laya-rs"
 readme = "README.md"
 keywords = ["laya", "mcp", "decision", "agent", "dag"]
 categories = ["development-tools", "science"]
@@ -53,7 +52,7 @@ tokio = { version = "1.53", default-features = false }
 rmcp = { version = "3.2", features = ["server", "transport-io"] }
 ureq = { version = "3", default-features = false, features = ["json"] }
 
-# --- lints: the same bar pii holds. ZERO, not "below baseline". ---
+# --- lints: a strict bar. ZERO, not "below baseline". ---
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "deny"
@@ -74,6 +73,12 @@ await_holding_lock = "deny"
 # (darling). Both compile fine; unifying them is rmcp's job. Allowed with
 # the reason here so the rule stays ON everywhere else.
 multiple_crate_versions = "allow"
+# NOT SATISFIABLE HONESTLY, so it is allowed with the reason rather than
+# silenced by dropping the whole `cargo` group. `cargo_common_metadata`
+# demands `package.repository`, and this project has no remote — so a URL
+# here would be invented, which is exactly the kind of fabricated fact this
+# codebase is built to avoid. Every other cargo lint stays ON.
+cargo_common_metadata = "allow"
 
 [profile.release]
 lto = true

@@ -28,6 +28,14 @@ echo "########## 5. DOC LINKS (must be 0 broken) ##########"
 python3 "$(dirname "$0")/regen-index.py" 2>&1 | tail -2
 echo
 
+echo "########## 5b. DOC CITATIONS (every citation must resolve) ##########"
+# WHY THIS IS IN THE GATE: writing _docs/03-reference/GRAPH-SEAM.md I cited a module that does
+# not exist (`laya-core::validate`) and nothing caught it — prose is not compiled, and the link
+# check above only proves a RELATIVE LINK resolves, not that a CLAIM is true. This fails the gate
+# on an unresolvable citation, so a doc cannot drift away from the code it describes.
+python3 "$(dirname "$0")/check-doc-citations.py"
+echo
+
 echo "########## 6. SPECS PRESENT ##########"
 ls specs/*.md | sed 's/^/  /'
 echo

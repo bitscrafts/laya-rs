@@ -46,7 +46,7 @@ one reviewable place. Never in a prompt. Never in the model. A threshold change 
 a diff, not a prompt edit.
 
 ### 4. `band` is computed by us, never by a graph transform
-pii-graph's expr language is *"only object member access … no arrays, no
+a graph `route` node's expr language is *"only object member access … no arrays, no
 functions"*. A `transform` node **cannot** compute a band, and `route`'s `eq` is
 exact equality with no ranges. That is why the payload arrives ready to match.
 Writing a band transform will look like it works and silently never match.
@@ -126,7 +126,13 @@ verifies every relative link resolves — run it, do not hand-edit the index.
   workspace never hard-deletes). Nothing should link into it.
 - **Never erase a superseded claim** — annotate it and point at the current truth.
   The disagreement is the finding.
-- pii's contracts are **linked, never copied**: a copied contract rots.
+- **This project is STANDALONE: nothing outside is linked, copied, or named.**
+  *This corrects an earlier entry here that read "contracts are linked, never copied" — the
+  direction is now stricter (2026-09-30): no association with anything outside this
+  repository at all. A link couples us to something we cannot verify from here; a copy
+  rots. So we do neither: a property we rely on from outside is stated as a fact about an
+  interface, and its consequence is enforced by a test in our own code, so nothing external
+  can move our behaviour silently.*
 - Never relay a status claim without re-checking the primary artifact. "Status:"
   fields, "(verified)" headings and per-row `Source:` columns prove *where* a
   number was read, never *when*.
@@ -149,15 +155,21 @@ verifies every relative link resolves — run it, do not hand-edit the index.
 - Known-unmeasured: the Rust head's cold-load time (decides the hook lane), and
   llama.cpp determinism across thread counts/builds.
 
-## SCOPE — this project only; pi-improved is a REFERENCE
+## SCOPE — THIS PROJECT ONLY
 
-**We do not work in `pi-improved`.** It is the example we read — for the `route`-node
-contract, for crate conventions, for prior art — and reading is all we do with it.
+**No association with any other project.** `/projects` holds many; this one is ours alone.
 
-- Never modify `pi-improved`: no edits, no commits, no "fix it while I am here".
-- Never take a dependency on it (`pii-graph` is not a dependency of anything here).
-- Never treat its state, its specs or its HEAD as ours.
-- The same applies to every other project in `/projects`: this project's files only.
+- Never modify, commit in, or "fix while I am here" another project.
+- Never take a code dependency on another project here.
+- Never treat another project's state, specs or HEAD as ours.
+- Never cite another project's file paths or line numbers in our docs: state what we rely on
+  as a **fact about the interface**, so the document stands on its own.
+
+When something elsewhere shows a contract we need, we **restate it in our own code** — see
+`crates/laya-core/src/route_payload.rs`, which names the two fields a graph matches on and pins
+them by test. That is why a change outside this repository cannot move our behaviour silently.
+
+**A DAG runner belongs HERE**, in this project — not in whatever project we borrowed an idea from.
 
 When the reference shows a contract we need, we **copy the shape into our own code** and cite it
 — we do not reach across and change it. Our `route_payload.rs` is exactly that: the contract

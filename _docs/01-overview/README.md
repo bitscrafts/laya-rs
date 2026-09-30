@@ -32,7 +32,7 @@ So the project is: **their ten levels, our free model, our graph engine.**
 ## The three properties that make it safe
 
 **1. The model cannot invent an edge.** Its answer is always one of the caller's
-declared options. pii-graph validates at author time (V1: every edge's port must be
+declared options. A graph validates at author time (every edge's port must be
 declared) and errors loudly at run time if nothing matches — so with a catch-all
 rule, an undefined edge is impossible.
 

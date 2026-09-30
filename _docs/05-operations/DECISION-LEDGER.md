@@ -3,6 +3,17 @@
 **Status**: DESIGN — the schema is settled; `laya-store` is not yet implemented
 (spec 04 owns it). This document is the contract that spec implements.
 
+> ## What is in the store TODAY: NOTHING
+>
+> Verified 2026-09-30, not assumed: `laya-store` declares **no dependencies** ("NO DEPS YET, ON
+> PURPOSE"), it is in **neither** binary's dependency tree, `redb` is **absent from `Cargo.lock`**,
+> and **no `ledger.redb` or `ledger-*.jsonl` exists** for this project. All seven `laya-mcp` tools
+> are **stateless** — every answer is computed per call.
+>
+> So this document is a contract for unwritten code, and **`calibrate` cannot mean anything yet**:
+> nothing records whether a decision was right (see the section below). Anyone reading a claim that
+> decisions are being recorded should treat it as a claim about the design, not about the system.
+
 ---
 
 ## What it is for
@@ -54,11 +65,10 @@ assert that B fails cleanly (a typed error, not a panic or corruption),
 and assert that the segment-file path succeeds in both.
 ```
 
-**Version note (review finding F10 correction):** `amem` pins `redb = 2`,
-`pidag` pins `1.0`, and these differ in lock/repair behaviour. This workspace pins
-**`redb = 4.2`** (the same major as `pi-improved`, which is the sibling we most
-resemble). That is a deliberate choice, recorded here because the review was right
-that the design's original claim ("redb 2 — amem, pidag") was half wrong.
+**Version note (review finding F10 correction):** alternate `redb` majors differ in lock and
+repair behaviour, so this project pins **`redb = 4.2`** — chosen here, not inherited. The
+review was right that the original version claim was half wrong; the corrections it produced
+are recorded in the review doc.
 
 ---
 
@@ -75,6 +85,7 @@ One JSON object per decision. Field names are the contract.
 | `confidence` | Laya's calibrated confidence |
 | `band` | `low` / `mid` / `high`, computed by us (B5) |
 | `margin` | **top1 − top2 gap** — added by blocker B1, because a near-tie is where a port can flip |
+| `near_tie` | whether `margin` fell under the policy floor. **Added 2026-09-30** — it was a payload field while this table omitted it, and with `escalate_on_near_tie` it is what demotes a band, so a recorded decision without it cannot be re-explained |
 | `probabilities` | the full distribution, so saturation can be re-derived |
 | `saturated` | whether one option held > `saturation_threshold` |
 | `p` / `score` | for a `noul` / `score` |

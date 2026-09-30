@@ -16,7 +16,7 @@ single-writer scheme (blocker B4), and `route` is **not** a tool (finding M6).
 
 ### Functional
 - F1. Transport is **MCP over stdio**, JSON-RPC 2.0 on stdin/stdout. Copy the
-  pattern from `pii-mcp/src/main.rs:144-158` — `stdio()` → `serve_server(server,
+  pattern — `stdio()` → `serve_server(server,
   (r, w))` → `running.waiting()` — **including the spec-22 bounded-lifetime fix**,
   so the server exits on EOF instead of parking forever on `pending()`.
 - F2. The tool surface is: `decide`, `ask_file`, `ask_files`, `gate`,
@@ -73,14 +73,14 @@ single-writer scheme (blocker B4), and `route` is **not** a tool (finding M6).
   `LAYA_READ_ROOTS` (colon-separated); **unset means the process cwd, never `/`**, and the
   resolved roots are printed at startup. `ask_file`/`ask_files` have a defined
   read scope (a configured root set), and refuse out-of-scope paths — not
-  pii-mcp's blanket workspace-wide grant.
+  a blanket workspace-wide grant.
 - F8. Every decision is appended to a **per-process segment file**; the store
   itself is opened **read-only** by the server. `laya-cli`'s `laya ledger compact`
   is the only writer (blocker B4).
 - F9. `ask_file`/`ask_files` mark file content as **DATA** in the state, never as
   instructions (the video's own warning: *"state is not treated as hostile"*).
-- F10. The `laya` node seam in pii is named precisely (finding m3): a new
-  `NodeFactory` registered in **both** pii-server's `registry()` **and**
+- F10. The seam is a precisely-named node factory (finding m3): registered in **both**
+  a server's `registry()` **and**
   `lint_registry()`, with `ports()`/`required_caps()`/`effects()` — a net-calling
   node is **not** `PURE`.
 
@@ -92,9 +92,8 @@ single-writer scheme (blocker B4), and `route` is **not** a tool (finding M6).
   (review M2). The claim "cheap enough for EVERY tool call" is **withdrawn**: the
   HTTP backbone path measured 608 ms, and cold load measured 23 s for the Python
   stack, so a hook lane needs a persistent server, not a per-call spawn.
-- NF4. redb pin: **4.2** (matching the reference implementation `pi-improved`, which we only
-  READ). Recorded because the
-  original claim about amem/pidag was half wrong (review F10).
+- NF4. redb pin: **4.2**, chosen rather than inherited. Recorded because the
+  original version claim was half wrong (review F10).
 
 ## Architecture
 

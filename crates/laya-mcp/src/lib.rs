@@ -22,7 +22,7 @@
 //!   any graph, which is the injection failure mode this whole architecture exists to
 //!   prevent. The graph owns every edge; `laya-rs` supplies a value.
 //! * **Errors are protocol errors, not successful results whose text starts with
-//!   `"error: …"`.** That pattern (which `pii-mcp` uses) is fail-open by accident: a
+//!   `"error: …"`.** That pattern is fail-open by accident: a
 //!   caller that only checks for a successful response treats a failure as an answer.
 //! * **No blanket filesystem scope.** `ask_file` reads only within a configured root
 //!   set, not the whole workspace.
@@ -403,7 +403,7 @@ pub enum ToolOutcome {
 
 /// Turn an outcome into an MCP result, using the protocol's error surface.
 ///
-/// This is the correction of `pii-mcp`'s pattern: a failure becomes
+/// This corrects that pattern: a failure becomes
 /// [`McpError`], NOT a `CallToolResult::success` whose text begins `"error: "`.
 /// A caller that only checks for success must not be able to mistake a failure for
 /// an answer.
@@ -1286,7 +1286,7 @@ fn readiness_reason(r: &Readiness) -> String {
     }
 }
 
-/// The dynamic tool-dispatch function type, mirroring `pii-mcp`'s working shape:
+/// The dynamic tool-dispatch function type — the shape the rmcp framework expects:
 /// given a tool-call context, return a boxed future resolving to the MCP response.
 type DispatchFn = for<'a> fn(
     ToolCallContext<'a, LayaMcpServer>,
@@ -1789,7 +1789,7 @@ mod tests {
     }
     #[test]
     fn a_failure_is_never_a_successful_result_with_an_error_prefix() {
-        // The pii-mcp pattern we deliberately do NOT copy: returning
+        // The pattern we deliberately do NOT use: returning
         // `CallToolResult::success` with text `"error: …"` is fail-open by accident,
         // because a caller checking only for success reads a failure as an answer.
         let out = handle("decide", &down(), &no_args(), &test_state());

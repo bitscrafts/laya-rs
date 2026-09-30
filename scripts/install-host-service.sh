@@ -13,7 +13,7 @@
 # WHY A UNIT AND NOT THE IMAGE'S ENTRYPOINT: /usr/local/bin/entrypoint.sh belongs to the
 # image, so an edit there is reverted by the next image update. A host unit lives
 # outside the image — upgrade-proof — and follows the sibling pattern already in place
-# here (llamacpp-laya.service, amem.service, hermes.service).
+# here (the host runs its own units for the model server and anything else it needs).
 set -uo pipefail
 
 UNIT_DIR="$HOME/.config/containers/systemd"

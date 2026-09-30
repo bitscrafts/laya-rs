@@ -11,7 +11,7 @@
 //!
 //! The two fields to notice are `label` and `band`: they are the ones a DAG matches
 //! on (`route on = "$.payload.label"`), and they are plain strings on purpose —
-//! pii-graph's expression language supports only member access and exact equality,
+//! A graph route node's expression language supports only member access and exact equality,
 //! so the payload must arrive ready to match. See `DESIGN-AMENDMENTS` blocker B5
 //! for why the band cannot be computed in the graph.
 

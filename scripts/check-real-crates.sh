@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the REAL crates hold the pii bar: zero clippy warnings, fmt clean, tests pass.
+# Verify the REAL crates hold this project's bar: zero clippy warnings, fmt clean, tests pass.
 set -uo pipefail
 export PATH="/usr/local/cargo/bin:$PATH"
 export CARGO_HOME=/usr/local/cargo

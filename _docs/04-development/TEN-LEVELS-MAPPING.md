@@ -52,11 +52,10 @@ route  on = "$.payload.label"
 ordinary nodes per port
 ```
 
-**Why `band` must come from us and not a transform node (B5):** pii-graph's
+**Why `band` must come from us and not a transform node (B5):** the graph's
 expression language supports *"only object member access … no arrays, no
-functions"* (`expr.rs:3-8`), `transform` emits a member value or a constant
-(`nodes.rs:43-62`), and `route`'s `eq` is exact `serde_json::Value` equality
-(`nodes.rs:113`) — no ranges, no comparisons. A transform **cannot** compute a
+functions"*), `transform` emits a member value or a constant, and `route`'s `eq` is exact
+`serde_json::Value` equality — no ranges, no comparisons. A transform **cannot** compute a
 band, and a route cannot express one. So `laya-rs` computes it, the thresholds
 still live in `Policy` TOML, and the graph gets back the one thing its language
 can match on: an exact string.

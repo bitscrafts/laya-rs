@@ -4,16 +4,17 @@
 `scripts/verify-all.sh` PASS · **227 tests** · clippy 0 · fmt clean · 54 doc links 0 broken ·
 audit vs baseline `new=0`.
 
-## SCOPE — this project only; `pi-improved` is a REFERENCE
+## SCOPE — THIS PROJECT ONLY (no association with any other project)
 
-**We do not work in `pi-improved`** (user, 2026-09-30). It is the example we read — for the
-`route`-node contract, crate conventions, prior art. Never modify it, never depend on it, never
-treat its state as ours. Same for every other project in `/projects`.
+**No association with any other project** (user, 2026-09-30). This repository is ours alone:
+never modify, depend on, or cite another project's files or line numbers in our docs. A property
+we rely on from outside is stated as a **fact about an interface**, and its consequence is
+enforced by a test in our own code.
 
-The reference's graph engine is `/projects/pi-improved/crates/pii-graph` (3,281 lines: `node.rs`,
-`nodes.rs`, `expr.rs`, `validate.rs`, `sched/*`, `run/*`). **`laya-rs` has NO graph
-implementation** — only `route_payload.rs`, the contract restated in our own crate so a change
-over there cannot move our behaviour silently. A DAG runner belongs HERE if we build one.
+**`laya-rs` has NO graph implementation.** It has `route_payload.rs`: the contract with a graph
+`route` node — the two field names a graph matches on — restated in our own crate and pinned by
+test, so nothing outside this repository can move our behaviour silently. A DAG runner belongs
+HERE if we build one.
 
 ## Six tools are real now (was 3 of 7)
 
@@ -78,7 +79,7 @@ smallest observed failure, and both file tools return `bytes` + a `warning` abov
 
 `laya-store` declares **no dependencies** ("NO DEPS YET, ON PURPOSE"), is in neither binary's tree,
 `redb` is **absent from `Cargo.lock`**, and **no `.redb` / `ledger-*.jsonl` exists anywhere** for
-this project. All seven tools are stateless. Every `.redb` on the machine is agent-memory's.
+this project. All seven tools are stateless.
 
 ## Documentation: ONE folder (merged 2026-09-29)
 
@@ -288,7 +289,7 @@ explicit direction). Exit 0, ~8 min, `_docs/06-research/02-analysis-glm-5.3.md`
 (460 lines). Session: `_tmp/pi-sessions/design-review/`.
 
 **3. Project scaffolded (complete).** Workspace + `crates/` + `xtask`, following
-pii's conventions (edition 2024, pii's strict lint set, `cargo xtask gate`), plus
+borrowed conventions (edition 2024, a strict lint set, `cargo xtask gate`), plus
 the `.cargo/config.toml` alias that makes the documented `cargo xtask gate` actually
 run (found broken by verification).
 
@@ -321,7 +322,7 @@ literally would have **published a 0.24 probability as 0.99**, defeating the
 confidence gate that the whole design depends on.
 
 **B5 — our central DAG mechanism was IMPOSSIBLE.** We planned a `transform` node to
-compute the confidence band. pii-graph's expr language is *"only object member
+compute the confidence band. A graph `route` node's expr language is *"only member
 access … no arrays, no functions"* (`expr.rs:3-8`) — **I re-verified this myself**
 before accepting it. A transform cannot compute a band; `route`'s `eq` is exact
 equality with no ranges. **Fix: `laya-rs` computes the band and emits it in the
@@ -407,10 +408,3 @@ python3 scripts/regen-index.py            # regen INDEX/TOC + verify every link
 bash scripts/check-real-crates.sh         # the zero-warning proof
 ```
 
-## amem keys
-
-- `laya-rs/architecture/design-and-ten-levels-mapping-2026-09-24`
-- `laya-rs/architecture/driving-dags-deterministic-port-selection-2026-09-24`
-- `laya-rs/architecture/two-lane-laya-and-llm-together-2026-09-24`
-- `indydevdan-agentic-engineering/video/v6-ten-levels-of-jev`
-- `indydevdan-agentic-engineering/finding/jev-10-levels-vs-our-laya-on-llamacpp-position`

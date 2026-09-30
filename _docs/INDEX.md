@@ -52,16 +52,14 @@ in exactly one place; this index points at it, never restates it.
 ### 99-archive
 - [Archive](99-archive/README.md) — Superseded material, kept with its consequence labelled.
 
-## Related trees (linked, never copied)
+## This project is self-contained
 
-- **pii** owns the graph engine. Its `route` contract, expr language and static
-  checks live in `/projects/pi-improved/` source and `_docs/`. We **link**: a
-  copied contract rots, a linked one stays true.
-- **Workspace-level** docs (the open register, workspace rules) live in
-  `/projects/docs/`. Our open items are registered there so they survive this
-  project's sessions.
-- **amem** holds the durable research trail (topics `laya-rs`, `pii`,
-  `indydevdan-agentic-engineering`).
+Every fact in this tree stands on its own: what we rely on from outside is stated
+as a property of an interface, never as a path or line number into another
+repository. The behaviour we depend on is enforced by tests in `crates/`, so a
+change anywhere else cannot move this project silently.
+
+**Standalone by design** — one project, one repository, no external association.
 
 ## Specs
 

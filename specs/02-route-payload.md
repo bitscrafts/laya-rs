@@ -3,7 +3,7 @@
 ## Overview
 `laya-rs` must hand a DAG's `route` node a payload whose `label` and `band` are
 matchable with plain member access and exact string equality, because that is all
-pii-graph's expression language supports.
+a graph `route` node's expression language supports.
 
 **Status: IMPLEMENTED.** `laya-core::route_payload` (tests in `specs/01`, green).
 This spec records the wire contract so a change is made against a written standard.
@@ -59,10 +59,10 @@ Answer { value, confidence, probabilities, options, ... }
         ▼  route on = "$.payload.label"   (member access + exact equality ONLY)
 ```
 
-**Why this shape and not a computed band in the graph:** pii-graph's expr language
-is *"only object member access … no arrays, no functions"* (`expr.rs:3-8`);
-`transform` emits a member value or a constant (`nodes.rs:43-62`); `route`'s `eq` is
-exact `serde_json::Value` equality (`nodes.rs:113`). A computed band is therefore
+**Why this shape and not a computed band in the graph:** a graph `route` node's expression
+language is **only object member access** (`$.a.b`) — no arrays, no functions, no arithmetic; a
+`transform` emits a member value or a constant; and `route`'s `eq` is **exact
+`serde_json::Value` equality**. A computed band is therefore
 **not expressible**, and this payload is the workaround that keeps thresholds in
 `Policy` TOML while giving the graph an exact string to match.
 

@@ -23,7 +23,7 @@ Four facts, each verified, each ruling out an option that looks reasonable on pa
 | The host runs user services at boot | `loginctl show-user mvcorrea --property=Linger` → `Linger=yes` | a user unit is enough; no root unit needed |
 
 Host services that already exist and follow this pattern: `llamacpp-laya.service`,
-`amem.service`, `hermes.service`.
+the host's own units.
 
 ---
 

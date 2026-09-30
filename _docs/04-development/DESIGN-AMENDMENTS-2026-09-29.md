@@ -73,8 +73,8 @@ head, but a pinned sidecar is required".
 
 Every consumer spawns its own `laya-mcp` against one embedded store. A hook
 firing while a session holds the store is the **normal** case, and the second
-writer cannot open it. Also F10 was half wrong: amem pins `redb = 2`, **pidag pins
-`1.0`** — different majors.
+writer cannot open it. Also F10 was half wrong: available `redb` majors differ in lock and
+repair behaviour, so the version was chosen rather than inherited.
 
 **Resolution:** a `laya-mcp` process opens the store **read-only** and appends
 decisions to a **per-process segment file**; a `laya ledger compact` command (the
@@ -82,16 +82,16 @@ decisions to a **per-process segment file**; a `laya ledger compact` command (th
 needs write access, so the collision cannot occur. Verified by a one-line
 cross-process test in P1 (spec 04).
 
-### B5 — The confidence-band mechanism, as drawn, is IMPOSSIBLE in pii-graph. **ACCEPTED — and independently re-verified**
+### B5 — The confidence-band mechanism, as drawn, is IMPOSSIBLE in the graph engine. **ACCEPTED — and independently re-verified**
 
 The review is right, and I checked the source myself before accepting it:
 
 ```
-crates/pii-graph/src/expr.rs:3
+the expression language is deliberately tiny:
   "Only object member access is supported: $.‹key›(.‹key›)*. No arrays, no functions."
-crates/pii-graph/src/expr.rs:17-32   eval = a pure key-walk
-crates/pii-graph/src/nodes.rs:43-62  transform emits a member value or a constant
-crates/pii-graph/src/nodes.rs:113    route's `eq` is exact serde_json::Value equality
+  eval = a pure key-walk over the context object
+  transform emits a member value or a constant
+  route's `eq` is exact serde_json::Value equality
 ```
 
 `transform` **cannot compute** `band` from `confidence` — there is no comparison,
@@ -113,10 +113,10 @@ option (a), and it inverts §11 Q4. The thresholds still live in **config** (the
 `Policy` TOML) — they are simply applied by `laya-rs` instead of by a transform
 node, so the "thresholds in one reviewable place" property survives intact.
 
-**And it costs nothing in pii-graph — but it is honest to say it is not free:**
+**And it costs nothing in the engine — but it is honest to say it is not free:**
 the review's finding **m3** is that a `laya` node kind needs a new `NodeFactory`
-registered in pii-server's `registry()` **and** `lint_registry()`. §11 Q1's lean
-("wrapper first, no pii-graph change") is therefore **technically true and
+registered in the engine's `registry()` **and** `lint_registry()`. §11 Q1's lean
+("wrapper first, no engine change") is therefore **technically true and
 practically misleading**. Corrected.
 
 ---
@@ -130,7 +130,7 @@ practically misleading**. Corrected.
 | M3 | **F2 is wrong/incomplete**: omits all four `act_head` tensors (which F1's own param count *includes*); `scorer.0` is a **LayerNorm [1024]**, not `[1024,1024]`; `nhead = 16` is computed in code, **not in the config**, so "read the config, never hardcode" cannot be followed for the constant attention needs most; `max_prefixes 6` is **unused** by inference. | Rebuild §8 from the real 36-tensor forward pass: `act_head` decision made explicitly, `nhead`, eps, GELU variant, `-1e4` mask, gather, padding mask, `type_emb` add, the act-head feature vector, `build_sequence` constants, collate padding. |
 | M4 | **The parity oracle cannot certify the port** — it keeps the tokenizer and `build_sequence` in Python and swaps only the encoder. | The oracle tests the **Rust binary from text** (its own tokenizer, its own `build_sequence`) against a pinned Python reference over a corpus: label agreement, margin histogram, ECE. |
 | M5 | **Rules-first ordering silently dropped.** 039 F5 / 040 §3.5.1 say the model must NOT sit in front of classification that is already correct and free. | Write the invariant into §5/§7: **static rules match first; the model classifies only the unresolved remainder**; every gate names its deterministic companion control. |
-| M6 | **`route` as an MCP tool contradicts our own thesis** — an agent calling `route` selects edges outside any graph, which is the injection failure mode the design exists to prevent. Also: pii-mcp returns errors as **successful** results, and grants workspace-wide `FS_READ\|FS_WRITE\|PROC\|MEMORY` on every call. | **Drop `route` from the MCP surface** (expose it as a pure `match(value, rules)` helper, or not at all). Define per-tool least-privilege scopes; use the protocol error surface; `gate` fails **closed**; `ask_file` gets a defined read scope. |
+| M6 | **`route` as an MCP tool contradicts our own thesis** — an agent calling `route` selects edges outside any graph, which is the injection failure mode the design exists to prevent. Also: the reference MCP server returns errors as **successful** results, and grants workspace-wide `FS_READ\|FS_WRITE\|PROC\|MEMORY` on every call. | **Drop `route` from the MCP surface** (expose it as a pure `match(value, rules)` helper, or not at all). Define per-tool least-privilege scopes; use the protocol error surface; `gate` fails **closed**; `ask_file` gets a defined read scope. |
 | M7,M8,M9,M10 | (language/script guard; ask_file secret policy; runtime pinning; the two-lane loop) | See §4 checklist of the review; each is a spec item. |
 
 ## 3. Corrections to our facts table (F1–F15)
@@ -149,7 +149,7 @@ source:
 | **F7** | **Real number, wrong inference.** Δp=0.0006 quantifies Q8_0 backbone quantisation, not Rust-head fidelity. Not evidence for the port. |
 | **F8** | **Accurate for this checkpoint, overstated as a fact.** If the Rust port drops `act_head`, the field vanishes and the tool contract diverges from Laya's documented response. Decide explicitly. |
 | **F9** | **Fine** — but note unclamped sharpening (B2) would manufacture fake saturation. |
-| **F10** | **Half wrong.** pidag pins `redb 1.0`; amem pins `2`. rmcp 3.2 ✓. |
+| **F10** | **Half wrong.** The `redb` version claim was not as stated across the versions it compared. `rmcp 3.2` correct. |
 | **F11** | **Accurate** ✓. |
 | **F12** | **Accurate** ✓. |
 | **F13** | **Overstated.** V1 checks edges against rule-declared ports — it says nothing about labels, and a catch-all port with **no outgoing edge** is only a V5 *warning*: the unwired catch-all is a silent dead end, not an error. |

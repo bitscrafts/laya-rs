@@ -79,7 +79,7 @@ fi
 
 # --- verification: ANALYSIS scope means NO source edits ---
 echo "--- scope check: .rs changes must be EMPTY ---" | tee -a "$LOG"
-for d in /projects/pi-improved /projects/laya-rs; do
+for d in /projects/laya-rs; do
   if [ -d "$d/.git" ]; then
     n=$(cd "$d" && git status --porcelain 2>/dev/null | grep '\.rs$' | wc -l)
     echo "  $d: $n changed .rs file(s)" | tee -a "$LOG"
