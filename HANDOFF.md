@@ -290,19 +290,20 @@ diff).
 * A check missing from `by_check` is indistinguishable from a check that found nothing.
   Both cases were observed on this tree. Cross-check `proven` against the baseline.
 
-## Next — there is no remaining work in specs 01–06; the next item is a NEW spec
+## Next — spec 07 is WRITTEN and SPLIT; the next action is to dispatch part 1
 
 Everything this section used to list is **done**: `ask_file`/`ask_files`, the near-tie margin in
-the payload, `should_compact`, `ledger` with its outcome path, and **P4 (the Rust head)**. The list
-below is what remains, and none of it is a gap in an existing spec.
+the payload, `should_compact`, `ledger` with its outcome path, and **P4 (the Rust head)**.
 
-1. **Spec 07 — the generic DAG executor.** A **new capability**, documented and deliberately *not*
-   written in `_docs/03-reference/GRAPH-SPEC.md` (which presents it as a *suggestion*). This is the
-   only real unit of work left. `laya-rs` has **no** graph implementation today — it has
-   `route_payload.rs`, the contract a graph `route` node matches on, restated here and pinned by test.
+1. **Spec 07 — the generic DAG executor — is now specified** (`specs/07-graph-executor.md`), split
+   into four parts, committed `9bd702a`. It is the only real unit of work left. `laya-rs` still has
+   **no** graph implementation — it has `route_payload.rs`, the contract a graph `route` node
+   matches on, restated here and pinned by test. **Next action: implement part 1**, which is
+   dependency-free and process-free (the flow, its refusals, the lowering, and the fix to the
+   criteria runner).
 2. **The open research questions** in `_docs/06-research/03-four-architecture-questions.md`
    (threading, redb config, the graph runner, absorb-vs-supersede). Research, not implementation.
-3. **The commit-hygiene decision (register A24)** — needing *the user*, not an agent.
+3. **The commit-hygiene decision (register A24)** — CLOSED 2026-09-30.
 
 ## Known gaps (honest)
 
