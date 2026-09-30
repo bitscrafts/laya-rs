@@ -496,6 +496,34 @@ Committing to a scheduler now buys flexibility we cannot yet demonstrate a need
 for, at the price of the one thing that is hard to recover: a single queryable
 history.
 
+### Does this approach supersede the engine? No — it makes us a satellite
+
+The plan is additive **by construction**, and for supersession the dependency runs the
+wrong way. Option (a) hands our graph **to** the engine. A component that cannot run a
+graph without the other one has not superseded it — it has become its **dependency**.
+
+**The test that settles it: supersession is a MIGRATION claim, not a new-build claim.**
+To supersede, `laya-rs` must (1) take over the engine's existing *function*, (2) accept
+its existing *data* — DAG JSON, run history, resumption state, node records, events —
+and (3) let the engine be **retired** with no run lost. This plan does none of the
+three, deliberately.
+
+Option (b) — our own scheduler — does not change this. It would add a **second**
+scheduler for new work while the engine keeps its runs, UI, SDD driver, queue daemon,
+MCP client, A2A and 68 integration test files. **Two live systems is coexistence, not
+supersession.**
+
+Why the additive plan is still correct: the engine's value is not its scheduler, it is
+its *hard-won recovery* (crash recovery, budgets, checkpointing), and a scheduler that
+has never crashed in production has untested recovery. Superseding means re-earning
+that and re-hosting every existing run. The return would be owning the executor —
+which is precisely the part the judge insight made **optional**: the judge does not
+care who executes.
+
+**If supersession IS the goal**, it is a legitimate but different project: a migration
+with a cutover that accepts the engine's inputs and data. That is not this plan, and
+the difference should be stated rather than discovered later.
+
 ### What the pushback changed
 
 - **Feasibility conceded**: it is feasible, and round 1's "25 283 LOC" overstated
