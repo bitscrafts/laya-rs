@@ -386,19 +386,41 @@ inside a run** (it is how a resume re-reads its own graph). There is no
 
 | option | what it means | verdict |
 |---|---|---|
-| **(a) our spec compiles to the engine's schema** | exporter emits DAG JSON satisfying the engine's own `validate()` (unique ids, no dangling `depends_on`/`after`/`on_fail`, quorum bounds, `for_each` expanded). Executed by the existing scheduler. | **recommended** — "our spec, our fields" is satisfied, and the executor is not re-written |
+| **(a) our spec compiles to the engine's schema** | exporter emits DAG JSON satisfying the engine's `validate()`, executed by **the existing scheduler** | **WITHDRAWN (see below)** — it makes the other project a **dependency**, which the standalone rule forbids |
 | (b) our spec + our own executor | fully ours, end to end | legitimate, and it is §4 — but it is a scheduler, so decide it as a scheduler |
 | (c) our spec, nobody runs it | a format with no executor | a drawing, not a system |
 
-**Recommendation: (a).** Our spec is the authoring surface and the superset;
-compilation targets the engine's schema for execution; mermaid is the human view
-(§2). This gives exactly what was asked — *our graph spec, refactored, with all
-the fields we need* — while the thing that runs stays the thing that is already
-tested against 68 integration test files.
+**CORRECTION (2026-09-30, user: *"no dependency!!!! our implementation is
+standalone!!! i am taking about absorbing features!"*).** Option (a) is **withdrawn**,
+and the reason it was wrong is worth stating precisely: it would have made another
+project a **runtime dependency**, which this project forbids; it also proposed a change
+*to that other project* to accept our file. Both violate the standing rule. The earlier
+argument for (a) — "the executor is already tested" — was arguing for convenience at the
+cost of the project's defining constraint, which is the wrong trade.
 
-Note the small dependency in (a): the engine needs to accept a DAG from a file
-(a flag) or be handed one for import. That is a change on the engine's side, and
-it is small — which is a much better trade than re-implementing recovery.
+**Recommendation: absorb the features.** The graph-runner capability is built **in our
+own crates**, depending on nothing outside:
+
+| feature to absorb | why we need it | our own version |
+|---|---|---|
+| graph model (nodes, edges, ports) | the authoring surface | our spec (§3 above), JSON |
+| topological order + ready queue + run loop | executing a flow | ours |
+| node executors: shell, **MCP call** | run a step; call the judge | ours, calling our own `laya-mcp` |
+| **run persistence + resume** | a flow that survives a restart | **redb — already a dependency here** |
+| retries, timeouts, budgets | not failing on the first error | ours |
+| mermaid renderer | the human view (§2) | ours |
+| **decision nodes (the band predicate)** | the differentiator | ours — see below |
+
+Note the asymmetry: the first six are *absorbed because we need them*; the last is the
+one thing the other side structurally cannot express, which is why it is ours already.
+
+**Deliberately NOT absorbed:** A2A, the SDD/spec driver, the web UI, the queue daemon,
+workflow templating, spec front-matter parsing, and the `pi` backend integration. Those
+serve that project's use cases, not ours, and absorbing them would be building a system
+we do not need rather than the capability we do.
+
+A useful side effect: **redb is already a dependency for the ledger**, so persisting runs
+and node records reuses the store we already own instead of adding a new one.
 
 ### What the pushback changed
 
@@ -496,33 +518,39 @@ Committing to a scheduler now buys flexibility we cannot yet demonstrate a need
 for, at the price of the one thing that is hard to recover: a single queryable
 history.
 
-### Does this approach supersede the engine? No — it makes us a satellite
+### Absorbing features vs superseding: what each one actually claims
 
-The plan is additive **by construction**, and for supersession the dependency runs the
-wrong way. Option (a) hands our graph **to** the engine. A component that cannot run a
-graph without the other one has not superseded it — it has become its **dependency**.
+These are different claims and only one of them is ours.
 
-**The test that settles it: supersession is a MIGRATION claim, not a new-build claim.**
-To supersede, `laya-rs` must (1) take over the engine's existing *function*, (2) accept
-its existing *data* — DAG JSON, run history, resumption state, node records, events —
-and (3) let the engine be **retired** with no run lost. This plan does none of the
-three, deliberately.
+**Absorption (what we are doing): we gain the capability, standalone.**
+By building the graph runner in our own crates and depending on nothing, `laya-rs`
+becomes able to run a flow end to end. Two consequences follow, and they are the ones
+that matter:
 
-Option (b) — our own scheduler — does not change this. It would add a **second**
-scheduler for new work while the engine keeps its runs, UI, SDD driver, queue daemon,
-MCP client, A2A and 68 integration test files. **Two live systems is coexistence, not
-supersession.**
+- **The two-ledger objection dissolves.** It only bites if we claim to take over another
+  system's history. We are not: we have **one** store, ours, and nothing to migrate. The
+  earlier §4 objection to building a scheduler was an objection to *supersession*,
+  imported into a decision that never required it. Corrected: under absorption, the
+  cost of the scheduler is simply its own cost.
+- **Nothing outside becomes a dependency**, which is the constraint that decided (a)
+  above.
 
-Why the additive plan is still correct: the engine's value is not its scheduler, it is
-its *hard-won recovery* (crash recovery, budgets, checkpointing), and a scheduler that
-has never crashed in production has untested recovery. Superseding means re-earning
-that and re-hosting every existing run. The return would be owning the executor —
-which is precisely the part the judge insight made **optional**: the judge does not
-care who executes.
+**Supersession (not our goal): the other system can be retired.**
+That is a *migration* claim and needs three things we are not attempting: take over its
+existing **function**, accept its existing **data** (run history, resumption state, node
+records, events), and let it be **retired with no run lost**. Absorbing the core features
+gets us a working runner; it does not retire anything, and it does not need to.
 
-**If supersession IS the goal**, it is a legitimate but different project: a migration
-with a cutover that accepts the engine's inputs and data. That is not this plan, and
-the difference should be stated rather than discovered later.
+**So: does this supersede it? No — and under the standalone rule it should not try.**
+What it supersedes is the *need* for it **in our flows**. Asking whether the other
+system can be retired is a question about *its* users, and is outside this project's
+scope by design.
+
+**The residual risk, stated honestly rather than deferred:** crash recovery is the
+hardest thing being absorbed. A scheduler that has never crashed in production has
+untested recovery, and that is now ours to earn rather than borrow. That is the real
+price of refusing the dependency, and it is a price worth paying — the alternative was
+coupling the judge to an executor when the judge does not care who executes.
 
 ### What the pushback changed
 
@@ -548,15 +576,16 @@ that each step is useful on its own:
 | 1 | **Reach `Policy::from_toml` from a real path** (env → file → defaults; effective values printed) | written, tested, unreachable; unblocks §2 entirely | small |
 | 2 | **Output-partitioned parallel matmul (C)** + a bit-exactness test against the scalar reference | the speed case, and it cannot be retrofitted cleanly once a kernel exists | medium |
 | 3 | **Policy fingerprint in the ledger record** | makes `calibrate` meaningful across a threshold change; cheap now, impossible to backfill | small |
-| 4 | **Our graph spec + compiler + mermaid renderer** | §3's deliverable, and §2's reviewability requirement; useful even if the executor never changes | medium |
+| 4 | **Our graph spec + mermaid renderer** (§3) and **the absorbed scheduler** | the graph capability itself, standalone; §2's reviewability requirement | medium |
 | 5 | **Pool with per-lane bounded channels (A + D)**, worker count reported, feature-gated | ordering, backpressure, fault isolation; rewrites the forbidding test honestly | medium |
 | 6 | **One real flow through the existing executor with `laya-mcp` as judge** | converts §3/§4 from argument into evidence | small |
 | 7 | Machine-measured values in redb + source-hash drift check | completes §2 once there is something measured | medium |
 | 8 | Egress pub/sub from the ledger (at-least-once, cursor-based) | fills the missing react-to-a-band-change path | medium |
 
-**Explicitly deferred:** building a scheduler. It is feasible (§4) and it is not
-wrong — it is simply the decision that should be made with the pilot's evidence
-rather than ahead of it.
+**No longer deferred.** Building the scheduler is part of the absorption (§3), because
+the alternative — handing a graph to the other project — is a dependency. Ordered after
+the spec and renderer, and before the pool, because a scheduler with an empty library of
+flows has nothing to run.
 
 ## 6. Open questions (deliberately unanswered)
 
