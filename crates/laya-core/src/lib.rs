@@ -23,11 +23,13 @@
 
 pub mod ask_file;
 pub mod ask_files;
+pub mod compact;
 pub mod policy;
 pub mod queue;
 pub mod readiness;
 pub mod route_payload;
 
+pub use compact::{CompactAdvice, CompactError, CompactInput, CompactThresholds, CompactUrgency};
 pub use policy::{Band, GateDecision, Policy, PolicyError};
 pub use queue::{EnqueueError, Enqueued, Priority, PriorityQueue, QueueStats};
 pub use readiness::{

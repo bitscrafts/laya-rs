@@ -369,6 +369,12 @@ pub struct RawArgs {
     /// The paths `ask_files` asks about.
     #[serde(default)]
     paths: Option<Vec<String>>,
+    /// The caller's own summary of recent turns, for `should_compact`.
+    #[serde(default)]
+    turns_summary: Option<String>,
+    /// How full the context is. Supplied by the CALLER — counted, never estimated.
+    #[serde(default)]
+    context_tokens: Option<u64>,
     #[serde(default)]
     op: Option<String>,
     /// Laya's own question map. Kept as a `Value` in the POC; a typed
@@ -509,6 +515,15 @@ pub fn handle(
             }
             ask_files_via_sidecar(args, state)
         }
+        "should_compact" => {
+            if let Some(missing) = missing_required(tool, args) {
+                return Err(McpError::invalid_params(
+                    format!("`{tool}` requires `{missing}`"),
+                    None,
+                ));
+            }
+            should_compact_via_sidecar(args, state)
+        }
         // Still honestly unimplemented: these need the file-reading and compaction
         // work the spec assigns to P2/P3. No argument contract is advertised.
         _ => to_result(ToolOutcome::NotImplemented(what)),
@@ -579,6 +594,138 @@ fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResul
 }
 
 /// The `decide` tool: typed questions -> route-shaped payloads.
+/// The `should_compact` tool (L7): the four judgements, turned into advice by OUR code.
+///
+/// **Four questions in ONE call**, per the level. Three are `noul`s and the 0..=2 score is a
+/// `score`; the token count is the CALLER's and is never sent to the model — thresholds are
+/// arithmetic and stay in code.
+///
+/// The model supplies judgements. This function owns the arithmetic, the veto, and the four
+/// words the agent hears.
+fn should_compact_via_sidecar(
+    args: &RawArgs,
+    state: &ServerState,
+) -> Result<CallToolResult, McpError> {
+    let summary = args.turns_summary.as_deref().unwrap_or_default();
+    let context_tokens = args.context_tokens.unwrap_or(0);
+
+    let questions = [
+        (
+            "switched_gears",
+            "Did the most recent request switch to a different task or subject from the work \
+             immediately before it?",
+        ),
+        (
+            "at_boundary",
+            "Did the last turn COMPLETE a unit of work, such that stopping here would lose \
+             nothing in progress?",
+        ),
+        (
+            "mid_edit",
+            // MEASURED 2026-09-30. The first phrasing asked TWO things at once ("spans more
+            // than one step" AND "would be broken by losing the conversation") and agreed with
+            // a known-intended answer only 1/6 times — 3 false positives, 2 false negatives.
+            // Since this judgement is a VETO, the false positives suppressed every genuine
+            // compaction request and the false negatives permitted the compaction the veto
+            // exists to prevent.
+            //
+            // Four phrasings were scored against the same six cases; this one and one other
+            // both reached 6/6 with no false positives. The simple, single, concrete form is
+            // kept. Small sample — six cases — so this is a large unambiguous improvement on
+            // 1/6, not a calibrated rate.
+            "Is work currently IN PROGRESS and not yet finished?",
+        ),
+    ];
+    let mut qmap = serde_json::Map::new();
+    for (id, text) in questions {
+        qmap.insert(
+            id.to_string(),
+            json!({"type": "noul", "instructions": text}),
+        );
+    }
+    // The 0..=2 score, described exactly as the source level describes it.
+    qmap.insert(
+        "needs_history".to_string(),
+        json!({
+            "type": "score",
+            "instructions": "How much of the earlier conversation does the NEXT step need?",
+            "criteria": {
+                "0": "none — the next step is self-contained",
+                "1": "some — a little context is needed",
+                "2": "all — the next step depends on the earlier work"
+            }
+        }),
+    );
+
+    let answers = state
+        .sidecar
+        .predict(
+            &json!({"turn_summary": summary}),
+            &serde_json::Value::Object(qmap),
+        )
+        .map_err(|e| {
+            McpError::internal_error(
+                format!("laya-mcp: the decision head is unavailable: {e}"),
+                None,
+            )
+        })?;
+
+    // Read the three nouls. A MISSING answer is treated as the conservative value, not as
+    // `false`-by-default: an absent `mid_edit` must not read as "not editing", or a failed
+    // question would silently unlock the veto.
+    let noul = |id: &str| -> Option<f64> {
+        answers
+            .get(id)
+            .and_then(|e| e.get("noul"))
+            .and_then(serde_json::Value::as_f64)
+    };
+    let policy = laya_core::Policy::default();
+    // No answer means we do NOT know it is safe to compact, so the veto applies. This is the
+    // fail-closed direction, the same rule `gate` follows — and it is why `map_or` is used
+    // rather than `map(..).unwrap_or(false)`, which would read a missing answer as "not
+    // editing" and silently unlock the veto.
+    let mid_edit = noul("mid_edit").is_none_or(|p| policy.noul_is_true(p));
+    let switched_gears = noul("switched_gears").is_some_and(|p| policy.noul_is_true(p));
+    let at_boundary = noul("at_boundary").is_some_and(|p| policy.noul_is_true(p));
+    let needs_history = answers
+        .get("needs_history")
+        .and_then(|e| e.get("score"))
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+
+    let input = laya_core::CompactInput {
+        context_tokens,
+        switched_gears,
+        at_boundary,
+        needs_history,
+        mid_edit,
+    };
+    let thresholds = laya_core::CompactThresholds::default();
+    let advice = laya_core::CompactAdvice::decide(&input, &thresholds);
+
+    let body = json!({
+        // The four words the agent may act on.
+        "urgency": advice.urgency.as_str(),
+        "compact_now": advice.compact_now,
+        "reasons": advice.reasons,
+        // The judgements, so the caller can audit the arithmetic.
+        "judgements": {
+            "switched_gears": switched_gears,
+            "at_boundary": at_boundary,
+            "needs_history": needs_history,
+            "mid_edit": mid_edit,
+        },
+        "context_tokens": context_tokens,
+        "thresholds": {
+            "notice": thresholds.notice,
+            "recommend": thresholds.recommend,
+            "request": thresholds.request,
+        },
+        "answers": answers,
+    });
+    to_result(ToolOutcome::Ok(body.to_string()))
+}
+
 /// The `ask_file` tool: read a file inside the scope and ask a typed question about it.
 ///
 /// The file NEVER enters the caller's context — only the typed answer is returned. That is
@@ -757,7 +904,7 @@ pub fn missing_required(tool: &str, args: &RawArgs) -> Option<&'static str> {
         "ask_file" => &["path", "question"],
         "ask_files" => &["paths"],
         "gate" => &["action"],
-        "should_compact" => &["turns_summary"],
+        "should_compact" => &["turns_summary", "context_tokens"],
         "ask" => &["questions"],
         "ledger" => &["op"],
         _ => &[],
@@ -774,6 +921,7 @@ pub fn missing_required(tool: &str, args: &RawArgs) -> Option<&'static str> {
         // question), and the error a caller sees would be about their PATH, sending them
         // to fix the wrong argument.
         "question" => args.question.as_deref().is_none_or(str::is_empty),
+        "context_tokens" => args.context_tokens.is_none(),
         "paths" => args
             .paths
             .as_ref()
@@ -1268,7 +1416,10 @@ mod tests {
         // `ask_file` and `ask_files` are IMPLEMENTED now, so they are not in this list.
         // Leaving them here would assert the opposite of the truth — and this is exactly
         // how a "not implemented" claim outlives the implementation.
-        for tool in ["ask", "should_compact", "ledger"] {
+        // `ask_file`, `ask_files` and `should_compact` are IMPLEMENTED now. Only `ask`
+        // (which needs the agent-written questions plus a gated command) and `ledger`
+        // (which needs `laya-store`) remain.
+        for tool in ["ask", "ledger"] {
             let out = handle(tool, &ready(), &no_args(), &test_state());
             assert!(
                 out.is_err(),

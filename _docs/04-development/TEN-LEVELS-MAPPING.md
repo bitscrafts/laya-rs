@@ -105,3 +105,33 @@ The video's thesis is *"Jev AND your agents"*, and it is also our docs 039/040
 conclusion. The cheap lane handles the bounded decisions; the expensive lane does
 the open work; the graph owns every edge in both cases. `laya-rs` never replaces
 the LLM lane — **its uncertainty is the LLM lane's work queue**.
+
+### L7 `should_compact` — measured, and one question had to be rewritten (2026-09-30)
+
+Implemented with the four judgements in ONE call and the thresholds in code, as the level
+specifies. The interesting part is a measurement that changed the implementation.
+
+**The `mid_edit` question agreed with a known-intended answer only 1/6 times.** The original
+phrasing was double-barrelled — *"Is an edit in progress that spans more than one step AND
+would be broken by losing the conversation?"* — and the model answered something else: 3
+false positives, 2 false negatives. Because `mid_edit` is a **veto**, the false positives
+suppressed every genuine compaction request (a measured 500k-token context whose work had
+finished came back `notice`, i.e. never compact) and the false negatives permitted exactly
+the compaction the veto exists to prevent.
+
+Four phrasings were scored against the same six cases with known intended answers:
+
+| phrasing | agreement | false pos | false neg |
+|---|---|---|---|
+| original (two conditions joined) | **1/6** | 3 | 2 |
+| `Is work currently IN PROGRESS and not yet finished?` | **6/6** | 0 | 0 |
+| `Would losing this conversation BREAK an unfinished change?` | **6/6** | 0 | 0 |
+| inverted (`Has the work been FINISHED?`) | 5/6 | 0 | 1 |
+
+Two independent phrasings reaching 6/6 is corroboration; the simple, single, concrete form was
+kept. **Small sample (six cases)** — this is a large unambiguous improvement on 1/6, not a
+calibrated rate, and it is recorded that way.
+
+**The generalisable lesson:** a question is a component and it can be wrong. This one was
+scored, found unusable, and replaced — *before* shipping. A veto built on a coin-flip
+question is worse than no veto, because it silently makes the tool useless.

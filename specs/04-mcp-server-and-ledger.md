@@ -35,6 +35,11 @@ single-writer scheme (blocker B4), and `route` is **not** a tool (finding M6).
   `ask`, never `allow`.
 - F6a. `gate` **cannot allow a near tie** — the same fail-closed rule as an unreachable
   head, applied to a reachable but undecided one. Added 2026-09-30.
+- F6b. **`should_compact` (L7).** The four judgements in ONE call; the token count and the
+  thresholds stay in code. `mid_edit` is a **veto** (a compaction mid-edit discards the working
+  state the edit depends on), and the question that produces it was **measured**: the first
+  phrasing agreed with a known-intended answer 1/6 times and was replaced by one scoring 6/6.
+  A veto on a coin-flip question is worse than no veto. Added 2026-09-30.
 - F7. Per-tool **least-privilege** scopes. **The scope lives in `laya-core`, not
   `laya-mcp`** (corrected 2026-09-30): the pure crate, so the rule deciding a refusal is
   unit-testable without a server, and so a second copy cannot drift. Configured by
