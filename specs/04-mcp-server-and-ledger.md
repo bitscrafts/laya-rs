@@ -40,6 +40,33 @@ single-writer scheme (blocker B4), and `route` is **not** a tool (finding M6).
   state the edit depends on), and the question that produces it was **measured**: the first
   phrasing agreed with a known-intended answer 1/6 times and was replaced by one scoring 6/6.
   A veto on a coin-flip question is worse than no veto. Added 2026-09-30.
+- F6c. **The gate is TWO signals, and `allow` requires both. (Added 2026-09-30.)** Measured:
+  this head cannot classify command danger. `"Is this action safe?"` as a noul scored **6/12**
+  on commands with known answers (`ls -la /tmp` and `rm -rf <dir>` both came back 0.85-0.89);
+  six consequence phrasings *all* had a negative separation, so no threshold could work; a
+  `choice` over declared effects reached **13/18** and still missed `: > file` and `dd if=`.
+  A `safe` noul at 0.89 with `irreversible=false` had produced a real `allow` on an `rm -rf`.
+  Therefore:
+  * the model's verdict alone must never be the control, **and neither must a string list**
+    (the source research records an agent routing around a string block with a heredoc);
+  * `allow` requires the destructive-pattern signal to be **clear AND** the model to reach the
+    high band. A pattern match can never be allowed through, whatever the model says;
+  * the response reports `model_decision`, `destructive_signals` (matched text + reason) and
+    `irreversible`, so a refusal is auditable rather than opaque.
+- F6d. **`Policy::gate` and the `irreversible` flag - a decorative parameter, corrected.**
+  Both `Band::Mid` arms were identical (`if irreversible { Ask } else { Ask }`), so the flag
+  changed nothing, and nothing ever inferred it - it defaulted to `false` and stayed there.
+  The measured `allow` on `rm -rf` came through that hole. The safety decision now comes from
+  the two-signal rule in F6c, and the flag is reported rather than trusted.
+- F6e. **`ask` (L10).** ONE tool where the CALLER writes the questions, over a state composed
+  from a summary + files + a command. The command is judged by the SAME `judge_command` the
+  `gate` tool uses - one gate, never two that could disagree - and is **not executed at all**
+  unless the verdict is `allow`. The response carries answers and reports
+  `content_in_context: false`; the state composition (order: output, then files, then summary;
+  256 KiB cap as a refusal, not a truncation) lives in `laya-core::agentic` where it is pinned
+  offline. `validate_questions` refuses a `choice`/`score` with **no `criteria`** - an earlier
+  version accepted `{"type":"choice","options":[...]}`, which laya does not read and which
+  raised `AttributeError` inside laya: a validator passing a request that could never work.
 - F7. Per-tool **least-privilege** scopes. **The scope lives in `laya-core`, not
   `laya-mcp`** (corrected 2026-09-30): the pure crate, so the rule deciding a refusal is
   unit-testable without a server, and so a second copy cannot drift. Configured by

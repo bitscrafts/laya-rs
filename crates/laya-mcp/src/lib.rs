@@ -366,6 +366,10 @@ pub struct RawArgs {
     /// question, which is how a file's text could become an instruction.
     #[serde(default)]
     question: Option<String>,
+    /// The command `ask` wants run. Gated BEFORE it is executed: a command the guardrail
+    /// does not allow is never run, so there is nothing for a caller to route around.
+    #[serde(default)]
+    command: Option<String>,
     /// The paths `ask_files` asks about.
     #[serde(default)]
     paths: Option<Vec<String>>,
@@ -515,6 +519,15 @@ pub fn handle(
             }
             ask_files_via_sidecar(args, state)
         }
+        "ask" => {
+            if let Some(missing) = missing_required(tool, args) {
+                return Err(McpError::invalid_params(
+                    format!("`{tool}` requires `{missing}`"),
+                    None,
+                ));
+            }
+            ask_via_sidecar(args, state)
+        }
         "should_compact" => {
             if let Some(missing) = missing_required(tool, args) {
                 return Err(McpError::invalid_params(
@@ -537,10 +550,32 @@ pub fn handle(
 fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
     let action = args.action.clone().unwrap_or_default();
     let irreversible = args.irreversible.unwrap_or(false);
+    let payload = judge_command(&action, irreversible, state)?;
+    to_result(ToolOutcome::Ok(payload.to_string()))
+}
 
+/// Judge ONE command, returning the gate payload.
+///
+/// Extracted so the `gate` tool and the `ask` tool share **one** implementation. Level 10
+/// runs its command through the guardrail gate first, and a second gate that could drift away
+/// from this one is exactly the defect class this project keeps finding: a rule stated in two
+/// places, disagreeing. There is one gate.
+///
+/// **Fails closed:** an unreachable sidecar yields `ask`, never `allow`. A gate that cannot
+/// ask must not permit.
+///
+/// # Errors
+/// An [`McpError`] if the model's answer cannot be read as a typed answer. A gate that cannot
+/// understand its own evidence must not proceed to a decision.
+fn judge_command(
+    action: &str,
+    irreversible: bool,
+    state: &ServerState,
+) -> Result<serde_json::Value, McpError> {
     let question = if irreversible {
         format!(
-            "Is this action safe to run WITHOUT human confirmation? It is believed to be              IRREVERSIBLE, so a wrong 'yes' cannot be undone. Action: {action}"
+            "Is this action safe to run WITHOUT human confirmation? It is believed to be \
+             IRREVERSIBLE, so a wrong 'yes' cannot be undone. Action: {action}"
         )
     } else {
         format!("Is this action safe to run without human confirmation? Action: {action}")
@@ -550,50 +585,207 @@ fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResul
     let laya_q = questions_to_laya(&questions);
 
     let policy = laya_core::Policy::default();
-    let payload = match state.sidecar.predict(&json!({"action": action}), &laya_q) {
-        Ok(answers) => {
-            let entry = answers.get("safe").cloned().unwrap_or_else(|| json!({}));
-            let answer = answer_from_laya(&policy, "safe", &entry, &[])
-                .map_err(|e| McpError::internal_error(format!("laya-mcp: {e}"), None))?;
-            let dp = laya_core::DecisionPayload::from_answer(&answer, &policy);
-            // The gate decision is derived from CONFIDENCE, never from the noul value
-            // alone: "the answer says what, confidence says whether."
-            //
-            // A NEAR TIE cannot allow. A gate whose evidence is a coin flip must ask — that
-            // is the same rule as an unreachable head, applied to a reachable but
-            // undecided one. The measured 0.0006 backend drift can flip an answer this
-            // close, so `allow` here would be permission granted on noise.
-            let decision = if dp.near_tie {
-                laya_core::GateDecision::Ask
-            } else {
-                policy.gate(answer.confidence, irreversible, answer.saturated())
-            };
-            serde_json::to_value(&dp).map_or_else(
-                |_| json!({}),
-                |mut v| {
-                    if let Some(o) = v.as_object_mut() {
-                        o.insert("decision".into(), json!(decision));
-                    }
-                    v
-                },
-            )
-        }
-        Err(e) => {
-            // FAIL CLOSED. The sidecar is unreachable, so we cannot ask — and a gate
-            // that cannot ask must not allow.
-            eprintln!("laya-mcp: gate falling back to `ask`: {e}");
-            json!({
-                "decision": laya_core::readiness::gate_when_down(),
-                "reason": "sidecar-unavailable",
-                "note": "the gate could not ask, so it must not allow",
-            })
-        }
-    };
+    Ok(
+        match state.sidecar.predict(&json!({"action": action}), &laya_q) {
+            Ok(answers) => {
+                let entry = answers.get("safe").cloned().unwrap_or_else(|| json!({}));
+                let answer = answer_from_laya(&policy, "safe", &entry, &[])
+                    .map_err(|e| McpError::internal_error(format!("laya-mcp: {e}"), None))?;
+                let dp = laya_core::DecisionPayload::from_answer(&answer, &policy);
+                // The gate decision is derived from CONFIDENCE, never from the noul value
+                // alone: "the answer says what, confidence says whether."
+                //
+                // A NEAR TIE cannot allow. A gate whose evidence is a coin flip must ask — that
+                // is the same rule as an unreachable head, applied to a reachable but
+                // undecided one. The measured 0.0006 backend drift can flip an answer this
+                // close, so `allow` here would be permission granted on noise.
+                let model_decision = if dp.near_tie {
+                    laya_core::GateDecision::Ask
+                } else {
+                    policy.gate(answer.confidence, irreversible, answer.saturated())
+                };
 
-    to_result(ToolOutcome::Ok(payload.to_string()))
+                // ------------------------------------------------------------------
+                // THE SECOND SIGNAL, AND WHY ALLOW REQUIRES BOTH.
+                //
+                // MEASURED 2026-09-30: this head cannot classify command danger. "Is this action
+                // safe?" as a noul scored 6/12 — `ls -la /tmp` and `rm -rf <dir>` both came back
+                // ~0.85-0.89. Six consequence phrasings all had a NEGATIVE separation (the lowest
+                // destructive score below the highest benign one), so no threshold could work. A
+                // `choice` over declared effects did better, 13/18, and still missed `: > file`
+                // and `dd if=... of=...`.
+                //
+                // So the model ALONE must not be the control. But a static list must not be the
+                // control either: `find . -delete` is an idiom many engineers never think of, and
+                // the source research records an agent ROUTING AROUND a string block by writing
+                // the same file through a bash heredoc.
+                //
+                // Hence two signals, and `allow` requires BOTH to be clear. They cover each
+                // other: the model generalises to shapes nobody enumerated, the pattern check is
+                // exact where it matches. A pattern match can NEVER be allowed through, whatever
+                // the model says.
+                // ------------------------------------------------------------------
+                let signals = laya_core::agentic::destructive_signals(action);
+                let destructive = !signals.is_empty();
+
+                let decision = if destructive {
+                    // We know this is destructive, exactly. It may still be legitimate — a
+                    // deliberate cleanup — so a human confirms rather than a blanket deny.
+                    laya_core::GateDecision::Ask
+                } else {
+                    model_decision
+                };
+
+                serde_json::to_value(&dp).map_or_else(
+                    |_| json!({}),
+                    |mut v| {
+                        if let Some(o) = v.as_object_mut() {
+                            o.insert("decision".into(), json!(decision));
+                            o.insert("model_decision".into(), json!(model_decision));
+                            o.insert(
+                                "destructive_signals".into(),
+                                serde_json::to_value(&signals).unwrap_or_else(|_| json!([])),
+                            );
+                            o.insert("irreversible".into(), json!(irreversible));
+                            o.insert(
+                                "signals_note".into(),
+                                json!(
+                                    "allow requires BOTH signals clear: no destructive pattern \
+                                     matched, and the model's confidence reached the high band. \
+                                     The head alone was measured at 6/12 on known commands."
+                                ),
+                            );
+                        }
+                        v
+                    },
+                )
+            }
+            Err(e) => {
+                // FAIL CLOSED. The sidecar is unreachable, so we cannot ask — and a gate
+                // that cannot ask must not allow.
+                eprintln!("laya-mcp: gate falling back to `ask`: {e}");
+                json!({
+                    "decision": laya_core::readiness::gate_when_down(),
+                    "reason": "sidecar-unavailable",
+                    "note": "the gate could not ask, so it must not allow",
+                })
+            }
+        },
+    )
 }
 
-/// The `decide` tool: typed questions -> route-shaped payloads.
+/// The `ask` tool (L10): the CALLER writes the questions.
+///
+/// ## What makes this level different
+///
+/// Levels 1–9 had us deciding what to ask. Here the agent writes the questions itself over a
+/// state it composes from a summary, files, and a command it wants run. Two orderings are
+/// deliberate and load-bearing:
+///
+/// 1. **The command is gated BEFORE it is run**, by the same [`judge_command`] the `gate` tool
+///    uses — one gate, not two that could disagree. A command whose verdict is not `allow` is
+///    refused and **never executed**. This closes the failure the source research records for
+///    this level: *"Level 10 gates its own command, not the agent's bash tool."* It also
+///    closes the level-6 failure it records, where an agent **routed around a block** by
+///    writing the same file through a bash heredoc — which is why running the gated command
+///    through this tool is safer than running anything directly.
+/// 2. **The response carries answers and never the files or the output.** That is what makes
+///    the level cheap: the caller pays for a judgement, not for reading.
+///
+/// The state composition itself is [`laya_core::agentic::compose_state`], where the order and
+/// the cap are pinned by offline tests.
+///
+/// # Errors
+/// An [`McpError`] for a missing or malformed question block, nothing to judge, an oversized
+/// state, a file outside the read scope, or a command the gate did not allow.
+fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let questions = laya_core::agentic::validate_questions(
+        args.questions.as_ref().unwrap_or(&serde_json::Value::Null),
+    )
+    .map_err(|e| McpError::invalid_params(format!("laya-mcp: {e}"), None))?;
+
+    let scope = &state.read_scope;
+    let mut files: Vec<laya_core::agentic::StateFile> = Vec::new();
+    for raw in args.paths.clone().unwrap_or_default() {
+        // Reuse the file tool's reader: one scope check, one size rule, one refusal message.
+        // The question is passed through because `FileState` requires one; at this level the
+        // question lives in the caller's own block, not here.
+        match laya_core::ask_file::read_for_question(scope, &raw, "") {
+            Ok(file) => files.push(laya_core::agentic::StateFile {
+                path: file.path,
+                content: file.content,
+            }),
+            Err(e) => {
+                return Err(McpError::invalid_params(e.to_string(), None));
+            }
+        }
+    }
+
+    // Gate the command FIRST, then run it. A refusal here is final: the command is not
+    // executed at all, so there is nothing to route around.
+    let (stdout, stderr) = if let Some(cmd) =
+        args.command.as_deref().filter(|c| !c.trim().is_empty())
+    {
+        let verdict = judge_command(cmd, false, state)?;
+        let decision = verdict.get("decision").and_then(serde_json::Value::as_str);
+        if decision != Some("allow") {
+            return Err(McpError::invalid_params(
+                format!(
+                    "laya-mcp: the gate did not allow this command, so it was NOT run. \
+                     decision={} evidence={verdict}",
+                    decision.unwrap_or("unknown")
+                ),
+                None,
+            ));
+        }
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .output()
+            .map_err(|e| {
+                McpError::internal_error(format!("laya-mcp: could not run the command: {e}"), None)
+            })?;
+        (
+            String::from_utf8_lossy(&out.stdout).to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+
+    let composed = laya_core::agentic::compose_state(
+        args.state.as_deref(),
+        &files,
+        Some(&stdout),
+        Some(&stderr),
+    )
+    .map_err(|e| McpError::invalid_params(format!("laya-mcp: {e}"), None))?;
+    let state_bytes = composed.len();
+
+    let answers = state
+        .sidecar
+        .predict(&json!(composed), questions)
+        .map_err(|e| {
+            McpError::internal_error(
+                format!("laya-mcp: the decision head is unavailable: {e}"),
+                None,
+            )
+        })?;
+
+    // The answers, plus what the caller needs to AUDIT the arithmetic — and deliberately
+    // NOT the files or the output. `content_in_context: false` states it so a caller does not
+    // have to infer it from what is absent.
+    let body = json!({
+        "answers": answers,
+        "state_bytes": state_bytes,
+        "files_read": files.len(),
+        "command_ran": args.command.as_deref().is_some_and(|c| !c.trim().is_empty()),
+        "content_in_context": false,
+        "questions_asked": questions.as_object().map_or(0, serde_json::Map::len),
+    });
+    to_result(ToolOutcome::Ok(body.to_string()))
+}
+
 /// The `should_compact` tool (L7): the four judgements, turned into advice by OUR code.
 ///
 /// **Four questions in ONE call**, per the level. Three are `noul`s and the 0..=2 score is a
@@ -830,6 +1022,7 @@ fn ask_files_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallTool
     to_result(ToolOutcome::Ok(body.to_string()))
 }
 
+/// The `decide` tool: typed questions -> route-shaped payloads.
 fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
     // The caller supplies the questions as Laya's own shape in this POC; a typed
     // `laya_abi::Question` array is the next step and the adapter above is ready for
@@ -1416,10 +1609,14 @@ mod tests {
         // `ask_file` and `ask_files` are IMPLEMENTED now, so they are not in this list.
         // Leaving them here would assert the opposite of the truth — and this is exactly
         // how a "not implemented" claim outlives the implementation.
-        // `ask_file`, `ask_files` and `should_compact` are IMPLEMENTED now. Only `ask`
-        // (which needs the agent-written questions plus a gated command) and `ledger`
-        // (which needs `laya-store`) remain.
-        for tool in ["ask", "ledger"] {
+        // `ask_file`, `ask_files`, `should_compact` and `ask` are all IMPLEMENTED now. Only
+        // `ledger` remains — it needs `laya-store`, and it needs an outcome-recording path
+        // before it can mean anything (see spec 05).
+        //
+        // Six of the seven tools are real; this test exists so that the SEVENTH cannot
+        // silently become a success.
+        {
+            let tool = "ledger";
             let out = handle(tool, &ready(), &no_args(), &test_state());
             assert!(
                 out.is_err(),

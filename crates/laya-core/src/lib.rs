@@ -21,6 +21,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod agentic;
 pub mod ask_file;
 pub mod ask_files;
 pub mod compact;
