@@ -3,7 +3,8 @@
 **Status**: the *contract* is IMPLEMENTED and tested; the *end-to-end run* is not built yet
 (see "What is missing" at the end — stated, not implied).
 
-**Read `specs/02-route-payload.md` for the field-by-field contract.** This document answers the
+**See [`GRAPH-SPEC.md`](GRAPH-SPEC.md) for our flow format and the flow → graph
+translation.** Read `specs/02-route-payload.md` for the field-by-field contract. This document answers the
 wider question: *what exactly is the seam, and what does this project have against it?*
 
 ---

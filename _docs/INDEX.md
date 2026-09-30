@@ -30,6 +30,7 @@ in exactly one place; this index points at it, never restates it.
 - [Guides](02-guides/README.md) — How to build, gate and call laya-rs.
 
 ### 03-reference
+- [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md) — A SUGGESTED (not decided) format for flows — nodes, kinds, composition — and the four-stage translation to a graph, with the invariants, the renderer's round-trip test, and a list of the weakest points to attack first.
 - [Reference](03-reference/README.md) — Technical reference: the contract and the wire shapes.
 
 ### 04-development

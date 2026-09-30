@@ -11,6 +11,7 @@ reading order.
 - [Guides](02-guides/README.md)
 
 ## 03-reference
+- [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md)
 - [Reference](03-reference/README.md)
 
 ## 04-development

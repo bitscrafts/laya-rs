@@ -1,0 +1,336 @@
+# Suggested graph specification, and how a flow becomes a graph
+
+**Status: SUGGESTED — a proposal for discussion, not a decided format.** Nothing here is
+implemented, and nothing here is fixed. It is written to be argued with: every field and
+rule below is a starting position, and the disagreements are more useful than the draft.
+Where a choice has a reason, the reason is given so it can be attacked on its merits. The piece it *consumes* — the decision payload — **is**
+implemented and tested; see [`GRAPH-SEAM.md`](GRAPH-SEAM.md) for that contract and for why a
+band must travel as a field rather than be computed.
+
+Two parts:
+
+* **Part 1 — the flow document.** What a person writes.
+* **Part 2 — the translation.** How a flow becomes a graph, mechanically and checkably.
+
+The two are separate on purpose: the flow document is the *authoring surface* and may be
+readable; the graph is the *execution form* and is deliberately dumb. Keeping them distinct is
+what lets us change one without re-verifying the other.
+
+---
+
+## Part 1 — the flow document (suggested)
+
+JSON, versioned. Text is canonical and reviewable; the store is a cache of it (see the
+research write-up §2.3 for why the renderer must exist before the store).
+
+```json
+{
+  "flow": "triage",
+  "version": 1,
+  "description": "Route an incoming issue, then act on the route.",
+
+  "inputs": ["issue"],
+
+  "nodes": [
+    {
+      "id": "classify",
+      "kind": "decide",
+      "question": "Which team owns this issue?",
+      "options": ["billing", "auth"],
+      "prompt": "$.inputs.issue",
+      "ports": {
+        "billing": "handle_billing",
+        "auth":    "handle_auth",
+        "_":       "human"
+      }
+    },
+    {
+      "id": "handle_billing",
+      "kind": "shell",
+      "run": "scripts/billing.sh \"{{classify.label}}\""
+    },
+    {
+      "id": "handle_auth",
+      "kind": "shell",
+      "run": "scripts/auth.sh \"{{classify.label}}\""
+    },
+    { "id": "human", "kind": "shell", "run": "scripts/escalate.sh" }
+  ]
+}
+```
+
+### Suggested node kinds
+
+| kind | what it does | writes files? |
+|---|---|---|
+| `shell` | runs a command; exit code is the result | declared, not assumed |
+| `mcp` | calls an MCP tool (our own `laya-mcp`, or any server the caller names) | no |
+| `agent` | **spawns a process** and speaks its protocol — the same shape as `shell`, so it is adoptable rather than a dependency | declared |
+| `decide` | asks the head a question and **routes on the answer** (Part 2) | no |
+| `quorum` | passes when N of M named predecessors passed | no |
+| `subflow` | runs another flow as part of this one (expanded at load — see below) | inherits |
+
+`decide` is the only kind that is ours alone, and it is the one thing a graph language cannot
+express for itself: **it needs a predicate over a structured value, and member access plus
+exact equality is not one.**
+
+### Suggested fields on every node
+
+| field | meaning | default |
+|---|---|---|
+| `id` | unique within the flow (and within the expansion) | required |
+| `kind` | one of the table above | required |
+| `depends_on` | node ids that must finish first | usually **derived** from ports/edges — write it only for nodes with no port parent |
+| `timeout` | seconds | inherited from the flow |
+| `retry` | `{attempts, backoff_ms}` | none |
+| `allow_failure` | a failure here does not fail the run | false |
+| `on_fail` | node(s) to run if this one fails | none |
+| `writes` | **whether this node edits a repository** — this is the worktree switch | false |
+| `with` | arguments, for `subflow` | none |
+
+`writes` is not decoration. It decides isolation: a `writes: true` node runs in its own
+worktree on its own branch, because two nodes editing one tree is a race no bookkeeping can
+fix. Read-only nodes fan out freely.
+
+### The decision node, in full (suggested)
+
+```json
+{
+  "id": "assess",
+  "kind": "decide",
+  "question": "Is this change safe to apply?",
+  "options": ["yes", "no"],
+  "prompt": "$.inputs.diff",
+  "on": "label",
+  "ports": { "yes": "apply", "no": "review", "_": "review" },
+
+  "escalate_on_near_tie": true,
+  "near_tie_port": "review"
+}
+```
+
+| field | meaning |
+|---|---|
+| `on` | what the routing matches: **`label`** (what the head answered) or **`band`** (`high`/`mid`/`low`, from *our* thresholds). Default `label` |
+| `ports` | answer → target node. `_` is the **fallback** and must be present when the port set does not cover every answer |
+| `escalate_on_near_tie` | when the top two probabilities are within the policy margin, send it to `near_tie_port` **instead**. **Default false**, so a routing change is always visible in a diff |
+| `near_tie_port` | where a near tie goes; required if `escalate_on_near_tie` is true |
+
+**Routing on `band` is the one to prefer for anything consequential**, because the band is
+computed by *our* thresholds from the head's confidence. An uncertain answer then escalates
+along an edge that was drawn at author time — no graph change, no new node, and tuning the
+threshold changes a number in our config, never the flow.
+
+### Composition (suggested)
+
+```json
+{
+  "id": "verify_tests",
+  "kind": "subflow",
+  "flow": "tdd-check",
+  "with": { "suite": "unit" },
+  "content_hash": "sha256:…"
+}
+```
+
+Three rules, each of which exists because the alternative is a bug:
+
+* **Expanded at load, not nested at run time.** The subflow's nodes join the parent's ready
+  queue, so its parallelism is fully available. Nesting a child as one schedulable unit would
+  serialise the whole of it behind a single node.
+* **Arguments are explicit** (`with`), so a flow is parameterised rather than copied. A child
+  that reads the parent's variables implicitly cannot be reused.
+* **The child is hashed and the hash recorded here.** A subflow edited in place silently
+  changes the parent's behaviour; the hash makes that visible, and a mismatch can be refused.
+
+---
+
+## Part 2 — the suggested translation: flow → graph
+
+Four stages. Each is a pure function where it can be, so each is separately testable.
+
+```
+ flow document
+      │
+   1. PARSE + VALIDATE ──────── refuse: duplicate ids, dangling refs,
+      │                                 bad retry, unknown kind, cycles
+      ▼
+   2. EXPAND SUBFLOWS ───────── substitute children, prefix ids, bind `with`,
+      │                         verify content_hash, reject expansion cycles
+      ▼
+   3. LOWER DECISIONS ───────── one `decide` node becomes:
+      │                           decide  (calls the head, produces payload)
+      │                           route   (on = "$.payload.<field>", rules)
+      │                           edges   (one per port)
+      ▼
+   4. BUILD THE GRAPH ───────── topological order + ready queue + write class
+      │
+      ▼
+ execution form (never hand-authored)
+```
+
+### Stage 1 — parse and validate
+
+Refusals, all with a named error, none of them a warning:
+
+| refused | why it must be a refusal |
+|---|---|
+| duplicate node id | ids are how edges, `with` and `depends_on` resolve; a duplicate silently retargets an edge |
+| `depends_on` naming a node that does not exist | a dangling edge is a node that never runs |
+| `decide` with no fallback while `ports` is incomplete | the head can answer something the ports do not cover; without `_` the run has nowhere to go |
+| unknown `kind` | a typo would otherwise become a no-op node that "succeeds" |
+| `retry.attempts` without `backoff_ms` (or the reverse) | half a retry policy is a retry storm |
+| `escalate_on_near_tie` without `near_tie_port` | the escalation has no destination |
+| a cycle | infinite loop; see Stage 2 |
+
+### Stage 2 — expand subflows
+
+Recursive substitution, and the recursion is where the interesting failure lives:
+
+* **Prefix every child id** (`verify_tests/compile`) so two uses of the same subflow in one
+  flow cannot collide, and so an error message names the real path.
+* **Bind `with`, and refuse an unbound argument** — a child reading a variable nobody passed is
+  a hole, and it should fail at load rather than during a run.
+* **Verify `content_hash`** and refuse on mismatch, so a changed child cannot move a parent
+  silently.
+* **Reject expansion cycles.** A subflow that includes itself, directly or through a chain, is
+  infinite expansion. It must be a **named error, not a hang** — this is the one failure here
+  that cannot be noticed from a stack trace, because there is nothing to interrupt.
+
+### Stage 3 — lower decisions
+
+This is the stage that makes the flow language usable and it is deliberately small: **a
+`decide` node becomes two nodes and a set of edges.**
+
+```json
+   { "id": "classify", "kind": "decide",
+     "question": "…", "options": ["billing","auth"],
+     "ports": { "billing":"handle_billing", "auth":"handle_auth", "_":"human" } }
+```
+
+becomes
+
+```json
+   { "id": "classify",          "kind": "mcp",
+     "tool": "decide",
+     "arguments": { "question": "…", "options": ["billing","auth"], "prompt": "…" } }
+
+   { "id": "classify/route",    "kind": "route",
+     "on": "$.payload.label",                     // member access only
+     "rules": [ { "eq": "billing", "port": "billing" },
+                { "eq": "auth",    "port": "auth"    },
+                { "port": "human" } ] }           // no `eq` == the fallback, LAST
+
+   edges:  classify -> classify/route
+           classify/route:billing -> handle_billing
+           classify/route:auth    -> handle_auth
+           classify/route:human   -> human
+```
+
+The three properties this translation **depends on**, and therefore asserts about itself:
+
+1. **`on` is member access only** — `$.payload.label` or `$.payload.band`. No arithmetic, no
+   ranges. This is why the band is a field.
+2. **`eq` is exact equality**, so the payload carries **strings**, never a number.
+3. **The first matching rule wins**, so the fallback is emitted **last**. Get that order wrong
+   and every answer takes the fallback, which looks like a working flow that always escalates.
+
+`escalate_on_near_tie` lowers into a **rule before the others**: when `near_tie` is true, the
+answer goes to `near_tie_port` regardless of what the label said. It is written as a leading
+rule on the band rather than as a separate node, so no edge is added that a reader cannot see.
+
+### Stage 4 — build the graph
+
+The graph is `(nodes, edges, write_class)`. The execution contract:
+
+* **topological order** from the derived edges; ties broken deterministically (by id) so two
+  runs of the same flow schedule identically when nothing depends on the choice;
+* **ready queue**: every node whose predecessors are satisfied is runnable; run them
+  concurrently up to a **declared, bounded** limit;
+* **write class** per node (`writes`) decides isolation — the worktree switch;
+* **failure policy**: **fail fast and cancel siblings**, with `allow_failure` and `quorum` as
+  the explicit opt-outs. A partial result that looks complete is the failure mode to design
+  against, and draining spends real work on a branch already abandoned.
+
+---
+
+## Part 3 — the render, and its round-trip test
+
+The execution form is machine-shaped, and a machine-shaped thing that nobody can read is how a
+flow library becomes unauditable. So the renderer is **mandatory, not optional**:
+
+```mermaid
+graph TD
+  classify[decide: Which team owns this issue?]
+  classify -->|billing| handle_billing
+  classify -->|auth| handle_auth
+  classify -->|fallback| human
+  handle_billing --> done
+```
+
+Rules that make it trustworthy rather than decorative:
+
+* **Mermaid is a review aid, not a serialisation format.** It cannot round-trip every field,
+  so the render is **provably lossy and labelled as such** — it names what it dropped rather
+  than dropping it silently.
+* **The test is render → re-parse → compare.** A renderer that loses an edge is worse than no
+  renderer, because it makes a broken flow look reviewed. Only a round-trip comparison catches
+  that, and it must compare the *derived* edge set, not the text.
+
+---
+
+## Part 4 — the invariants the format is meant to preserve
+
+These are the properties the format exists to preserve. Each is stated so it can be tested.
+
+| invariant | consequence |
+|---|---|
+| **the graph owns every edge** | every port is drawn at author time; the head selects among them and can never invent one |
+| **the payload carries strings, never thresholds** | the graph compares; our code computes |
+| **the fallback is always last and always present when needed** | the run has somewhere to go whatever the head answers |
+| **one writer per worktree** | a `writes` node gets its own branch; read-only nodes share freely |
+| **a record names `run_id` and `node_id`** | append order is not execution order once nodes run in parallel |
+| **flow text is canonical; the store is a cache with a source hash** | a drift between them is refused, not reconciled |
+| **nothing outside this repository is required** | the format is ours; a flow runs with our crates alone |
+
+---
+
+## What is missing (stated plainly)
+
+**All of it.** No parser, no validator, no expander, no lowering, no executor, no renderer.
+`specs/` runs 01–06 and contains no graph-execution spec; nothing in `crates/` can execute a
+graph today.
+
+What exists on our side of the seam is the **decision payload** — `label`, `band`, `margin`,
+`near_tie`, `confidence`, `saturated` — implemented, tested, and emitted by `laya-mcp`. So the
+lowering's target (`$.payload.label`, `$.payload.band`) is real; everything that would consume
+it is not.
+
+The order that follows from the dependencies: **this format and its renderer**, then the
+executor, then the pool it needs to make a fan-out real.
+
+## What this document is NOT proposing
+
+* **Not a spec.** No spec is being written; this is a proposal to react to. It becomes a spec
+  only when someone decides it should, and the discussion has not got there.
+* **Not an implementation plan.** The stages are described so the translation is checkable, not
+  because the work is scheduled.
+* **Not compatible-by-design with anything.** No other format is being matched, extended or
+  copied, deliberately. If a field looks familiar, it is because the problem is, not because it
+  was borrowed.
+* **Not complete.** The open questions in the research write-up (fan-out width, how much of the
+  decision field set belongs in the format, whether `calibrate` recommends or changes) are
+  answered nowhere here, and a couple of them change the format when they are answered.
+
+## Where to attack this first
+
+In descending order of how much a change would ripple:
+
+1. **`decide` as a node kind.** It is the whole reason the format is ours rather than anyone's —
+   but if a `mcp` node plus a thin convention would do, the format loses a kind.
+2. **`ports` keyed by answer.** Convenient to write and read; it conflates *the answer* with *the
+   destination*, which may be wrong once a flow needs two nodes to react to one answer.
+3. **`writes: true` as a per-node boolean.** It is a simplification — a node might write only
+   inside a declared subtree, and then the worktree boundary is wrong.
+4. **Expanding subflows at load.** Buys parallelism, costs a graph that is bigger than what was
+   written, and error messages that name prefixed ids a reader never typed.

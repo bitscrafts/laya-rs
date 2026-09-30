@@ -18,6 +18,12 @@ DOCS = {
     ),
     "01-overview/README.md#the-three-properties": ("", ""),
     "02-guides/README.md": ("Guides", "How to build, gate and call laya-rs."),
+    "03-reference/GRAPH-SPEC.md": (
+        "Suggested graph specification, and how a flow becomes a graph",
+        "A SUGGESTED (not decided) format for flows — nodes, kinds, composition — and the "
+        "four-stage translation to a graph, with the invariants, the renderer's round-trip "
+        "test, and a list of the weakest points to attack first."
+    ),
     "03-reference/README.md": ("Reference", "Technical reference: the contract and the wire shapes."),
     "04-development/DESIGN-AMENDMENTS-2026-09-29.md": (
         "Design amendments — what the adversarial review changed",
