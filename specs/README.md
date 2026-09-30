@@ -29,9 +29,10 @@ including the doc-citation check and the live corpus parity check (§6c).
 ## What is left
 
 **Nothing outstanding in specs 01–06.** (`EXIT CRITERIA: pass=22 fail=0 prose=2`, and no
-unchecked box remains anywhere in `specs/`.) What comes next is **spec 07**, which is now
-written and split into four parts — the generic graph executor, absorbing a DAG runner as our
-own capability rather than a gap in P4.
+unchecked box remains anywhere in `specs/` for those six — the runner now also reports
+`pending=62`, which is spec 07's criteria, counted and named rather than skipped.) What comes
+next is **spec 07**, written and split into four parts — the generic graph executor, absorbing a
+DAG runner as our own capability rather than a gap in P4.
 Everything else is implemented and proven:
 
 - P1 is complete. The MCP server exposes all seven tools, the redb ledger is written by

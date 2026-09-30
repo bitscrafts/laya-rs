@@ -1,9 +1,12 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 (6) · **Status**: GREEN — **SPEC 03 IS COMPLETE, every spec 01–06 done.**
-`EXIT CRITERIA: pass=22 fail=0 prose=2` — **no unchecked box remains anywhere in `specs/`.**
+**Date**: 2026-09-30 (7) · **Status**: GREEN — **SPEC 03 IS COMPLETE, every spec 01–06 done.**
+**Spec 07 is written and split into four parts** (see Next); its 62 exit criteria are reported
+`pending` — counted and named by the criteria runner, never silently skipped.
+`EXIT CRITERIA: pass=22 fail=0 prose=2 pending=62` — **no unchecked box remains anywhere in
+`specs/` for specs 01–06.**
 `scripts/verify-all.sh` PASS · **345 tests** · clippy 0 workspace-wide · fmt clean ·
-61 doc links 0 broken · doc-honesty 27 docs every citation resolves.
+61 doc links 0 broken · doc-honesty 32 docs every citation resolves.
 
 The live corpus is a **gate step**, not a manual check: `verify-all.sh` §6c runs
 `scripts/live-corpus-parity.py`, so `LABEL AGREEMENT: 16/16 = 1.0000` is reported on every gate run
