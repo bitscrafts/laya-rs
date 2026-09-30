@@ -6,10 +6,30 @@ Replace the Python decision path with a pure-Rust implementation of Laya's
 and no torch** — which also removes the `tokenizers`/`transformers` version
 conflict that already bit us once.
 
-**Status: IN PROGRESS (2026-09-30).** The offline-testable foundation is landed (the
-safetensors reader against the real 36-tensor file, the config parser, and the math primitive
-whose oracle is available). The tokenizer and the full forward pass are NOT written, and this
-spec says so rather than implying otherwise.
+**Status: IN PROGRESS (2026-09-30, updated).** The offline-testable path is now **proven**:
+
+* the **safetensors reader** against the real 36-tensor file (36 tensors, every shape);
+* the **math primitives** with per-branch MEASURED accuracy (`erf` was wrong three times);
+* the **forward pass**, reproduced against **PyTorch itself** — a differential fixture generated
+  by running the real `nn.TransformerEncoderLayer`, matching to a **worst logit difference of
+  4.05e-6** against a margin scale of 1e-3;
+* the **tokenizer and `build_sequence`** — in progress (delegated), with the differential fixture
+  as the acceptance test.
+
+**What the port learned that this spec did not say**, and which is now recorded because it is the
+kind of thing that is silently wrong rather than loudly wrong:
+
+* **The encoder block's activation is `ReLU`, not `GELU`.** `nn.TransformerEncoderLayer` is
+  constructed without an `activation` argument and torch's default is `F.relu`, while `scorer`
+  and `act_head` carry their own explicit `nn.GELU()`. Two activations in one model.
+* **`norm_first=True`** — both `LayerNorm`s precede their sublayer.
+* The fused `in_proj` row is `[q_0..q_d, k..., v...]`, so chunking by `head_dim` yields
+  `3*n_heads` pieces and head `h` of `k` sits at `n_heads + h`.
+* `type_emb` is added **before** the blocks; the attention is bidirectional (no causal mask);
+  and the act features come from the **detached** softmax.
+
+**Not yet done:** wiring the tokenizer to a live backbone call (P4's remaining integration), and
+the LIVE corpus criterion below.
 
 > ### MEASURED FACTS THAT CORRECT THIS SPEC (2026-09-30)
 >
