@@ -470,6 +470,62 @@ nodes fails, does the scheduler cancel the siblings or let them finish? Recommen
 explicit opt-outs — because a partial result that looks complete is the failure mode this
 project keeps finding, and draining spends real work on a branch already abandoned.
 
+### Worktrees as a mitigation for parallel execution — they solve a REAL case, but not this one
+
+Tested, not assumed (git 2.47.3, this repo):
+
+```
+git worktree add <dir> master                    -> fatal: 'master' is already used by
+                                                    worktree at '/projects/laya-rs'
+git worktree add -b wt/x <dir> master            -> works; main tree stays 0 dirty
+git worktree add <dir2> wt/x                     -> fatal: 'wt/x' is already used by
+                                                    worktree at '<dir>'
+```
+
+**A branch can be checked out in exactly ONE worktree.** So worktrees give **isolation per
+writer**, never **shared concurrent writes** — and the deeper reason is not git's
+bookkeeping but that two agents editing one file tree is a race whatever the bookkeeping
+says.
+
+**What they do not mitigate (the correction).** The fan-out that parallel execution
+actually needs to speed up is the **Laya calls**, and a worktree does nothing for them:
+Laya calls are in-process reads that touch no repository, so a worktree adds isolation and
+**zero** concurrency. The bottleneck is the **strictly serial sidecar**, and worktrees
+multiply write-targets, not compute. **The pool is still what makes a fan-out real.**
+
+**What they DO solve, and it is a real case.** The moment flows contain **repo-editing**
+nodes — an SDD+TDD flow, a build-and-fix loop, anything that writes code — parallel
+execution has a genuine shared-resource problem, and worktrees are the right answer: one
+worktree on a **fresh branch** per writing node, in a **sibling** directory, with the
+**scheduler as the only committer** that reviews and merges branch diffs in order.
+
+**And that yields a design axis this document did not have:** the executor must classify
+nodes by **whether they write**:
+
+| node kind | parallelisable how | isolation needed |
+|---|---|---|
+| compute / decision (a Laya call, an MCP call) | straight fan-out, bounded | none — read-only |
+| **repo-editing** (an agent that edits files) | fan-out **per worktree** | **a worktree on its own branch** |
+| shell with side effects on shared state | serialise, or declare the resource | explicit, per-node |
+
+Worktrees are the mechanism for **the middle row only**, and they make that row's
+parallelism safe rather than making parallelism fast.
+
+**Traps, carried over from field experience and worth re-stating here:**
+- the worktree must be a **sibling**, never nested inside the repo. A path-sandboxed agent
+  whose cwd is the worktree resolves the main repo as "outside the working directory",
+  every call is rejected, it writes nothing, and the gate then **passes on an unchanged
+  tree** — a false green.
+- **merge-back is a new failure mode.** Parallel editing nodes produce divergent branches
+  and therefore conflicts, and the conflict is a *semantic* problem the scheduler cannot
+  resolve on its own. This is the honest cost of parallel writers.
+- a worktree requires the work to be **in a git repo**. Non-repo flows cannot use it.
+
+So the answer to "could parallel execution be mitigated with worktrees?" is: **for
+repo-editing nodes, yes, and they are the right mechanism — but they are not the
+mitigation the fan-out needs, because the fan-out's bottleneck is the serial sidecar, not
+shared files.**
+
 ### Composition: subgraphs that expand, with arguments and a hash
 
 Composability means a flow can use another flow as a step. Three decisions:
