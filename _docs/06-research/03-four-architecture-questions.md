@@ -398,8 +398,28 @@ project a **runtime dependency**, which this project forbids; it also proposed a
 argument for (a) — "the executor is already tested" — was arguing for convenience at the
 cost of the project's defining constraint, which is the wrong trade.
 
-**Recommendation: absorb the features.** The graph-runner capability is built **in our
-own crates**, depending on nothing outside:
+**The feature, named precisely: execute ANY generic DAG.** That is the absorbed
+capability, and it is the core one — not a scheduler we happen to need for convenience.
+Everything else is a detail of it.
+
+**And the consequence is the design principle: an SDD+TDD flow is not a feature of the
+engine, it is a GRAPH the engine can run.** The engine must not know what "spec" or
+"test" means. An SDD+TDD pipeline, a build-and-verify flow, a research fan-out, a
+migration — all are the same thing to the executor: nodes, edges, ports, and calls. That
+is exactly the flexibility the original question asked for ("all the flows could be
+represented in a graph"), and it is only achievable if the engine stays generic. The
+moment SDD is built in, the engine has a use case baked into it and the flexibility is
+gone.
+
+So the absorbed capability is deliberately **narrow**: a generic graph executor.
+**SDD+TDD ships as a flow in the starter library** (§2), written in our spec, compiled
+by our compiler, rendered by our mermaid renderer — expressible, not special-cased.
+
+Why this sits naturally with us: **Laya is made for exactly this role.** The graph owns
+every edge; Laya supplies the *values* the edges are chosen on. An engine with no
+predicate gets one by calling us, and it never needs to know what the question meant.
+
+The pieces, all **in our own crates**, depending on nothing outside:
 
 | feature to absorb | why we need it | our own version |
 |---|---|---|
@@ -416,8 +436,9 @@ one thing the other side structurally cannot express, which is why it is ours al
 
 **Deliberately NOT absorbed:** A2A, the SDD/spec driver, the web UI, the queue daemon,
 workflow templating, spec front-matter parsing, and the `pi` backend integration. Those
-serve that project's use cases, not ours, and absorbing them would be building a system
-we do not need rather than the capability we do.
+serve that project's use cases, not ours — and note the shape of the refusal: the SDD
+*driver* is not absorbed while an SDD *flow* is expressible. That is the generic-engine
+principle stated as a decision, rather than as an aspiration.
 
 A useful side effect: **redb is already a dependency for the ledger**, so persisting runs
 and node records reuses the store we already own instead of adding a new one.
