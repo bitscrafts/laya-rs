@@ -312,15 +312,24 @@ The pieces, all **in our own crates**, depending on nothing outside:
 |---|---|
 | graph model (nodes, edges, ports) | our spec, JSON |
 | topological order + ready queue + run loop | ours |
-| node executors: shell, **MCP call** | ours, calling our own `laya-mcp` |
+| node executors: shell, **MCP call**, **agent** | ours — the agent node **spawns a process** and speaks its protocol, which is adoptable rather than a library dependency |
 | **run persistence + resume** | ours, in **redb — already a dependency for the ledger** |
 | retries, timeouts, budgets | ours |
 | mermaid renderer | ours (§2.3) |
 | **decision nodes (the band predicate)** | ours — the differentiator |
 
 **Deliberately NOT absorbed:** A2A, the SDD *driver*, the web UI, the queue daemon,
-workflow templating, spec front-matter parsing, the external agent backend. Those serve
-that project's use cases, not ours.
+workflow templating, spec front-matter parsing. Those serve that project's use cases, not
+ours.
+
+**One entry was removed from this refusal list after checking it, and the correction
+matters:** a first draft listed "the external agent backend" as *not* absorbed, which
+contradicted §3.1 — an SDD+TDD flow needs an **agent node**, so refusing it would leave the
+flow unexpressible. Inspecting how the backend is actually reached shows it is an **RPC
+transport to a spawned process**, not an in-process library integration. So an agent node is
+**ours**, implemented the same way a shell node is: spawn the configured CLI and speak its
+protocol. Adoptable without a dependency — which is the distinction the refusal list is
+supposed to make.
 
 Note the shape of that refusal, because it *is* the principle: **the SDD driver is not
 absorbed while an SDD flow is expressible.**
