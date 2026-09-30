@@ -167,23 +167,46 @@ nothing outside its own tests.** Every production site takes `Policy::default()`
 dependency is in the manifest for a parser no binary invokes. This is the project's
 recurring shape: *a documented capability no caller can reach.*
 
-### 2.2 redb does not make loading faster
+### 2.2 Nothing in the storage layer can make loading faster — because storage is not the cost
 
-Three different things get conflated:
+Measured, and the measurement changes the question. Three separate things get called "the
+load":
 
-| what is loaded | size | belongs in | does redb help? |
-|---|---|---|---|
-| the head's **weights** | 106 MB, 26.5 M params, ~24 s | a file (safetensors) | **no** — redb is a B-tree store, not a tensor loader; floats in it would be *slower* |
-| **policy / thresholds** | a few KB | text | no measurable gain at this size |
-| **measured values** (ECE, samples) | a few rows | redb | not a load win — a *correctness* win |
+| what is loaded | size | what it actually costs |
+|---|---|---|
+| the head's **weights** | 106 MB, 26.5 M params | **1.6 s** warm. Raw read at SATA speeds is **193 ms**; the rest is tensor construction |
+| the **Python stack** (torch, transformers, the `laya` package) | ~1.2 GB of torch, 87 `.so` files | **~23 s cold**, **~1.7 s warm** |
+| **policy / thresholds** | a few KB | nothing measurable |
 
-**redb cannot make the head load faster and should not be asked to.** What it *can* do is
-make the load **honest**: store a fingerprint of the checkpoint it expects and verify it
-before use — the same fail-closed posture as the readiness preflight.
+**The ~24 s is not the weights and not the config — it is the Python library stack.** The
+1.2 GB of `.so` files must be read and relocated, and the only reason it looks affordable at
+1.7 s is the page cache; the sidecar's own header records the cold figure as ~23 s. So the
+question "can we load the weights faster with sqlite?" has no useful answer, because **the
+weights were never the slow part.**
 
-The real load win is already planned and is **P4**: today the 24 s is paid by a long-lived
-Python sidecar; in-process it becomes a startup cost paid once, with no socket and no
-serialisation.
+**Would sqlite help? No — and it is the same shape of argument as redb.**
+
+| candidate | verdict |
+|---|---|
+| **redb** | no — a B-tree store is not a tensor loader; moving float32 weights into it adds a decode step and removes nothing |
+| **sqlite** | no — same argument, plus a `BLOB` read *plus* a Python-object materialisation the raw file does not need. It also brings a C library into a crate that forbids `unsafe` and C bindings |
+| **mmap the safetensors** | **yes, and only this one works** — the format is already page-aligned and offsets are absolute, so the kernel pages tensors in on demand. It does not make the read *faster*, it makes the read *avoidable* for tensors a given call never touches |
+
+**And this is exactly what the Rust port already does.** `laya-head::safetensors` stores
+tensor offsets into the buffer and materialises an `f32` vector only when a caller asks for
+one. Since the file is **106 MB** and any single decision reads a fraction of it, mmap is the
+right shape and it is already the implementation. It is also worth noting what the *other*
+106 MB is: 106 048 536 bytes of payload against 106.1 MB nominal **is** the safetensors
+format, and the header — 4 296 bytes for all 36 tensors — is negligible.
+
+**The real load win is P4, and it is not about faster reading — it is about removing the
+1.2 GB.** In-process Rust means there is no Python stack to import at all, so the ~23 s
+ceases to exist rather than being optimised. The head's own 1.6 s becomes a once-paid
+startup cost.
+
+**What redb can still do here is make the load HONEST**, which is a different and real
+benefit: store a fingerprint of the checkpoint it expects and verify it before use — the same
+fail-closed posture as the readiness preflight. That is worth having and is not about speed.
 
 ### 2.3 Flows must be exportable — and the renderer comes FIRST
 
@@ -494,6 +517,8 @@ the *disagreement* is the finding. Newest correction last.
 | 4 | the pool is justified by **throughput** | measured: 8 concurrent calls complete in 121 ms, so the machine idles | justified by **ordering, backpressure and fault isolation** (§1.3) |
 | 5 | our spec should **compile to the other engine's schema**, executed by its scheduler | it made another project a **runtime dependency**, and proposed changing it — both forbidden by the standalone rule; the argument for it ("the executor is already tested") traded a defining constraint for convenience | **withdrawn**; absorb the executor into our own crates instead (§3.2) |
 | 6 | building a scheduler is **deferrable**, and its cost is ~25 283 LOC | 25k is the *engine*, not a scheduler (~1.5–3k); and the deferral assumed the other executor, which is exactly the dependency being refused | the executor is **part of the absorption**, ordered with the pool (§3.2, §5) |
+
+| 7 | the 106 MB checkpoint is what costs ~24 s to load | measured: the weights load in **1.6 s** warm and read in **193 ms** raw; the ~23 s cold figure is the **Python library stack** (1.2 GB of torch, 87 `.so` files) | §2.2 corrected — and the practical consequence is that **no storage format can help**, because storage was never the cost |
 
 **One that was not a correction but a refinement:** the priority queue does not touch
 split-K, but the question exposed that site A had been specified with *no mechanism* — and
