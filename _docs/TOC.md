@@ -29,6 +29,7 @@ reading order.
 - [Adversarial review by pi + glm-5.3](06-research/02-analysis-glm-5.3.md)
 - [The review brief](06-research/02a-analysis-brief.md)
 - [Research](06-research/README.md)
+- [Four architecture questions (threading, config, graph spec, scheduler)](06-research/03-four-architecture-questions.md)
 
 ## 99-archive
 - [Archive](99-archive/README.md)

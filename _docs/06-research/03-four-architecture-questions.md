@@ -4,12 +4,21 @@
 **Subject:** four questions asked together, because they are one question wearing four hats:
 *where does authority live, and what is data versus what is code?*
 
-| # | question | short answer |
-|---|---|---|
-| 1 | Safe multithreading is a must | **Agreed — and it is safe, if you parallelise the OUTPUT, not the reduction.** I was wrong to frame this as single-threaded. Corrected below. |
-| 2 | Config: hardcoded? JSON? redb? | **Neither, alone. Split by WHO authors the change:** hand-authored → text, machine-measured → redb. Also: today `from_toml` exists and nothing calls it. |
-| 3 | Make our app a Laya-based graph runner? | **No — that is the one thing that would make it worse.** Its precise niche is the *predicate a graph cannot compute for itself*. |
-| 4 | Can we supersede the workspace's DAG engine? | **No, and it is not close.** But we can supply the one thing it structurally lacks. |
+> **REVISION 2 (2026-09-30).** The user pushed back on all four, and **three of the four
+> corrections were right and are accepted below.** Round 1 is kept where it was wrong, with the
+> superseded wording visible, because the disagreement is the finding. §1 gained a whole axis I
+> had missed (D) and the admission-control role the existing queue was written for; §2 gained the
+> load-time question and two good ideas of the user's (mermaid export, starter flows); §3 was
+> based on a misreading and is rewritten; §4's feasibility answer was the *wrong test* and is
+> corrected. Summary of what changed, at the end of each section under **"What the pushback
+> changed"**.
+
+| # | question | round 1 answer | round 2 answer |
+|---|---|---|---|
+| 1 | Safe multithreading is a must | yes, A+C, not B | **yes — and the queue is the mechanism for A; plus axis D, which round 1 missed entirely** |
+| 2 | Config: hardcoded? JSON? redb? | split by author | unchanged, **plus**: redb does *not* speed the load; mermaid export is mandatory; ship starter flows as text, not a `.redb` |
+| 3 | Make our app a Laya-based graph runner? | no | **round 1 answered a different question — building OUR spec is sound; see the corrected design** |
+| 4 | Can we supersede the DAG engine? | no, not close | **feasible; the objection is data (two ledgers), not LOC — and the judge role is executor-independent, so this is deferrable** |
 
 ---
 
@@ -53,71 +62,145 @@ annotated in the same pass.
 
 ---
 
-## 1. Safe multithreading is a must — and I had the reason backwards
+## 1. Multithreading, the priority queue, and other data structures
 
-I previously wrote that the head should be single-threaded because "parallel
-reduction changes floating-point summation order". **That is true of one
-parallelisation strategy and false of another, and I collapsed the three.**
+### Round 1, and what was wrong with it
 
-There are three places concurrency can go, and they have nothing in common:
+Round 1 said: parallelise **A** (across calls) and **C** (output-partitioned
+rows), forbid **B** (split-K, which reorders a summation and breaks determinism).
+That part stands. But it left **A** implemented by "a pool in front of the pure
+function" with **no named mechanism and no data structure** — and this project
+already contains the mechanism, sitting unwired in `laya-core::queue`. Asking
+"doesn't the priority queue fix this?" is the right question, and the honest
+answer has three parts.
+
+### First: does the queue fix split-K? No — they are orthogonal, and cannot touch
+
+**Split-K is about how one dot product's summation is partitioned. A queue is
+about which request runs next.** A queue has no access to the inside of a
+matmul, so nothing about ordering can fix an arithmetic property. Concretely:
+`PriorityQueue` orders `T`; split-K changes the *result* of a single call. They
+live at different layers and neither can substitute for the other.
+
+### Second, and this is the correction: the queue IS the missing half of A
+
+Round 1's A was "parallelise across calls" with no mechanism. The queue is
+exactly the mechanism for A, and it was written for precisely this:
+
+```
+Priority::Gate        > Interactive > Background
+Priority::shedable()    — the classes that may be dropped under pressure
+PriorityQueue::new(capacity)  — bounded, refuses rather than growing without limit
+EnqueueError::Full      — fail closed, not queue-forever
+```
+
+So the design should be: **the pool is the worker set; the queue is its
+admission control.** Requests arrive, are classified (`Gate` for a gate call,
+`Interactive`, `Background`), and a bounded capacity provides backpressure. That
+is the shape round 1 was gesturing at and never named.
+
+**Two things stand in the way, and they are real work, not a wiring exercise:**
+
+1. `PriorityQueue<T>` is **a plain struct** — `lanes: [VecDeque<T>; 3]`, no
+   `Mutex`, no `Condvar`, no wake mechanism. Sharing it across worker threads
+   needs synchronisation it does not have.
+2. The server does **not** currently have concurrency to prioritise: it runs
+   `tokio::runtime::Builder::new_current_thread()`, and there is a test in
+   `laya-mcp` that **fails the build if `PriorityQueue` appears in production
+   code**:
+
+   > *"the queue could never fill and its 'queue is full, fail closed' error
+   > could never fire. It read as protection and provided none. The queue is
+   > gone; this test exists so a future contributor who adds one back has to
+   > think about whether this server has any concurrency to prioritise (it does
+   > not: one client over stdio, current-thread runtime)."*
+
+   **That test is right for the current server, and it becomes the specification
+   for the change.** Adding the pool is what makes the queue meaningful; the test
+   is what forces that order. Pool first, queue second — not the reverse.
+
+### Third: the axis round 1 missed entirely — D, inside one call
+
+Round 1's split was A/B/C. There is a fourth site:
 
 | site | what is split | determinism | verdict |
 |---|---|---|---|
-| **A. across calls** | two independent decisions at once | untouched — no call's arithmetic changes | **safe, and the real win** |
-| **B. split-K** (split the *reduction*) | one dot product's summation cut across threads | **broken** — partial sums combine in a different order each run | **must not** |
-| **C. output-partitioned** (split M/N) | the *output* rows; each element's dot product stays whole, in one thread, in one order | **bit-identical to scalar** | **safe, and the other real win** |
+| **A. across calls** | two independent decisions | untouched | safe — the queue's job |
+| **B. split-K** | one dot product's summation | **reordered every run** | **forbidden** |
+| **C. output-partitioned** | a matmul's output rows | **bit-identical to scalar** | safe — the kernel's job |
+| **D. intra-call, across independent matmuls** | *different* matmuls of one layer | **bit-identical** — different outputs, no shared reduction | safe, and round 1 overlooked it |
 
-I was describing **B**. The design should do **A and C**, which is why the
-conclusion reverses: multithreading is a must **and** achievable without
-sacrificing the determinism the ledger depends on.
+A layer's projections are separate, independent matmuls feeding separate
+outputs; and there are two layers. D is safe for exactly the reason C is — no
+shared reduction — and it costs almost nothing to add once C exists, because it
+is the same proof applied at a coarser grain.
 
-**C is the important one**, because it is where the speed is. A matmul's output
-element `(i,j)` is one dot product; give row `i` entirely to one worker and the
-summation order is *identical* to the serial version — same operations, same
-sequence, same rounding. Determinism is preserved by construction, not by
-testing. This is also what the real BLAS libraries partition for.
+### Fourth: what is actually wrong today (the honest problem list)
 
-### It needs no `unsafe` and no dependency
+Measured, and it reframes the whole question: **throughput is not the problem.**
 
-The crate forbids `unsafe`, which would normally kill a hand-written parallel
-matmul. It does not, because `std::thread::scope` plus `chunks_mut` is **safe
-Rust**: the borrow checker proves the disjoint output slices do not alias, and
-the scope guarantees the threads join. So the choice was never
-"parallel *or* no-unsafe" — it was "parallel *or* split-K".
+| problem | measured | is it real? |
+|---|---|---|
+| throughput | 8 concurrent calls complete in **121 ms**; one call is 173–436 ms | **no** — the machine is idle most of each call |
+| head-of-line blocking | a `Gate` call arriving behind 8 `Background` calls waits for all of them | **yes** — latency, and it is the queue's purpose |
+| no shedding under load | a bounded queue exists but is unused | **yes** |
+| **fault isolation** | one panicking call takes the whole process, and the sidecar is a single process | **yes, and this is the strongest argument for the pool — not speed** |
+| cancellation | nothing can cancel an in-flight call | yes, and unsolved |
 
-```rust
-// The shape of it: each output row belongs to exactly one worker, so the
-// arithmetic inside each row is byte-for-byte what the serial version did.
-std::thread::scope(|s| {
-    for (out_row, w_row) in out.rows_mut().zip(weights.rows()) {
-        s.spawn(move || compute_row(out_row, w_row, input));
-    }
-});
-```
+So the pool's justification is **ordering, backpressure and fault isolation**,
+and only then latency. Round 1 justified it by speed, which the measurement does
+not support.
 
-### The one remaining trap, stated so it is not discovered later
+### Other data structures, and pub/sub — a ranked answer
 
-**FMA changes results too.** `a*b + c` computed with a fused multiply-add has a
-single rounding step; computed separately it has two. So a "vectorised" kernel
-that fuses is *not* bit-identical to the scalar reference even though its
-summation order is perfect. Any SIMD/FMA work must therefore either (a) be
-tested against the scalar reference for exactness, or (b) be declared as a
-separate *numerical* mode. Silently enabling it is the same defect class as
-split-K, arriving through a different door.
+**The queue's shape is already right** (three lanes, bounded). What it lacks is
+concurrency, not structure. Ranked:
 
-**Recommended design (supersedes what spec 03 says today):**
+1. **(Recommended) One bounded channel per lane**, not a `Mutex<PriorityQueue>`.
+   A shared lock makes every worker contend on one mutex and needs a `Condvar`
+   to wake it; a bounded `mpsc` per lane gives the same ordering semantics, hands
+   the wake-up to the runtime, and provides backpressure for free (a full channel
+   *is* `EnqueueError::Full`). It also removes the queue's own struct from the
+   hot path, which is what lets the forbidding test be rewritten honestly rather
+   than deleted.
+2. **`Mutex<PriorityQueue<T>>`** — works, simplest diff, keeps the 16 tests
+   meaningful as-is. Correct but contended, and it makes the queue a global
+   bottleneck on the one path that exists to remove bottlenecks.
+3. **A lock-free structure** — not considered. There is no measurement demanding
+   it, and this project's rule is that a mechanism is justified by a measurement.
 
-- the forward pass stays a **pure function** for a single call — that part of the old
-  answer stands, and it is what makes C safe;
-- **C ships by default**: output-partitioned rows via `std::thread::scope`,
-  bounded by an explicit worker count (not `num_cpus` silently);
-- **A is the caller's layer**: a fixed-size pool *in front of* the pure function —
-  this is what removes the sidecar's serialisation, and it never touches one call's
-  arithmetic;
-- **B is forbidden**, and a test must pin bit-exactness against the scalar
-  reference so it cannot creep in;
-- the worker count is **reported**, and the default is 1 until the exactness test
-  passes on the target machine — fail-safe, matching this project's readiness rule.
+**Pub/sub — right idea, and it is the wrong tool for half the job.** The two
+directions have opposite requirements:
+
+| direction | shape needed | why |
+|---|---|---|
+| **ingest** (request → worker) | **work queue** | each request must be handled by **exactly one** worker. A topic gives you *at-least-one-of-N* semantics, which is how a decision gets computed twice, or zero times |
+| **egress** (decision made / band changed → whoever cares) | **pub/sub or a tail-able stream** | many consumers, one event, no ownership |
+
+**Ingest: never pub/sub.** **Egress: pub/sub, and it is genuinely missing
+today.** Right now the only record a decision happened is a ledger **append**;
+anything wanting to *react* to a band change must poll or re-read. That is an
+unfilled gap, and redb already supplies the durable substrate — the segments are
+append-only and `laya ledger tail` exists.
+
+**One caveat that decides the implementation:** in-process pub/sub dies with the
+process, and supervision is unsolved. So egress must be **at-least-once from the
+ledger**, not a memory bus — a subscriber should be able to ask "what happened
+since cursor N" and get it after a restart. Otherwise the notification path
+silently loses events exactly when it matters, which is the "read as protection
+and provided none" failure mode this project has already been bitten by twice.
+
+### What the pushback changed
+
+- **A is now named**: the priority queue is the pool's admission control, and the
+  existing `Gate/Interactive/Background` classes are the right ones.
+- **D is added** — intra-call parallelism across independent matmuls, which
+  round 1 missed.
+- **The justification moved** from throughput (unsupported by measurement) to
+  ordering, backpressure and fault isolation (all measured or structural).
+- **Order is now fixed**: pool → then queue. The forbidding test is the gate.
+- **Ingest vs egress is now split**: channels for one, pub/sub from the ledger
+  for the other.
 
 ---
 
@@ -139,187 +222,327 @@ crates/laya-mcp/src/lib.rs:1129      let policy = laya_core::Policy::default();
 recurring shape: *a documented capability no caller can reach*. The `toml`
 dependency is in the manifest for a parser no binary invokes.
 
+### "Won't redb allow faster loads?"
+
+**No — redb is not a loader, and the 24 s is not a config cost.** Separating the
+two, because the question assumes one thing where there are three:
+
+| what is loaded | size | where it should live | does redb help? |
+|---|---|---|---|
+| the head's **weights** | 106 MB, 26.5 M params, ~24 s | a file (safetensors), memory-mapped or read once | **no** — redb is a B-tree store, not a tensor loader; putting 106 MB of floats in it would make the load *slower* |
+| **policy / thresholds** | a few KB | text (see below) | no measurable gain at this size |
+| **measured values** (ECE, sample counts) | a few rows | redb | not a load-time win; a *correctness* win |
+
+So the load-time question has a different answer than expected: **redb cannot
+make the head load faster, and should not be asked to.** What it *can* do is make
+the load **honest** — store a fingerprint of the checkpoint it expects and verify
+it before use, which is the same fail-closed posture as the Laya-readiness
+preflight. That is worth having, and it is not about speed.
+
+The real load win is already planned and is **P4**: today the 24 s is paid by a
+long-lived Python sidecar; once the head is in-process it becomes a startup cost
+paid once, with no socket and no serialisation. redb does not participate.
+
+### "Can the flows be exportable — for human check, like mermaid?"
+
+**Yes, and this is the strongest of the four suggestions.** It also inverts the
+design order, and that is the important part:
+
+> **If a flow lives in redb, a text renderer is mandatory, not optional** —
+> because a binary store removes the only human-readable view that would
+> otherwise exist.
+
+So the order becomes: **text format / renderer first, store second.** Storing
+first and rendering later is how a binary container becomes unauditable.
+
+Design notes that follow from it:
+
+- **Mermaid is a review aid, not a serialisation format.** It shows nodes, edges
+  and labels; it cannot round-trip full field values, so the canonical form must
+  stay text (or a text projection of the stored row). Rendering must therefore be
+  **provably lossy-and-labelled** rather than quietly dropping a field.
+- **It is cheap and it pays immediately**: `graph TD` output is diffable, so a
+  flow change becomes a reviewable diff, and a reviewer can see the graph without
+  running anything. Nothing in the tree renders this today.
+- The check worth building alongside it: **render → re-parse → compare**. A
+  renderer that silently drops an edge is worse than none, and this is exactly
+  the class of bug that only a round-trip test catches.
+
+### "Could we ship a pre-filled redb with common flows?"
+
+**Yes to the goal, no to shipping the `.redb` file — ship the text plus a
+builder.** Four reasons, in order of force:
+
+1. **A `.redb` in the repo makes the content unauditable.** The first two
+   suggestions in this section are *about* reviewability; committing a binary
+   store gives that up in the same breath.
+2. **Format versioning.** The engine's store carries a `schema_version` and needs
+   `migrate_v1_to_v2` for exactly this reason. A pre-filled store shipped as a
+   binary means every format change breaks every installation, with no migration
+   path a human can read.
+3. **It collides with the single-writer rule.** The store admits one writer
+   (`DatabaseAlreadyOpen` enforces it, by design). A pre-filled store that
+   anything must update is the wrong shape; a text source that *builds* the store
+   is not.
+4. **The precedent already exists**: initialisation is a command that *creates*
+   the store, not a file that is copied. Starter flows should be the same thing —
+   `laya flows import starter/` → text in, store out.
+
+Same bytes at the end, reviewable and migratable on the way.
+
 ### The question underneath the question
 
-"Hardcoded, JSON, or redb?" is really **two** questions, and they have different
-answers:
+"Hardcoded, JSON, or redb?" is really **two** questions with different answers:
 
 1. **Who authors the change?** A human editing a threshold while reading a
    dashboard, or a measurement writing a number back?
 2. **What has to be true of the store?** Reviewable and diffable, or atomic and
    queryable?
 
-redb answers (2) one way and (1) the other, and that is the whole finding:
-
 | | text file (TOML/JSON) | redb |
 |---|---|---|
-| hand-editable | **yes** | no — binary format |
+| hand-editable | **yes** | no — binary |
 | diffable / reviewable in a PR | **yes** | no |
 | an agent can author it | **yes** | only through code |
 | atomic multi-key update | no | **yes** |
-| history / provenance of what was in force | only if you keep the files | **yes, naturally** |
-| concurrent readers with a writer | fine | **a held reader blocks a writer** (already measured, and the reason the server never holds the ledger open) |
+| history of what was in force | only if the files are kept | **yes, naturally** |
+| concurrent reader + writer | fine | **a held reader blocks a writer** (measured; why the server never holds the ledger open) |
 
 **Recommendation — split by author, not by format:**
 
 - **Human-authored policy → text, and it is the source of truth.** Thresholds,
   the L7 questions, near-tie margins. These are *arguments about intent*: they
-  need to be read, argued with, and diffed. This is the case `from_toml` was
-  written for, and it should be wired to a real path (env → file → defaults) with
-  the load path and the effective values **printed at startup**, exactly as the
-  read-scope boundary already is.
+  need to be read, argued with, diffed. Wire `from_toml` to a real path (env →
+  file → defaults) and **print the effective values at startup**, as the
+  read-scope boundary already does.
 - **Machine-measured values → redb.** Anything `calibrate` or a measurement
-  produces: the ECE, the sample count, the recommended threshold, the date. A
-  machine writes these and no human hand-edits them, so reviewability is not
-  lost — *it was never available*.
+  produces. A machine writes these and no human hand-edits them, so
+  reviewability is not lost — *it was never available*.
 - **A fingerprint of the effective policy goes into every ledger record.** This
-  is the piece that makes the whole thing more than plumbing: today a decision is
-  recorded with its confidence, but not with **the thresholds that were in force
-  when it was made**. Without that, changing a threshold silently invalidates
-  every prior outcome — and `calibrate`, whose entire job is comparing
-  confidence against correctness, cannot tell which policy produced which
-  correctness. With it, a threshold change becomes an experiment with a before
-  and an after.
-
-**So: redb for the numbers that are measured, text for the numbers that are
-argued, and a hash of both in the ledger.** Not one store for everything — the
-two kinds of number have genuinely different lifespans and owners.
+  is what makes it more than plumbing. Today a decision records its confidence
+  but **not the thresholds in force when it was made**, so changing a threshold
+  silently invalidates every prior outcome — and `calibrate`, whose whole job is
+  comparing confidence against correctness, cannot tell which policy produced
+  which correctness. With the fingerprint, a threshold change becomes an
+  experiment with a before and an after.
 
 **And the failure mode to design against now:** two sources of truth that drift.
-If the file says 0.90 and redb says 0.95, which is in force? Pick one as
-authoritative (text), make redb's copy *derived and stamped with the source
-hash*, and refuse to start when the hashes disagree — the same fail-closed
+Pick one as authoritative (text), make redb's copy **derived and stamped with the
+source hash**, and refuse to start when they disagree — the same fail-closed
 posture as the Laya-readiness preflight.
 
----
+### What the pushback changed
 
-## 3. Should we become a Laya-based graph runner?
-
-The premise is fair: the video's subject *is* rules following JSON. But the
-reconnaissance changes the answer, because **the workspace already has a graph
-runner, and it already has a node type that calls an MCP server over stdio.**
-
-```
-pidag, measured:
-  src/core/dag.rs      NodeType { Llm, Shell, Quorum }
-  Node fields           for_each · quorum · subgraph · retry · on_fail
-                        · verify · timeout · budget · after · mcp_call
-  McpCallConfig         server: "stdio://path/to/bin" | "http://..."
-                        transport: "http" | "stdio"
-                        tool + arguments (templated)
-  type_dispatch         a node with `mcp_call` set delegates to McpCallWorker
-```
-
-So a graph node **can already call `laya-mcp` over stdio today.** Building a
-graph runner inside `laya-rs` would not add that capability — it would add a
-*second, incompatible* one, and the cost is concrete: node scheduling, retries,
-budgets, checkpointing, crash recovery and persistence are ~25k LOC in the thing
-that already does them.
-
-### Where the real gap is — and it is exactly ours
-
-Here is the load-bearing finding, and it is a **constraint of the graph's own
-language**, not a preference:
-
-> the expression language supports **only object member access** — no arrays, no
-> functions, no comparisons. A `route` matches by **exact `serde_json::Value`
-> equality**, and there are **no ranges**. A `transform` node therefore *cannot*
-> compute a band, and a `route` *cannot* express one.
-
-So a graph runner can route on `"bug_in_code"` but **it cannot decide that the
-answer is `"bug_in_code"`**. It has no predicate over a structured value, no
-comparison, no way to turn a number into a decision — that is why our
-`route_payload` emits a **band** (a discrete, exactly-matchable string) instead
-of a float.
-
-**That is the niche, and it is precise: `laya-rs` is the predicate provider for a
-graph whose own language is deliberately too weak to express one.** Not a runner
-— the thing a runner calls when it needs a judgement it cannot compute.
-
-### Ranked recommendation
-
-1. **(Recommended) Stay a decision layer; let graphs drive us.** Publish
-   decisions as exactly the discrete values a `route` can match (already done in
-   `route_payload`), and wire a `mcp_call` node → `laya-mcp`. The "flows are
-   graphs" goal is *already satisfied* — the flows live in the runner.
-2. **(If flexibility is the actual pain) extend the runner, do not fork it.** A
-   `route`-over-payload primitive plus the existing MCP node gives graph-authored
-   flexible flows with one implementation, one ledger, one place to fix a bug.
-3. **(Not recommended) Build a graph runner in `laya-rs`.** It would duplicate
-   ~25k LOC, split the decision ledger away from the runs that consumed the
-   decisions, and put scheduling inside the crate whose value is being small,
-   deterministic and checkable.
-
-Note the coupling with §1: option 1 puts `laya-mcp` on a runner's critical path,
-where the serial sidecar's 173–436 ms per call is a real cost. **The pool from
-§1 is what makes this architecture viable**, which is the useful sense in which
-these four questions are one question.
+- **Load time**: redb cannot speed it and should not be asked to; the honest use
+  is verifying the checkpoint it expects. The speed win is P4, not storage.
+- **Mermaid export is promoted from "nice" to "mandatory, and FIRST"** — a binary
+  store obliges a text renderer, and the renderer needs a round-trip test.
+- **Starter flows: ship text + an import command, not a `.redb`** — for
+  auditability, migration, and the single-writer rule.
 
 ---
 
-## 4. Could we supersede the workspace's DAG engine?
+## 3. Should we have our own graph specification?
 
-**No — and the comparison is not close enough to be interesting.** Measured,
-both trees, same day:
+### Round 1 answered the wrong question
 
-| | the DAG engine | `laya-rs` |
+Round 1 read the suggestion as "copy a known project's graph format" and argued
+against it. **That was a misreading, and the correction is accepted: defining
+*our own* specification — with the fields our decisions actually need — is
+sound.** The useful version of the question is therefore not *"copy or not"* but
+**"what does our spec contain, and who executes it?"**
+
+### What our spec has to carry
+
+Two families of field, and the second is the whole reason we would have one:
+
+| family | fields | whose vocabulary |
 |---|---|---|
-| src LOC | **25 283** | 11 652 (8 crates) |
-| `#[test]` markers | 116 | **284** |
-| integration test files | **68** | — (in-crate) |
-| scheduler / retries / budgets | **yes** | no |
-| checkpoint + crash recovery | **yes** | no |
-| run persistence | **yes** (redb) | a *decision* ledger only |
-| UI, queue daemon, RPC, A2A | **yes** | no |
-| MCP server | yes | **yes** (7 tools) |
-| MCP client (stdio **and** http) | **yes** | no |
-| expression / condition language | **none at all** | `route` payload contract |
+| execution | node id, `depends_on`, retry, timeout, `for_each`, `quorum`, `on_fail`, subgraph | already exists in the engine's model |
+| **decision** | `laya_call` (tool + arguments), the `band`/`label` predicate, the payload contract, `escalate_on_near_tie` | **ours — and the second is what a graph language cannot express for itself** |
 
-The shapes are different, not unequal: the engine is a **scheduler** (it decides
-*when* and *whether* work runs), we are a **judge** (we decide *what is true*).
-Superseding would mean re-implementing scheduling, persistence, recovery and a UI
-in the crate that currently has one dependency-free 106 MB forward pass — to end
-up with a worse scheduler and a worse-documented judge.
+So the spec is **their execution fields plus our decision fields**, and the
+refactor is real but bounded: it is an *extension* of a shape that exists, not an
+invention.
 
-**The test for "supersede" worth applying, now and later:** *same inputs, same
-outputs, fewer moving parts.* We cannot pass it, because we do not accept the
-engine's inputs — DAG JSON, run history, budgets, resumption state. A component
-that cannot accept the thing's inputs has not superseded it; it has described a
-different thing.
+### The load-bearing constraint, unchanged from round 1
 
-**What we can honestly claim instead:** the engine's nodes can be conditioned
-only on *terminal state* (its `on_fail` edges) or matched by **placeholder text**
-in a prompt. There is no predicate over a **structured value**. That is a real,
-bounded, defensible gap — and we fill it. **Supply, do not supersede** — the same
-conclusion as §3, from the opposite direction, which is mild evidence it is the
-right one.
+The graph's expression language supports **only object member access** — no
+arrays, no functions, no comparisons — and `route` matches by **exact
+`serde_json::Value` equality**, with no ranges. So a `transform` node **cannot**
+compute a band and a `route` **cannot** express one.
+
+That is why `route_payload` emits a **discrete, exactly-matchable band** instead
+of a float, and it is the reason the decision fields have to exist at all. It is
+a constraint of the language, not a preference, and it survives every
+reformulation of this question.
+
+### The fact that decides the design
+
+**There is no path to hand the executor an externally-authored graph today.**
+`serde_json::from_str::<Dag>` does exist, but it parses the `dag_json` **stored
+inside a run** (it is how a resume re-reads its own graph). There is no
+`--dag <file>` and no import path. So:
+
+| option | what it means | verdict |
+|---|---|---|
+| **(a) our spec compiles to the engine's schema** | exporter emits DAG JSON satisfying the engine's own `validate()` (unique ids, no dangling `depends_on`/`after`/`on_fail`, quorum bounds, `for_each` expanded). Executed by the existing scheduler. | **recommended** — "our spec, our fields" is satisfied, and the executor is not re-written |
+| (b) our spec + our own executor | fully ours, end to end | legitimate, and it is §4 — but it is a scheduler, so decide it as a scheduler |
+| (c) our spec, nobody runs it | a format with no executor | a drawing, not a system |
+
+**Recommendation: (a).** Our spec is the authoring surface and the superset;
+compilation targets the engine's schema for execution; mermaid is the human view
+(§2). This gives exactly what was asked — *our graph spec, refactored, with all
+the fields we need* — while the thing that runs stays the thing that is already
+tested against 68 integration test files.
+
+Note the small dependency in (a): the engine needs to accept a DAG from a file
+(a flag) or be handed one for import. That is a change on the engine's side, and
+it is small — which is a much better trade than re-implementing recovery.
+
+### What the pushback changed
+
+- **Accepted**: the goal is *our* spec, not a copy. Round 1's framing was wrong.
+- **The spec is now specified**: execution fields + decision fields, and the
+  decision fields are the ones the graph language structurally cannot express.
+- **A new decisive fact**: the executor cannot be fed a graph from outside today,
+  so option (a) carries one small engine-side change and that is the honest cost.
+
+---
+
+## 4. Implementing a scheduler — feasible? And "laya as judge" as the goal
+
+### Round 1 used the wrong test
+
+Round 1 argued "we cannot supersede it" with the test *same inputs, same outputs,
+fewer moving parts* — we do not accept their inputs, so we fail. **That test is
+the right test for *superseding* and the wrong test for *replacing***, which is
+what was actually being proposed. Replacing does not have to accept their inputs
+at all. So: **yes, it is feasible**, and the honest question is what it costs and
+what it gives up.
+
+### The cost, sized honestly
+
+The engine is ~25 283 src LOC, but that is **not** the size of a scheduler. Most
+of it is not scheduling: retries, budgets, checkpointing, crash recovery, run
+persistence, the UI, RPC, A2A, an MCP client, a queue daemon, an SDD driver, and
+workflow templates. A minimum viable scheduler is much smaller:
+
+```
+topological order over depends_on      an MCP call node                 resume from a checkpoint
+a ready-queue of runnable nodes        a shell node                     record node results
+run each node to completion            persist runs + events            report a terminal state
+```
+
+A defensible estimate is **1.5–3k LOC** — not 25k. So feasibility is not the
+objection, and saying "25k LOC" as if it were the cost would be misleading.
+
+### The real objection, and it is a data objection
+
+**Scheduling is easy. Recovery is not, and the *ledger split* is worse than
+either.**
+
+1. **Two schedulers means two run histories and two ledgers.** A decision's record
+   and the run that consumed it would live in different stores, so *"which
+   decisions did run X make, and were they right?"* has **no single query**. That
+   is the strongest argument, and it is about the shape of the data, not the size
+   of the code. It is also the one that gets harder to fix later, because history
+   cannot be backfilled.
+2. **Crash recovery is the hard-won part.** A scheduler that has never crashed in
+   production has untested recovery, and recovery bugs appear *only* in
+   production. The engine's 68 integration test files are largely about this.
+3. **Two things that can drift** — the same failure mode as the config question.
+   Two schedulers will disagree about node semantics within a release or two.
+
+### Where the pushback is right, and what follows
+
+**"Laya acting as a judge on our graphs is a winning choice" — agreed, and it is
+the architectural insight of this whole document.** The reason it settles the
+question is this:
+
+> **The judge role does not depend on who executes.** Deciding *what is true* is
+> independent of deciding *when work runs*.
+
+Which means the executor is **swappable**, and the whole §4 decision becomes
+**deferrable** — provided the interface is drawn in the right place now:
+
+```
+        our spec (authoring)                    <- ours, §3
+              │
+              ▼
+        compile → executor's schema             <- the seam: stable, small
+              │
+              ├── executor A: the existing scheduler      (today)
+              └── executor B: ours, later, if ever        (possible, not now)
+              ▲
+              │  every node that needs a judgement calls:
+        laya-mcp  (the judge — 7 tools, over MCP stdio)  <- never changes
+```
+
+**So the recommendation is not "don't build a scheduler". It is: do the cheap
+things first, and let the pilot decide.**
+
+1. **Define our spec and its compiler** (§3) — including the mermaid renderer
+   (§2). This is the part that is ours regardless of who executes.
+2. **Run ONE real flow through the existing executor with `laya-mcp` as a judge.**
+   The `mcp_call` node type exists, so this is a wiring exercise, not a build.
+3. **Then decide the scheduler with real evidence**: if the seam holds and the
+   only remaining pain is that the executor is not ours, (b) becomes a normal
+   engineering choice with a known interface — and by then the two-ledger
+   objection is *measured* rather than predicted, which is the honest way to
+   settle it.
+
+Committing to a scheduler now buys flexibility we cannot yet demonstrate a need
+for, at the price of the one thing that is hard to recover: a single queryable
+history.
+
+### What the pushback changed
+
+- **Feasibility conceded**: it is feasible, and round 1's "25 283 LOC" overstated
+  the cost by conflating a scheduler with the engine around it (real estimate
+  1.5–3k LOC).
+- **The objection is restated as data, not size**: two ledgers, and history
+  cannot be backfilled.
+- **The winning insight recorded**: judge and executor are independent, so the
+  decision is deferrable if the seam is drawn now.
+- **The recommendation becomes a pilot**, ordered so that every step is useful
+  even if the scheduler is never built.
 
 ---
 
 ## 5. Recommended actions, ranked
 
-Nothing here is implemented. Asked in order of value per unit of risk:
+Nothing here is implemented. Ordered by value per unit of risk, and revised so
+that each step is useful on its own:
 
-| # | action | why first | cost |
+| # | action | why here | cost |
 |---|---|---|---|
-| 1 | **Reach `Policy::from_toml` from a real path** (env → file → defaults, effective values printed) | it is written, tested, and unreachable — the cheapest real capability in the tree; it also unblocks §2 entirely | small |
-| 2 | **Output-partitioned parallel matmul** (site C) with a bit-exactness test against the scalar reference | the whole speed case, and it *cannot* be retrofitted cleanly once a kernel is written | medium |
-| 3 | **Policy fingerprint in the ledger record** | makes `calibrate` meaningful across a threshold change; cheap now, impossible to backfill later | small |
-| 4 | **The call pool** (site A), feature-gated, worker count reported | removes the sidecar's serialisation; the precondition for §3 option 1 | medium |
-| 5 | **A `mcp_call` node → `laya-mcp`** proof, end to end | demonstrates the integration claim in §3 instead of asserting it | small |
-| 6 | Machine-measured values in redb + source-hash drift check | completes §2, but only earns its keep once §3 exists | medium |
+| 1 | **Reach `Policy::from_toml` from a real path** (env → file → defaults; effective values printed) | written, tested, unreachable; unblocks §2 entirely | small |
+| 2 | **Output-partitioned parallel matmul (C)** + a bit-exactness test against the scalar reference | the speed case, and it cannot be retrofitted cleanly once a kernel exists | medium |
+| 3 | **Policy fingerprint in the ledger record** | makes `calibrate` meaningful across a threshold change; cheap now, impossible to backfill | small |
+| 4 | **Our graph spec + compiler + mermaid renderer** | §3's deliverable, and §2's reviewability requirement; useful even if the executor never changes | medium |
+| 5 | **Pool with per-lane bounded channels (A + D)**, worker count reported, feature-gated | ordering, backpressure, fault isolation; rewrites the forbidding test honestly | medium |
+| 6 | **One real flow through the existing executor with `laya-mcp` as judge** | converts §3/§4 from argument into evidence | small |
+| 7 | Machine-measured values in redb + source-hash drift check | completes §2 once there is something measured | medium |
+| 8 | Egress pub/sub from the ledger (at-least-once, cursor-based) | fills the missing react-to-a-band-change path | medium |
+
+**Explicitly deferred:** building a scheduler. It is feasible (§4) and it is not
+wrong — it is simply the decision that should be made with the pilot's evidence
+rather than ahead of it.
 
 ## 6. Open questions (deliberately unanswered)
 
-- **What is the unit of a pool worker** — a whole `ask`, or one question within
-  it? The head is a single forward pass per question, so call-level parallelism
-  may leave the machine idle during one large `ask`.
+- **Cancellation.** Nothing can cancel an in-flight call. With a pool this stops
+  being theoretical: a `Gate` request cannot preempt anything, so priority only
+  orders work, it never interrupts it.
 - **Does `calibrate` change thresholds automatically, or only recommend?** The
   ledger makes both possible; only one is safe, and it is not obvious which.
-- **Text-authoritative config versus redb-authoritative** — I recommend text, but
-  the argument assumes a human is the one editing. If an agent becomes the
-  primary editor, the reviewability argument weakens.
+- **Text-authoritative config vs redb-authoritative** — I recommend text, but the
+  argument assumes a human is the editor. If an agent becomes the primary author,
+  the reviewability argument weakens.
 - **Bit-exactness across machines.** C guarantees bit-exactness *within* a
-  machine. Two different CPUs may differ on the same input; nothing here
-  addresses that, and NF3's determinism promise should be read as per-machine
-  until it is measured.
+  machine. Two CPUs may differ on identical input; NF3's determinism promise
+  should be read as per-machine until that is measured.
+- **How much of the decision field set belongs in the spec?** Too little and the
+  spec cannot express the routing; too much and it becomes a programming language
+  with a validator nobody wrote.

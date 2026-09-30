@@ -54,6 +54,12 @@ DOCS = {
         "The exact prompt the reviewer ran against, so the review is reproducible.",
     ),
     "06-research/README.md": ("Research", "Numbered research write-ups: convention and index."),
+    "06-research/03-four-architecture-questions.md": (
+        "Four architecture questions (threading, config, graph spec, scheduler)",
+        "Discussion only: the priority queue as admission control and a missed fourth "
+        "parallelism axis; where config should live and why redb does not speed the load; "
+        "our own graph specification and mermaid export; and whether to build a scheduler."
+    ),
     "99-archive/README.md": ("Archive", "Superseded material, kept with its consequence labelled."),
 }
 

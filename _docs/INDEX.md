@@ -47,6 +47,7 @@ in exactly one place; this index points at it, never restates it.
 - [Design (v1) — superseded in part](06-research/01-design.md) — The original design. Read DESIGN-AMENDMENTS first: the review corrected five blockers in it.
 - [Adversarial review by pi + glm-5.3](06-research/02-analysis-glm-5.3.md) — The full review: five blockers, ten majors, fact-by-fact corrections.
 - [The review brief](06-research/02a-analysis-brief.md) — The exact prompt the reviewer ran against, so the review is reproducible.
+- [Four architecture questions (threading, config, graph spec, scheduler)](06-research/03-four-architecture-questions.md) — Discussion only: the priority queue as admission control and a missed fourth parallelism axis; where config should live and why redb does not speed the load; our own graph specification and mermaid export; and whether to build a scheduler.
 - [Research](06-research/README.md) — Numbered research write-ups: convention and index.
 
 ### 99-archive
