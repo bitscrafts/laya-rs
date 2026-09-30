@@ -434,6 +434,61 @@ The pieces, all **in our own crates**, depending on nothing outside:
 Note the asymmetry: the first six are *absorbed because we need them*; the last is the
 one thing the other side structurally cannot express, which is why it is ours already.
 
+### Composition and parallel execution — the two properties that make it a DAG engine
+
+**Parallel execution is the DEFINING feature, not an optimization.** A DAG engine that
+runs its nodes one at a time is a sequence with extra steps — the only reason to express a
+flow as a graph rather than a shell script is that independent branches run at once. So it
+belongs in the first version, not a later one.
+
+Three consequences, and one of them **reorders the plan**:
+
+1. **Fan out the ready set, bounded.** Every node whose dependencies are satisfied is
+   runnable; the scheduler runs them concurrently up to a declared limit. Unbounded is
+   not acceptable: a 16-node fan-out is 16 concurrent Laya calls.
+
+2. **This makes the pool CO-REQUISITE, not a later optimization.** The sidecar is
+   **strictly serial** today, so a fan-out of 8 nodes would serialise behind it — the
+   graph engine would end up slower than eight shell commands in parallel, which is the
+   one outcome that would make the whole design pointless. So the pool (§1, site A) moves
+   from rank 5 to **before or with** the scheduler. **The graph fans out; the pool is what
+   makes the fan-out real.** This is the clearest case in the document of the four
+   questions being one question.
+
+3. **Determinism must be restated, because parallelism changes what it promises.** The
+   *set* of outcomes stays deterministic for independent branches — that is what
+   independence means — but the **interleaving does not**:
+   - the ledger must attribute every record to `run_id` + `node_id`, because append order
+     is no longer execution order and a consumer reading "the last row" breaks;
+   - anything claiming replayability must not be extended to a parallel run's *ordering*;
+   - the store still has exactly **one writer** (the scheduler appends for all concurrent
+     runs), so the single-writer rule survives parallelism untouched.
+
+**A failure policy must be chosen explicitly, not defaulted.** If one of five parallel
+nodes fails, does the scheduler cancel the siblings or let them finish? Recommendation:
+**fail fast and cancel siblings by default**, with `allow_failure` and the quorum node as
+explicit opt-outs — because a partial result that looks complete is the failure mode this
+project keeps finding, and draining spends real work on a branch already abandoned.
+
+### Composition: subgraphs that expand, with arguments and a hash
+
+Composability means a flow can use another flow as a step. Three decisions:
+
+- **Expand at load, not nest at run time.** A subgraph's nodes join the parent's ready
+  queue, so their parallelism is fully available. Nesting a child as one schedulable unit
+  would serialise the whole of it behind a single node, defeating the point above.
+- **Bind arguments explicitly** (`with`), so a child flow is parameterised rather than
+  copied. A child that reads the parent's variables implicitly cannot be reused.
+- **Hash the child and record the hash in the parent.** A subgraph changed in place
+  silently changes the parent's behaviour; the hash makes it visible, and a mismatch can
+  be refused rather than discovered later. Same principle as the policy fingerprint (§2).
+
+**And the validation rule that follows: cycles must be rejected at load.** A subgraph that
+includes itself, directly or through a chain, is infinite expansion — it must fail with a
+named error rather than hang. Same class as the `for_each` expansion and quorum bounds
+checks that already exist, and the kind of rule that has to be written before the feature,
+not after the first hang.
+
 **Deliberately NOT absorbed:** A2A, the SDD/spec driver, the web UI, the queue daemon,
 workflow templating, spec front-matter parsing, and the `pi` backend integration. Those
 serve that project's use cases, not ours — and note the shape of the refusal: the SDD
@@ -598,15 +653,20 @@ that each step is useful on its own:
 | 2 | **Output-partitioned parallel matmul (C)** + a bit-exactness test against the scalar reference | the speed case, and it cannot be retrofitted cleanly once a kernel exists | medium |
 | 3 | **Policy fingerprint in the ledger record** | makes `calibrate` meaningful across a threshold change; cheap now, impossible to backfill | small |
 | 4 | **Our graph spec + mermaid renderer** (§3) and **the absorbed scheduler** | the graph capability itself, standalone; §2's reviewability requirement | medium |
-| 5 | **Pool with per-lane bounded channels (A + D)**, worker count reported, feature-gated | ordering, backpressure, fault isolation; rewrites the forbidding test honestly | medium |
+| 5 | **Pool with per-lane bounded channels (A + D)**, worker count reported, feature-gated | **co-requisite with rank 4, not after it**: without the pool a node fan-out serialises on the sidecar and the graph engine is slower than a shell script | medium |
 | 6 | **One real flow through the existing executor with `laya-mcp` as judge** | converts §3/§4 from argument into evidence | small |
 | 7 | Machine-measured values in redb + source-hash drift check | completes §2 once there is something measured | medium |
 | 8 | Egress pub/sub from the ledger (at-least-once, cursor-based) | fills the missing react-to-a-band-change path | medium |
 
 **No longer deferred.** Building the scheduler is part of the absorption (§3), because
 the alternative — handing a graph to the other project — is a dependency. Ordered after
-the spec and renderer, and before the pool, because a scheduler with an empty library of
-flows has nothing to run.
+the spec and renderer (a scheduler with no flows has nothing to run).
+
+**Revised ordering (2026-09-30): the pool moves up to be co-requisite with the
+scheduler.** The earlier order put the pool last, which assumed a serial engine. Since
+parallel node execution is the *defining* feature of a DAG engine (§3), and the sidecar is
+strictly serial, the scheduler without the pool would deliver a graph engine that
+serialises its own fan-outs. The two must land together or the first one is unmeasurable.
 
 ## 6. Open questions (deliberately unanswered)
 
