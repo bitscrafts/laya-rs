@@ -114,7 +114,17 @@ both halves are cheap to satisfy.**
 
 ### First, the measured size of the problem
 
-The head's forward pass is **7.55 G-MAC ≈ 15.1 GFLOP** per call at the real shape
+The head's forward pass is **4.98 G-MAC ≈ 9.97 GFLOP** per call at the real shape
+(`d_model 1024`, `n_head 16`, `n = head_max_len 192`, 2 layers, `d_ff 4096`, read from the real
+tensor shapes, not from the config).
+
+> **CORRECTION (2026-09-30).** This section previously read **"7.55 G-MAC ≈ 15.1 GFLOP"**. That
+> figure is **1.5× too high**: 7.55 G-MAC is what the formula yields at `n = 300`, and it was
+> carried over from a scratch estimate instead of being recomputed from the checkpoint's actual
+> shapes. The superseded wording is kept above so the disagreement is visible rather than erased.
+> The lesson is the class, not the arithmetic: a constant that is not recomputed from the live
+> artefact is a **claim**, and this one had units and looked derived, which is why it survived a
+> commit. Full working in `_docs/06-research/03-four-architecture-questions.md` §0.
 (`L=192`, `d=1024`, `ffn=4096`, 2 layers — `L = head_max_len` is the *maximum*, and the sequence
 is only that long when it is full). On one core at ~20 GFLOPS that is **~755 ms**; across 8 cores
 at ~80 GFLOPS, **~189 ms**. Current measured end-to-end latency through the Python sidecar is
