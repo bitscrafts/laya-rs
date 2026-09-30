@@ -79,7 +79,7 @@ pub fn layer_norm(x: &[f32], weight: &[f32], bias: &[f32], eps: f32) -> Vec<f32>
         .collect()
 }
 
-/// The exact GELU (`0.5·x·(1 + erf(x/√2))`), which is what `nn.GELU()` defaults to.
+/// The exact `GELU` (`0.5·x·(1 + erf(x/√2))`), which is what `nn.GELU()` defaults to.
 ///
 /// The `tanh` approximation is *not* interchangeable here: it differs in the third decimal, which
 /// is the same order as the margins the near-tie policy acts on.
@@ -180,6 +180,21 @@ pub fn softmax(logits: &[f32]) -> Vec<f32> {
         }
     }
     exps
+}
+
+/// `relu(W·x + b)` — the encoder block's feed-forward activation.
+///
+/// **`ReLU`, not `GELU`.** `nn.TransformerEncoderLayer` is constructed without an `activation`
+/// argument in the reference, and torch's default is `F.relu`; the `scorer` and `act_head`
+/// contain their own explicit `nn.GELU()`. Two different activations in one model, and the
+/// difference is invisible unless the default is checked — so it is checked and pinned by a
+/// fixture generated from the real modules.
+#[must_use]
+pub fn linear_relu(w: &[f32], b: &[f32], x: &[f32], out_dim: usize, in_dim: usize) -> Vec<f32> {
+    linear(w, b, x, out_dim, in_dim)
+        .into_iter()
+        .map(|v| v.max(0.0))
+        .collect()
 }
 
 /// Matrix-vector product: `out[i] = Σ_j w[i*n + j] * x[j]`.

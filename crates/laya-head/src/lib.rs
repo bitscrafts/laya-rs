@@ -31,6 +31,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod forward;
 pub mod math;
 
 pub mod safetensors;

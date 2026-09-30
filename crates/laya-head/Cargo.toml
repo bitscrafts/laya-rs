@@ -15,6 +15,7 @@ description = "The 26.5M-parameter Laya decision head in pure Rust: safetensors 
 # and writing it means the exact semantics we depend on are asserted against the real
 # checkpoint rather than trusted to a version range.
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
