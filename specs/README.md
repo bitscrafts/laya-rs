@@ -16,13 +16,29 @@ Specs are the **implementation contract**, not documentation. Each one carries:
 |---|---|---|
 | [`01-decision-payload.md`](01-decision-payload.md) | P1 | **IMPLEMENTED** — policy, per-type bands, composite scoring, payload |
 | [`02-route-payload.md`](02-route-payload.md) | P1 | **IMPLEMENTED** — the route-shaped wire contract |
-| [`03-rust-head.md`](03-rust-head.md) | P4 | NOT STARTED — the 26.5M head in pure Rust (`clamp_temperature` already landed) |
-| [`04-mcp-server-and-ledger.md`](04-mcp-server-and-ledger.md) | P1 | NOT STARTED — the stdio server + the single-writer ledger |
+| [`03-rust-head.md`](03-rust-head.md) | P4 | **NOT STARTED** — the 26.5M head in pure Rust (`clamp_temperature` already landed). The only spec left. |
+| [`04-mcp-server-and-ledger.md`](04-mcp-server-and-ledger.md) | P1 | **COMPLETE (2026-09-30)** — the stdio server (all 7 tools) + the redb ledger |
 | [`05-laya-must-be-running.md`](05-laya-must-be-running.md) | P1 | **IMPLEMENTED** — judgement + probe parsers + `laya doctor`, all tested |
 | [`06-priority-queue.md`](06-priority-queue.md) | P1 | **IMPLEMENTED** — the bounded priority queue, 16 tests |
 
-**103 tests pass across the workspace, clippy is at zero warnings, fmt is clean,
-and `cargo xtask gate` reports PASS on all three steps.**
+**255 tests pass across the workspace, clippy is at zero warnings, fmt is clean, and
+`cargo xtask gate` passes all three steps.** Run `scripts/verify-all.sh` for the whole picture,
+including the doc-citation check.
+
+## What is left
+
+**Only spec 03 (P4).** Everything else is implemented and proven:
+
+- P1 is complete. The MCP server exposes all seven tools, the redb ledger is written by
+  `laya ledger compact` and nothing else, and `scripts/prove-ledger.py` proves the whole
+  lifecycle end to end through the real binaries.
+- **Two things are deliberately not built, and neither is a spec:**
+  - `calibrate`. It is *possible* now — the outcome path exists — but it needs outcomes
+    actually recorded before it can mean anything. `laya ledger stats` reports
+    `outcomes: 0` and says so.
+  - **Driving a DAG with a payload.** `route_payload.rs` is the tested contract and the
+    payload reaches a caller, but nothing yet feeds one through a real `route` node. That
+    runner belongs in this repository (see `AGENTS.md`, SCOPE).
 
 ## Order
 

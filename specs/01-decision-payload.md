@@ -10,6 +10,8 @@ This spec is retro-specified: the code exists (TDD'd in the same session, RED
 before GREEN) and the spec records the contract so the next change is made
 against a written standard rather than against the implementation.
 
+**Status: IMPLEMENTED.** `laya-core::policy` + `route_payload`; tests green.
+
 **Project**: /projects/laya-rs
 **Phase**: 1 — P1 (pure core)
 

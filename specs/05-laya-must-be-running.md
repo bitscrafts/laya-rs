@@ -14,6 +14,8 @@ running, because the failure mode of a decision layer that cannot decide is a
 - when it is down, every tool **fails closed** — `gate` answers `ask`, never
   `allow`; other tools return a protocol error, never an empty success.
 
+**Status: IMPLEMENTED.** `laya-core::readiness` + `laya doctor`; the head probe was added 2026-09-30 after `doctor` was found certifying READY while the head was dead.
+
 **Project**: /projects/laya-rs
 **Phase**: P1 (blocks everything)
 

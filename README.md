@@ -31,6 +31,44 @@ crates/laya-cli        the terminal runner   -> binary `laya`
 xtask                  recurring tasks (`cargo xtask gate`)
 ```
 
+## The seven MCP tools
+
+`decide` · `gate` · `ask_file` · `ask_files` · `should_compact` · `ask` · `ledger`
+
+All seven are implemented. `route` is deliberately **not** a tool: exposing it would let an
+agent select edges outside any graph, which is the injection failure mode the design exists to
+prevent.
+
+## The sidecar, and what it costs
+
+The decision HEAD needs torch, so it runs as a **pinned, persistent Python sidecar** over a unix
+socket — a per-call interpreter spawn measured 23–24 s, which is untenable. Two consequences
+worth knowing before you rely on it:
+
+* it is **strictly serial** (one connection, a blocking loop); the backbone is 5.8× parallel,
+  the head is not. `ask_files` therefore asks sequentially and reports `parallel: false`;
+* the head reads a **PREFIX** of the state — a signal at the start scored identically at 3,975
+  and 199,951 bytes, and the same signal at the END was gone by 3,976. Both file tools return
+  `bytes` and attach a `warning` above 1 KiB, because a verdict silently covering the first page
+  of a 200 KiB file would be worse than a refusal.
+
+Spec 03 (P4) removes both limits by porting the head to Rust.
+
+## Ledger
+
+```
+LAYA_LEDGER_DIR   where a server appends its own segment file (unset = no ledgering)
+laya ledger compact   merge segments into ledger.redb — THE ONLY WRITER
+laya ledger stats     counts, latency percentiles, saturation rate
+laya ledger tail [N]  the most recent records
+laya ledger outcome   record whether a decision was right
+```
+
+`laya-mcp` appends to `ledger-<pid>.jsonl` and **never opens the store**: `append_segment`
+takes a directory, so the single-writer collision cannot happen. Nothing reaches `ledger.redb`
+until `compact` runs, and compaction **moves** segments into `ingested/` rather than deleting
+them, so it is idempotent and the raw evidence survives.
+
 ## Gates
 
 ```bash

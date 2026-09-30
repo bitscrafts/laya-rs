@@ -30,6 +30,8 @@ redb, 2nd process : Error: DatabaseAlreadyOpen        <- blocker B4, now PROVEN
 So: a priority queue **yes**, and its real justification is the *work* lane. For the
 store it is a **serialisation queue** whose ordering is a nicety, not the point.
 
+**Status: IMPLEMENTED, AND DELIBERATELY UNWIRED.** `laya-core::queue` has the bounded queue and 16 tests, and nothing calls it: the server serves one client over stdio on a single thread, so dispatch is already serial. The queue is kept for a future multi-client server and this line is why its absence from the build is not a defect.
+
 **Project**: /projects/laya-rs
 **Phase**: P1
 
