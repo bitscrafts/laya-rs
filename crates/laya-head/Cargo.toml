@@ -1,0 +1,25 @@
+[package]
+name = "laya-head"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "The 26.5M-parameter Laya decision head in pure Rust: safetensors load + attention/LayerNorm/GELU/scorer. No Python, no torch."
+
+[dependencies]
+# DEPS FOR THE UNWRITTEN PART ARE ABSENT ON PURPOSE.
+# This crate is the P4 work (specs/03-rust-head.md): only the
+# temperature clamp exists so far. The forward pass will need
+# `safetensors` and `blake3` back; declaring them now would make the
+# manifest describe a crate that does not exist, which is how a shell
+# gets mistaken for an implementation.
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

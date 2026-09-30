@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/laya-abi",
+    "crates/laya-core",
+    "crates/laya-backbone",
+    "crates/laya-head",
+    "crates/laya-store",
+    "crates/laya-mcp",
+    "crates/laya-cli",
+    "xtask",
+]
+exclude = [
+    # `_tmp/` holds runner scripts and pi session dirs — never a workspace member.
+    "_tmp",
+]
+
+# NOTE: standalone Cargo workspace, deliberately NOT a member of any parent
+# workspace (the same choice amem made). Every crate lives under `crates/`, and
+# the *crate directory name* is the short role (`core`, `mcp`, `store`) while the
+# package name keeps the full `laya-*` prefix, so both `cargo -p laya-core` and a
+# directory listing stay meaningful.
+#
+# Build with:  cargo check --workspace
+# Gate with:   cargo xtask gate
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pi-improved/laya-rs"
+readme = "README.md"
+keywords = ["laya", "mcp", "decision", "agent", "dag"]
+categories = ["development-tools", "science"]
+description = "laya-rs — a Rust System-1 decision layer: Laya over MCP stdio, feeding deterministic DAG route nodes"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+schemars = { version = "1", features = ["derive"] }
+parking_lot = "0.12"
+redb = "4.2"
+tempfile = "3"
+toml = "1.1"
+blake3 = "1.8"
+safetensors = "0.6"
+byteorder = "1.5"
+tokio = { version = "1.53", default-features = false }
+rmcp = { version = "3.2", features = ["server", "transport-io"] }
+ureq = { version = "3", default-features = false, features = ["json"] }
+
+# --- lints: the same bar pii holds. ZERO, not "below baseline". ---
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+unreachable_pub = "deny"
+unused_qualifications = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+await_holding_lock = "deny"
+# UPSTREAM, not ours: rmcp 3.2 pulls syn 2 (tracing-attributes) and syn 3
+# (darling). Both compile fine; unifying them is rmcp's job. Allowed with
+# the reason here so the rule stays ON everywhere else.
+multiple_crate_versions = "allow"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

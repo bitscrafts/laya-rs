@@ -1,0 +1,22 @@
+# .gitignore — laya-rs
+
+# Build output
+/target/
+
+# The pinned Python runtime for the decision head: ~5.4 GB, reproducible from
+# scripts/setup-runtime.sh with a pinned laya version. Never commit it; the pin is the
+# record, not the tree.
+/.venv-laya/
+
+# Scratch. Everything here is disposable — which is exactly why the GATE does not live
+# here: `scripts/verify-all.sh` used to be in `_tmp/` and was therefore neither versioned
+# nor callable from a fresh clone. Load-bearing scripts live in `scripts/`.
+/_tmp/
+
+# Archived trees kept for provenance (superseded docs, retired one-shot scripts). Kept on
+# disk deliberately — the no-destroy rule — but they are history, not source.
+/docs.old-*/
+/_docs/99-archive/
+
+# Logs
+*.log

@@ -1,0 +1,23 @@
+[package]
+name = "laya-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Terminal runner: ask Laya a question from the shell, print the route-shaped payload, inspect the ledger."
+
+[[bin]]
+name = "laya"
+path = "src/main.rs"
+
+[dependencies]
+laya-core = { path = "../laya-core" }
+laya-backbone = { path = "../laya-backbone" }
+ureq = { workspace = true }
+
+[lints]
+workspace = true

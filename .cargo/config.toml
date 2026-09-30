@@ -1,0 +1,9 @@
+# Cargo alias so `cargo xtask gate` works — the standard xtask pattern.
+#
+# WHY THIS FILE EXISTS (found by verification, not by reading): AGENTS.md, README.md
+# and every spec document the gate as `cargo xtask gate`, but WITHOUT this alias
+# cargo answers `error: no such command: xtask`. A documented command that does not
+# run is worse than no documentation — it is a claim the tree cannot honour. The
+# alias is what makes the documented command real.
+[alias]
+xtask = "run --quiet --package xtask --"

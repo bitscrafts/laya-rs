@@ -1,0 +1,22 @@
+[package]
+name = "laya-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Embedded redb store: the append-only decision ledger, calibration stats, per-tool budgets and policy overrides."
+
+[dependencies]
+# NO DEPS YET, ON PURPOSE (STATUS: NOT STARTED).
+# The redb ledger is unwritten; `redb`/`blake3` come back with it.
+# Declaring them now would misrepresent the crate's state.
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

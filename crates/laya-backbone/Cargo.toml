@@ -1,0 +1,22 @@
+[package]
+name = "laya-backbone"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "HTTP client for the llama.cpp backbone (/embedding) and the Laya decision endpoint. The only crate that talks to the network."
+
+[dependencies]
+laya-core = { path = "../laya-core" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

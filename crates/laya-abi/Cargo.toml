@@ -1,0 +1,18 @@
+[package]
+name = "laya-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Stable types shared by every laya-rs crate: the question, the typed answer, and the route-shaped decision payload"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

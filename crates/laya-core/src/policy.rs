@@ -1,0 +1,563 @@
+//! Thresholds, confidence bands and composite weights — **all caller-side**.
+//!
+//! The video's central discipline is that the model never sees a threshold:
+//! *"Jev never sees the weights. Tuning means changing a number, not a prompt."*
+//! This module is that idea made concrete. Every number a decision depends on is
+//! here, in one reviewable place, loadable from TOML.
+
+use serde::{Deserialize, Serialize};
+
+use laya_abi::QuestionType;
+
+/// Apply a threshold pair to a confidence.
+///
+/// One place, so the two call sites (`band` and `band_for`) can never drift
+/// apart. Boundary semantics: `>= high` is High, `< low` is Low, so the low
+/// boundary belongs to the band above it.
+fn classify(confidence: f64, low: f64, high: f64) -> Band {
+    if confidence >= high {
+        Band::High
+    } else if confidence < low {
+        Band::Low
+    } else {
+        Band::Mid
+    }
+}
+
+/// Where an answer's confidence falls, per the caller's thresholds.
+///
+/// This is the value a DAG routes on. Keeping it a discrete band rather than a
+/// float is deliberate: a float threshold on a model's own probability invites
+/// silent drift, whereas a band is an explicitly-authored edge in the graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Band {
+    /// Confidence is too low to act on. Route to a human, or to the LLM lane for
+    /// a second opinion.
+    Low,
+    /// Confident enough to ask once / proceed with a checkpoint.
+    Mid,
+    /// Confident enough that a destructive action may run without confirmation.
+    High,
+}
+
+impl Band {
+    /// The lowercase wire name, so a `route` rule can write `{ eq = "low", … }`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Mid => "mid",
+            Self::High => "high",
+        }
+    }
+}
+
+/// What a gate concluded — the three-way outcome the video's L4 describes.
+///
+/// Note there is **no `block` variant that implies safety**: a gate is one signal
+/// among several (the video's own L6 was routed around; its author calls the fix
+/// *"an instruction, not a control"*). `Deny` means "this signal says no", and
+/// the caller is expected to pair it with other controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateDecision {
+    /// Proceed without asking.
+    Allow,
+    /// The signal refuses. Make the branch terminal; do not retry around it.
+    Deny,
+    /// The pick is plausible but the confidence is not — escalate.
+    Ask,
+}
+
+/// A policy error: a config that cannot be trusted.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum PolicyError {
+    /// A threshold lies outside `0.0..=1.0`.
+    #[error("threshold `{name}` = {value} is outside 0.0..=1.0")]
+    ThresholdOutOfRange {
+        /// Which threshold.
+        name: &'static str,
+        /// The offending value.
+        value: f64,
+    },
+    /// The two thresholds are inverted, so no band could ever be `Mid`.
+    #[error("{which} thresholds are inverted: low ({low}) must be strictly below high ({high})")]
+    ThresholdsInverted {
+        /// Which threshold pair ("choice/score" or "noul").
+        which: &'static str,
+        /// The low threshold.
+        low: f64,
+        /// The high threshold.
+        high: f64,
+    },
+    /// A `noul` threshold lies outside `0.0..=1.0`.
+    #[error("noul_threshold = {0} is outside 0.0..=1.0")]
+    NoulThresholdOutOfRange(f64),
+    /// The config could not be parsed.
+    #[error("policy config is not valid TOML: {0}")]
+    Toml(String),
+}
+
+/// The numbers every decision depends on.
+///
+/// Defaults come from the video's measured bands (below 0.5 a human decides,
+/// above 0.9 a destructive action runs unconfirmed) and are intentionally
+/// conservative: it is better to escalate than to act on a plausible guess.
+///
+/// **Per-type thresholds (finding m4 of the design review).** A `noul`'s
+/// "confidence" and a `choice`/`score` one are different quantities, so they must
+/// not share a boundary:
+///
+/// * `noul` confidence is `max(p, 1 − p)` — the belief *already folded* so that
+///   0.5 means maximally uncertain.
+/// * `choice`/`score` confidence is `1 − H(p)/log(k)` — a normalised entropy.
+///
+/// A single global band therefore made "0.6 confident" mean two different things.
+/// [`Policy::band_for`] takes the question type and applies the right threshold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Policy {
+    /// At or above this, a `choice`/`score` confidence is `High`.
+    pub high_threshold: f64,
+    /// Below this, a `choice`/`score` confidence is `Low`.
+    pub low_threshold: f64,
+    /// [`Self::high_threshold`] for a `noul`.
+    pub noul_high_threshold: f64,
+    /// [`Self::low_threshold`] for a `noul`.
+    pub noul_low_threshold: f64,
+    /// For a `noul`, the `p` at or above which the answer counts as true.
+    ///
+    /// Separate from the confidence bands because a `noul` has no separate
+    /// confidence — the probability *is* the belief (Laya's documented shape).
+    pub noul_threshold: f64,
+    /// When one option takes more than this share of the mass, treat the answer
+    /// as suspect rather than as strong evidence.
+    ///
+    /// This exists because we measured the deployed checkpoint returning exactly
+    /// `1.000/0.000/0.000` on a real `choice` — the same degenerate-softmax smell
+    /// as the inert `act_probability` head.
+    pub saturation_threshold: f64,
+    /// Whether to refuse to act on a saturated answer at all (`Ask` instead of
+    /// acting), or merely record it. Default: record only.
+    pub escalate_on_saturation: bool,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            high_threshold: 0.9,
+            low_threshold: 0.5,
+            noul_high_threshold: 0.9,
+            noul_low_threshold: 0.5,
+            noul_threshold: 0.5,
+            saturation_threshold: 0.999,
+            escalate_on_saturation: false,
+        }
+    }
+}
+
+impl Policy {
+    /// Parse from TOML text.
+    ///
+    /// # Errors
+    /// [`PolicyError::Toml`] if the text is not valid TOML for this shape.
+    pub fn from_toml(text: &str) -> Result<Self, PolicyError> {
+        toml::from_str(text).map_err(|e| PolicyError::Toml(e.to_string()))
+    }
+
+    /// Check that this policy is internally coherent.
+    ///
+    /// # Errors
+    /// A [`PolicyError`] naming the first problem found.
+    pub fn validate(&self) -> Result<(), PolicyError> {
+        // The band boundaries and the saturation cutoff are all probabilities.
+        for (name, value) in [
+            ("high_threshold", self.high_threshold),
+            ("low_threshold", self.low_threshold),
+            ("noul_high_threshold", self.noul_high_threshold),
+            ("noul_low_threshold", self.noul_low_threshold),
+            ("saturation_threshold", self.saturation_threshold),
+        ] {
+            if !(0.0..=1.0).contains(&value) {
+                return Err(PolicyError::ThresholdOutOfRange { name, value });
+            }
+        }
+        // Checked separately from the loop above, and it must come BEFORE any
+        // range check that would also cover it: `noul_threshold` is not a band
+        // boundary, so a bad value deserves the narrower error that names it.
+        // (Found by test: with it inside the loop, this variant was unreachable.)
+        if !(0.0..=1.0).contains(&self.noul_threshold) {
+            return Err(PolicyError::NoulThresholdOutOfRange(self.noul_threshold));
+        }
+        // BOTH threshold pairs must be well-ordered, not just the choice/score
+        // pair — a noul pair with low >= high makes the Mid band unreachable for
+        // every noul, which is the same silent-hole bug one type over.
+        for (which, low, high) in [
+            ("choice/score", self.low_threshold, self.high_threshold),
+            ("noul", self.noul_low_threshold, self.noul_high_threshold),
+        ] {
+            if low >= high {
+                return Err(PolicyError::ThresholdsInverted { which, low, high });
+            }
+        }
+        Ok(())
+    }
+
+    /// Classify a `choice`/`score` confidence into a band.
+    ///
+    /// Use [`Self::band_for`] when the question type is known — a `noul`'s
+    /// confidence is a different quantity and has its own boundaries.
+    #[must_use]
+    pub fn band(&self, confidence: f64) -> Band {
+        classify(confidence, self.low_threshold, self.high_threshold)
+    }
+
+    /// Classify a confidence into a band, using the boundaries for `kind`.
+    ///
+    /// This is the entry point callers should prefer: a `noul` reports
+    /// `max(p, 1 − p)` while a `choice`/`score` reports `1 − H(p)/log(k)`, so the
+    /// same boundary would mean two different things (design-review finding m4).
+    #[must_use]
+    pub fn band_for(&self, kind: QuestionType, confidence: f64) -> Band {
+        match kind {
+            QuestionType::Noul => classify(
+                confidence,
+                self.noul_low_threshold,
+                self.noul_high_threshold,
+            ),
+            QuestionType::Choice | QuestionType::Score => {
+                classify(confidence, self.low_threshold, self.high_threshold)
+            }
+        }
+    }
+
+    /// Decide a gate from a confidence and whether the proposition is one we must
+    /// never get wrong.
+    ///
+    /// `irreversible` inverts the default: for a destructive action the *only*
+    /// confidence that allows it is `High`. The video's measured example is the
+    /// reason — `rm -rf node_modules && npm install` was classified "reversible"
+    /// at confidence 0.35, and 0.35 must ask a human however the pick reads.
+    #[must_use]
+    pub fn gate(&self, confidence: f64, irreversible: bool, saturated: bool) -> GateDecision {
+        if saturated && self.escalate_on_saturation {
+            return GateDecision::Ask;
+        }
+        match self.band(confidence) {
+            Band::High => GateDecision::Allow,
+            Band::Low => GateDecision::Deny,
+            // Mid, and every irreversible case that is not High: the pick may be
+            // plausible, but the confidence is what we are acting on.
+            Band::Mid if irreversible => GateDecision::Ask,
+            Band::Mid => GateDecision::Ask,
+        }
+    }
+
+    /// Apply a `noul` threshold — the "smart if", with the comparison in code.
+    #[must_use]
+    pub fn noul_is_true(&self, p: f64) -> bool {
+        p >= self.noul_threshold
+    }
+
+    /// Combine weighted sub-scores into one number.
+    ///
+    /// The weights live in the caller's config, never in the prompt: the model
+    /// scores each factor in isolation and code does the arithmetic. Returns the
+    /// weighted mean, or `None` when the weights are empty or sum to zero (there
+    /// is no meaningful score in that case).
+    #[must_use]
+    pub fn weighted_score(pairs: &[(f64, f64)]) -> Option<f64> {
+        let total_weight: f64 = pairs.iter().map(|(w, _)| *w).sum();
+        if total_weight.abs() < f64::EPSILON {
+            return None;
+        }
+        // `mul_add` is both more accurate and fewer instructions; clippy is
+        // right to want it here.
+        let acc = pairs.iter().fold(0.0_f64, |a, (w, s)| w.mul_add(*s, a));
+        Some(acc / total_weight)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- the band boundaries ------------------------------------------------
+
+    #[test]
+    fn bands_split_at_the_configured_thresholds() {
+        let p = Policy::default(); // low 0.5, high 0.9
+        assert_eq!(p.band(0.0), Band::Low);
+        assert_eq!(p.band(0.49), Band::Low);
+        // EXACTLY the low threshold is Mid, not Low: `< low` is Low, so the
+        // boundary belongs to the band above it. Pinned so a refactor cannot
+        // silently move it.
+        assert_eq!(p.band(0.5), Band::Mid);
+        assert_eq!(p.band(0.89), Band::Mid);
+        assert_eq!(p.band(0.9), Band::High);
+        assert_eq!(p.band(1.0), Band::High);
+    }
+
+    #[test]
+    fn band_names_are_route_ready() {
+        assert_eq!(Band::Low.as_str(), "low");
+        assert_eq!(Band::Mid.as_str(), "mid");
+        assert_eq!(Band::High.as_str(), "high");
+    }
+
+    // ---- the video's measured cases ----------------------------------------
+
+    #[test]
+    fn the_measured_reversible_case_asks_a_human() {
+        // The video: `rm -rf node_modules && npm install` -> "reversible" at
+        // confidence 0.35 -> ASKS A HUMAN, because the pick is plausible and the
+        // confidence is not. 0.35 is Low here, so it Denies rather than Asks —
+        // either way it does NOT allow, which is the property that matters.
+        let p = Policy::default();
+        let d = p.gate(0.35, false, false);
+        assert_ne!(d, GateDecision::Allow, "0.35 must never auto-allow");
+    }
+
+    #[test]
+    fn mid_confidence_always_asks_never_denies() {
+        // The control for the case above: a genuinely Mid confidence must ASK,
+        // not DENY — refusing outright on a plausible answer would push callers
+        // to bypass the gate.
+        let p = Policy::default();
+        assert_eq!(p.gate(0.7, false, false), GateDecision::Ask);
+        assert_eq!(p.gate(0.7, true, false), GateDecision::Ask);
+    }
+
+    #[test]
+    fn irreversible_needs_high_confidence() {
+        let p = Policy::default();
+        assert_eq!(p.gate(0.95, true, false), GateDecision::Allow);
+        // The same confidence on a reversible action is also Allow — the flag
+        // only ever *tightens*, never loosens.
+        assert_eq!(p.gate(0.95, false, false), GateDecision::Allow);
+        assert_eq!(p.gate(0.7, true, false), GateDecision::Ask);
+    }
+
+    // ---- saturation: the flag we added from our own measurement -------------
+
+    #[test]
+    fn saturated_answers_ask_only_when_configured() {
+        let mut p = Policy::default();
+        assert_eq!(
+            p.gate(0.99, false, true),
+            GateDecision::Allow,
+            "record-only by default"
+        );
+        p.escalate_on_saturation = true;
+        assert_eq!(
+            p.gate(0.99, false, true),
+            GateDecision::Ask,
+            "when configured, saturation escalates"
+        );
+    }
+
+    // ---- noul ---------------------------------------------------------------
+
+    #[test]
+    fn noul_threshold_is_inclusive_and_in_code() {
+        let p = Policy::default(); // 0.5
+        assert!(p.noul_is_true(0.5));
+        assert!(!p.noul_is_true(0.499));
+        assert!(p.noul_is_true(0.99));
+    }
+
+    // ---- composite scoring --------------------------------------------------
+
+    #[test]
+    fn composite_score_applies_weights() {
+        // The video's ticket example: severity .6, frustration .3, quality .1.
+        let pairs = [(0.6, 0.9), (0.3, 1.0), (0.1, 0.2)];
+        let got = Policy::weighted_score(&pairs);
+        let want = 0.6_f64.mul_add(0.9, 0.3_f64.mul_add(1.0, 0.1 * 0.2));
+        assert!((got.unwrap_or_default() - want).abs() < 1e-12);
+    }
+
+    #[test]
+    fn composite_score_rejects_degenerate_weights() {
+        // No weights, and weights summing to zero: both mean "no score", and
+        // returning 0.0 would silently read as "definitely not important".
+        assert!(Policy::weighted_score(&[]).is_none());
+        assert!(Policy::weighted_score(&[(0.0, 1.0), (0.0, 0.5)]).is_none());
+    }
+
+    // ---- config -------------------------------------------------------------
+
+    #[test]
+    fn toml_round_trip_and_defaults() {
+        let p = Policy::default();
+        let text = toml::to_string(&p).unwrap_or_default();
+        let back = Policy::from_toml(&text).unwrap_or_default();
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn a_partial_toml_takes_defaults_for_the_rest() {
+        let p = Policy::from_toml("high_threshold = 0.95").unwrap_or_default();
+        assert!((p.high_threshold - 0.95).abs() < f64::EPSILON);
+        assert!(
+            (p.low_threshold - 0.5).abs() < f64::EPSILON,
+            "unspecified keys keep defaults"
+        );
+    }
+
+    #[test]
+    fn inverted_thresholds_are_rejected() {
+        let p = Policy {
+            low_threshold: 0.9,
+            high_threshold: 0.5,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            p.validate(),
+            Err(PolicyError::ThresholdsInverted {
+                which: "choice/score",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn equal_thresholds_are_rejected() {
+        // Equal values make Mid unreachable — a whole band silently disappears,
+        // which is exactly the kind of config bug that must fail loudly.
+        let p = Policy {
+            low_threshold: 0.7,
+            high_threshold: 0.7,
+            ..Policy::default()
+        };
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn out_of_range_thresholds_are_rejected() {
+        let p = Policy {
+            high_threshold: 1.5,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            p.validate(),
+            Err(PolicyError::ThresholdOutOfRange { .. })
+        ));
+        let p = Policy {
+            noul_threshold: -0.1,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            p.validate(),
+            Err(PolicyError::NoulThresholdOutOfRange(_))
+        ));
+    }
+
+    #[test]
+    fn the_default_policy_is_valid() {
+        assert!(Policy::default().validate().is_ok());
+    }
+
+    #[test]
+    fn unknown_keys_are_rejected() {
+        // A typo'd key must not be silently ignored: `hihg_threshold = 0.99`
+        // would otherwise leave the gate at the default and nobody would notice.
+        assert!(Policy::from_toml("hihg_threshold = 0.99").is_err());
+    }
+    // ---- per-type thresholds (design-review finding m4) ---------------------
+    //
+    // A noul reports max(p, 1-p) and a choice/score reports 1 - H(p)/log(k).
+    // Those are different quantities, so they get different boundaries — these
+    // tests pin that they are read from the RIGHT pair, which is the bug the
+    // review found (one global threshold made "0.6 confident" mean two things).
+
+    #[test]
+    fn a_noul_uses_its_own_thresholds() {
+        let p = Policy {
+            low_threshold: 0.5,
+            high_threshold: 0.9,
+            noul_low_threshold: 0.7,
+            noul_high_threshold: 0.99,
+            ..Policy::default()
+        };
+        // 0.6 is Mid for a choice/score (>= 0.5, < 0.9) but LOW for a noul
+        // (< 0.7). Same number, different answer: the whole point.
+        assert_eq!(p.band_for(QuestionType::Choice, 0.6), Band::Mid);
+        assert_eq!(p.band_for(QuestionType::Noul, 0.6), Band::Low);
+        assert_eq!(p.band_for(QuestionType::Noul, 0.995), Band::High);
+        assert_eq!(p.band_for(QuestionType::Score, 0.6), Band::Mid);
+    }
+
+    #[test]
+    fn band_and_band_for_agree_for_choice_and_score() {
+        // `band` is the convenience form for the choice/score pair; if the two
+        // ever disagree, one of them is using the wrong thresholds.
+        let p = Policy::default();
+        for c in [0.0, 0.3, 0.5, 0.7, 0.9, 0.95, 1.0] {
+            assert_eq!(p.band(c), p.band_for(QuestionType::Choice, c), "c={c}");
+            assert_eq!(p.band(c), p.band_for(QuestionType::Score, c), "c={c}");
+        }
+    }
+
+    #[test]
+    fn an_inverted_noul_pair_is_rejected() {
+        // The same silent-hole bug as the choice/score pair, one type over: with
+        // low >= high the Mid band is unreachable for every noul.
+        let p = Policy {
+            noul_low_threshold: 0.9,
+            noul_high_threshold: 0.5,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            p.validate(),
+            Err(PolicyError::ThresholdsInverted { which: "noul", .. })
+        ));
+    }
+
+    #[test]
+    fn equal_noul_thresholds_are_rejected() {
+        let p = Policy {
+            noul_low_threshold: 0.8,
+            noul_high_threshold: 0.8,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            p.validate(),
+            Err(PolicyError::ThresholdsInverted { which: "noul", .. })
+        ));
+    }
+
+    #[test]
+    fn out_of_range_noul_band_thresholds_are_rejected() {
+        for p in [
+            Policy {
+                noul_high_threshold: 2.0,
+                ..Policy::default()
+            },
+            Policy {
+                noul_low_threshold: -0.5,
+                ..Policy::default()
+            },
+        ] {
+            assert!(matches!(
+                p.validate(),
+                Err(PolicyError::ThresholdOutOfRange { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn per_type_thresholds_survive_a_toml_round_trip() {
+        // The per-type boundaries must be configurable, not just constructible —
+        // otherwise a deployment cannot tune them.
+        let p = Policy::from_toml("noul_low_threshold = 0.7\nnoul_high_threshold = 0.99")
+            .unwrap_or_default();
+        assert!((p.noul_low_threshold - 0.7).abs() < f64::EPSILON);
+        assert!((p.noul_high_threshold - 0.99).abs() < f64::EPSILON);
+        assert!(
+            (p.low_threshold - 0.5).abs() < f64::EPSILON,
+            "choice pair keeps defaults"
+        );
+    }
+}

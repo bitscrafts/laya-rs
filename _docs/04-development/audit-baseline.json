@@ -1,0 +1,20 @@
+[
+ "A1:capacity",
+ "A1:dispatch",
+ "A1:fmt",
+ "A1:fmt",
+ "A1:main",
+ "A1:main",
+ "A1:server_capabilities",
+ "A1:stats",
+ "A1:temp_tag",
+ "A1:temperature_was_clamped",
+ "A1:with_criteria",
+ "A3:laya-abi:schemars",
+ "A3:laya-cli:laya-store",
+ "A3:laya-head:blake3",
+ "A3:laya-head:safetensors",
+ "A3:laya-mcp:laya-head",
+ "A3:laya-mcp:laya-store",
+ "A3:laya-store:blake3"
+]

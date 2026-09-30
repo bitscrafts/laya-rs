@@ -1,0 +1,34 @@
+# laya-rs — table of contents
+
+Flat list of every document. See [`INDEX.md`](INDEX.md) for structure and the
+reading order.
+
+## 01-overview
+- [What laya-rs is](01-overview/README.md)
+- [](01-overview/README.md#the-three-properties)
+
+## 02-guides
+- [Guides](02-guides/README.md)
+
+## 03-reference
+- [Reference](03-reference/README.md)
+
+## 04-development
+- [Design amendments — what the adversarial review changed](04-development/DESIGN-AMENDMENTS-2026-09-29.md)
+- [P1 status — and the measurements that shaped it](04-development/P1-STATUS.md)
+- [The ten levels, mapped to our tools](04-development/TEN-LEVELS-MAPPING.md)
+- [Development](04-development/README.md)
+
+## 05-operations
+- [Readiness and the priority queue](05-operations/READINESS-AND-QUEUE.md)
+- [The decision ledger](05-operations/DECISION-LEDGER.md)
+- [Operations](05-operations/README.md)
+
+## 06-research
+- [Design (v1) — superseded in part](06-research/01-design.md)
+- [Adversarial review by pi + glm-5.3](06-research/02-analysis-glm-5.3.md)
+- [The review brief](06-research/02a-analysis-brief.md)
+- [Research](06-research/README.md)
+
+## 99-archive
+- [Archive](99-archive/README.md)

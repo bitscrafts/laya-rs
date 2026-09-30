@@ -1,0 +1,31 @@
+[package]
+name = "laya-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "The MCP stdio server: one Rust binary exposing laya-rs to Hermes, pi, Claude Code, skills and hooks"
+
+[[bin]]
+name = "laya-mcp"
+path = "src/main.rs"
+
+[dependencies]
+laya-abi = { path = "../laya-abi" }
+laya-core = { path = "../laya-core" }
+laya-backbone = { path = "../laya-backbone" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util", "sync", "time"] }
+rmcp = { workspace = true }
+ureq = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
