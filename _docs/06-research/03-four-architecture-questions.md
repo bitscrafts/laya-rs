@@ -12,7 +12,7 @@ ledger](#corrections-ledger) rather than deleted, because the disagreement is th
 | # | question | answer |
 |---|---|---|
 | 1 | Safe multithreading; does the queue fix it; other structures; pub/sub? | **Yes — and parallelism is safe if you split the OUTPUT, never the reduction.** The existing priority queue is the pool's admission control. Pub/sub: never for ingest, yes for egress. |
-| 2 | Config hardcoded, JSON, or redb? Faster loads? Export flows? Ship a filled redb? | **Split by author**: text for human-authored thresholds, redb for machine-measured values. redb does **not** speed the load. Ship flows as **text + an import command**. |
+| 2 | Config hardcoded, JSON, or redb? Faster loads? Export flows? Ship a filled redb? | **Split by author**: text for human-authored thresholds, redb for machine-measured values. **No storage format speeds the load** — ~24 s is the Python stack, not the 106 MB of weights. Ship flows as **text + an import command**. |
 | 3 | Our own graph specification? | **Yes — and the feature is generic DAG execution.** The engine must not know what a "spec" or "test" is. Absorb it **standalone**. |
 | 4 | Feasible to implement a scheduler? Supersede the other engine? | **Feasible** (it is ~1.5–3k LOC, not 25k). **Absorbing is not superseding** — and supersession is not our goal. |
 
@@ -506,8 +506,9 @@ the ledger has none yet.
 
 ## Corrections ledger
 
-Six round-1 claims were wrong. They are kept here rather than deleted, because in each case
-the *disagreement* is the finding. Newest correction last.
+Seven claims made in earlier rounds were wrong. They are kept here rather than deleted, because in each case
+the *disagreement* is the finding. Newest correction last; the table is complete as of
+2026-09-30.
 
 | # | claim | what invalidated it | corrected to |
 |---|---|---|---|
