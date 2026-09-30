@@ -79,6 +79,71 @@ language is **only object member access** (`$.a.b`) — no arrays, no functions,
 | `noul_and_score_fields_carried_through` | noul with p; score with score | `p` / `score` present |
 | `payload_round_trips_and_omits_empty_fields` | any payload | equal after round-trip; `label`/`band` present in the JSON |
 
+## `calibrate` — whether the confidence is worth gating on (added 2026-09-30)
+
+Spec 04's ledger records `(confidence, correct)` pairs. This is the feature that consumes them.
+
+**Where it lives:** the pure function is in `laya-store` (it is arithmetic over two vectors, with
+no I/O and no model); the CLI verb is `laya ledger calibrate`. It is NOT an MCP tool, because it
+reads the whole ledger and a per-call tool that scans the store is a different kind of operation
+from every other tool on that surface.
+
+### Functional
+
+- **C1.** `calibrate` computes **Expected Calibration Error** as `laya.common.ece_score` defines
+  it: 15 equal-width bins over `(0, 1]` (the first edge is exclusive, so a confidence of exactly
+  0.0 falls in NO bin), each bin contributing `bin_mass × |mean_confidence − accuracy|`, where
+  `bin_mass` is that bin's share of all samples. The reference implementation is the oracle and it
+  is pinned by test against values produced by running it:
+
+  | conf | correct | ECE |
+  |---|---|---|
+  | `[1,1,1,1]` | `[1,1,1,1]` | `0.0` |
+  | `[1,1,1,1]` | `[0,0,0,0]` | `1.0` |
+  | `[0.9,0.8,0.7,0.95,0.6]` | `[1,1,1,0,1]` | `0.39` |
+  | `[0.1,0.2,0.9]` | `[0,1,1]` | `0.3333333333333333` |
+  | `[]` | `[]` | `nan` |
+
+- **C2.** An **empty** input returns `nan`, not 0. This is the same rule as an empty percentile:
+  zero would read as "perfectly calibrated", which is a measurement nobody made.
+- **C3.** The join is by decision identity: an outcome names a decision, and only decisions that
+  **have** an outcome enter the calculation. Decisions without outcomes are counted separately.
+- **C4.** It reports, and does not judge: `ece`, the sample count, the number of decisions with no
+  outcome, the per-bin table, and a **plain statement when the sample is too small to conclude
+  anything**. What counts as too small is recorded (see C5) rather than left to vibes.
+- **C5.** `MIN_SAMPLES = 30`. Below it, `calibrate` still computes and reports the ECE but marks
+  it `conclusive: false`. 30 is a convention, stated as a convention — with 15 bins it means an
+  average of 2 samples per bin, which is weak, and the point of saying so is that a number with
+  `conclusive: false` next to it cannot be quoted as if it were one.
+- **C6.** It reports the **saturation rate** alongside. A saturation rate near 1.0 means the
+  model's confidence carries almost no information, which is the single most useful thing to know
+  before trusting any threshold on it.
+
+### Non-Functional
+
+- **NC1.** No new dependency. The arithmetic is sums and comparisons.
+- **NC2.** Deterministic: the same records give the same ECE, to the last bit.
+- **NC3.** It never writes. `calibrate` is a reader, and the store stays append-only.
+
+### TDD Contract
+
+| Test Name | Input | Expected Output |
+|---|---|---|
+| `ece_matches_the_reference_on_perfect_input` | the 5 oracle vectors above | exact equality, including `nan` |
+| `ece_of_an_empty_input_is_nan_not_zero` | `[]` | `nan`, with the reason |
+| `ece_uses_(0,1]_bins_so_confidence_zero_is_excluded` | `[0.0]` / `[1]` | excluded from every bin |
+| `only_decisions_with_outcomes_enter_the_calculation` | 3 decisions, 1 outcome | `1` sample |
+| `a_small_sample_is_marked_inconclusive` | `MIN_SAMPLES − 1` | `conclusive: false` |
+| `at_min_samples_it_is_conclusive` | `MIN_SAMPLES` | `conclusive: true` (the boundary) |
+| `the_saturation_rate_is_reported_alongside` | a saturated decision | a rate of `1.0` |
+
+### Guardrails
+
+- Do NOT compute an ECE and present it without the sample size. An ECE over 3 decisions is noise.
+- Do NOT treat `nan` as an error to be swallowed: it is the correct answer for no data.
+- Do NOT let `calibrate` write an outcome. Recording what was right is a human/agent act, and a
+  calibration that manufactured its own ground truth would be measuring itself.
+
 ## Exit Criteria
 - [ ] `cd /projects/laya-rs && cargo test -p laya-core --lib` — all pass
 - [ ] `cd /projects/laya-rs && cargo clippy -p laya-core --all-targets -- -D warnings` — zero

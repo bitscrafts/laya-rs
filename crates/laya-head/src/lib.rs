@@ -31,6 +31,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod safetensors;
+
 /// The temperature clamp Laya applies to its own config, which a faithful port
 /// must reproduce (blocker B2).
 ///

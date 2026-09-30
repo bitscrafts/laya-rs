@@ -43,6 +43,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod calibrate;
+
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};

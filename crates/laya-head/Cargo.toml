@@ -10,12 +10,11 @@ categories.workspace = true
 description = "The 26.5M-parameter Laya decision head in pure Rust: safetensors load + attention/LayerNorm/GELU/scorer. No Python, no torch."
 
 [dependencies]
-# DEPS FOR THE UNWRITTEN PART ARE ABSENT ON PURPOSE.
-# This crate is the P4 work (specs/03-rust-head.md): only the
-# temperature clamp exists so far. The forward pass will need
-# `safetensors` and `blake3` back; declaring them now would make the
-# manifest describe a crate that does not exist, which is how a shell
-# gets mistaken for an implementation.
+# The safetensors READER is written here, not pulled in: the format is a documented 8-byte
+# length plus JSON, the obvious crates mmap (which needs `unsafe` and this crate forbids it),
+# and writing it means the exact semantics we depend on are asserted against the real
+# checkpoint rather than trusted to a version range.
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
