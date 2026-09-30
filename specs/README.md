@@ -20,29 +20,30 @@ Specs are the **implementation contract**, not documentation. Each one carries:
 | [`04-mcp-server-and-ledger.md`](04-mcp-server-and-ledger.md) | P1 | **COMPLETE (2026-09-30)** — the stdio server (all 7 tools) + the redb ledger |
 | [`05-laya-must-be-running.md`](05-laya-must-be-running.md) | P1 | **IMPLEMENTED** — judgement + probe parsers + `laya doctor`, all tested |
 | [`06-priority-queue.md`](06-priority-queue.md) | P1 | **IMPLEMENTED** — the bounded priority queue, 16 tests |
+| [`07-graph-executor.md`](07-graph-executor.md) | P5 | **SPECIFIED** — the generic DAG executor, split into 4 parts: [1](07-graph-executor-part1.md) the flow+lowering+R15 · [2](07-graph-executor-part2.md) composition+render · [3](07-graph-executor-part3.md) the scheduler · [4](07-graph-executor-part4.md) CLI+acceptance |
 
-**255 tests pass across the workspace, clippy is at zero warnings, fmt is clean, and
+**345 tests pass across the workspace, clippy is at zero warnings, fmt is clean, and
 `cargo xtask gate` passes all three steps.** Run `scripts/verify-all.sh` for the whole picture,
-including the doc-citation check.
+including the doc-citation check and the live corpus parity check (§6c).
 
 ## What is left
 
-**Nothing outstanding — every spec 01–06 is done.** (`EXIT CRITERIA: pass=22 fail=0 prose=3`, and no
-unchecked box remains anywhere in `specs/`.) What comes next is a NEW spec, not remaining work on
-these: the generic graph executor (`_docs/03-reference/GRAPH-SPEC.md`), which is spec 07 and is
-deliberately not written yet — absorbing a DAG executor is our own capability, not a gap in P4.
+**Nothing outstanding in specs 01–06.** (`EXIT CRITERIA: pass=22 fail=0 prose=2`, and no
+unchecked box remains anywhere in `specs/`.) What comes next is **spec 07**, which is now
+written and split into four parts — the generic graph executor, absorbing a DAG runner as our
+own capability rather than a gap in P4.
 Everything else is implemented and proven:
 
 - P1 is complete. The MCP server exposes all seven tools, the redb ledger is written by
   `laya ledger compact` and nothing else, and `scripts/prove-ledger.py` proves the whole
   lifecycle end to end through the real binaries.
-- **Two things are deliberately not built, and neither is a spec:**
-  - `calibrate`. It is *possible* now — the outcome path exists — but it needs outcomes
-    actually recorded before it can mean anything. `laya ledger stats` reports
-    `outcomes: 0` and says so.
-  - **Driving a DAG with a payload.** `route_payload.rs` is the tested contract and the
-    payload reaches a caller, but nothing yet feeds one through a real `route` node. That
-    runner belongs in this repository (see `AGENTS.md`, SCOPE).
+- **One thing is deliberately not built, and it is not a gap:** `calibrate`. It is *possible*
+  now — the outcome path exists — but it needs outcomes actually recorded before it can mean
+  anything. `laya ledger stats` reports no outcomes recorded while there are none, so the gap
+  is visible rather than implied.
+- **Spec 07 supersedes the older note here that "nothing yet feeds a payload through a real
+  `route` node".** That was true when written; spec 07 is the runner, and it lands in this
+  repository (`AGENTS.md`, SCOPE).
 
 ## Order
 
