@@ -36,6 +36,8 @@ categories = ["development-tools", "science"]
 description = "laya-rs — a Rust System-1 decision layer: Laya over MCP stdio, feeding deterministic DAG route nodes"
 
 [workspace.dependencies]
+# Glob expansion for ask_files. Already in the local registry — no network fetch.
+glob = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

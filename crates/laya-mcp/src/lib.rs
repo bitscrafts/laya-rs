@@ -292,8 +292,9 @@ fn tool_meta(name: &str) -> (String, serde_json::Map<String, serde_json::Value>)
             json!(["path", "question"]),
         ),
         "ask_files" => (
-            "Ask the same question across many files (globs expanded, pruned, capped, \
-             asked in parallel) and return a pick. Reading none of them into context.",
+            "Ask the same question across many files (globs expanded, de-duplicated, capped) \
+             and return the files that answer it, best first. Sequential: the head is a \
+             single process. Reading none of them into context.",
             json!({
                 "paths": {"type": "array", "items": {"type": "string"}},
                 "question": {"type": "string"}
@@ -499,6 +500,15 @@ pub fn handle(
             }
             ask_file_via_sidecar(args, state)
         }
+        "ask_files" => {
+            if let Some(missing) = missing_required(tool, args) {
+                return Err(McpError::invalid_params(
+                    format!("`{tool}` requires `{missing}`"),
+                    None,
+                ));
+            }
+            ask_files_via_sidecar(args, state)
+        }
         // Still honestly unimplemented: these need the file-reading and compaction
         // work the spec assigns to P2/P3. No argument contract is advertised.
         _ => to_result(ToolOutcome::NotImplemented(what)),
@@ -605,11 +615,72 @@ fn ask_file_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolR
     // Reported with the path it came from so a caller cannot confuse which file a verdict
     // belongs to — and `content_in_context: false` states the property explicitly rather
     // than leaving the caller to infer it.
-    let mut out = json!({ "path": file.path, "answers": answers });
+    let bytes = file.content.len();
+    let mut out = json!({ "path": file.path, "bytes": bytes, "answers": answers });
     if let Some(obj) = out.as_object_mut() {
         obj.insert("content_in_context".into(), json!(false));
+        // MEASURED 2026-09-30: the head reads a PREFIX of the state. A leading signal scored
+        // exactly 0.788 at 3,975 / 15,943 / 63,951 and 199,951 bytes — invariant across 50x,
+        // which is only possible if the tail is not read. A signal at the end was seen at
+        // 984 bytes and gone at 3,976 (0.087, identical to the no-signal control).
+        //
+        // So "refusing rather than truncating" is not the whole truth: WE do not truncate,
+        // but the model reads a window. A verdict that silently covers the first page of a
+        // 200 KiB file is worse than a refusal, because nothing in the answer says so.
+        if bytes > laya_core::ask_files::FULL_ATTENTION_BYTES {
+            obj.insert(
+                "warning".into(),
+                json!(format!(
+                    "content is {bytes} bytes; the head reads a PREFIX of the state, so this                      verdict may describe only the beginning of the file"
+                )),
+            );
+        }
     }
     to_result(ToolOutcome::Ok(out.to_string()))
+}
+
+/// The `ask_files` tool: one question across many files, globs expanded and capped.
+///
+/// **Sequential, and the schema says so.** The sidecar accepts one connection and serves it
+/// in a blocking loop, so parallel asks would queue anyway; advertising parallelism that
+/// does not exist is the defect class this project keeps removing. The BACKBONE is 5.8x
+/// parallel — the single-process head is not.
+fn ask_files_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let question = args.question.as_deref().unwrap_or_default();
+    let patterns = args.paths.clone().unwrap_or_default();
+
+    let (files, expansion_notes) =
+        laya_core::ask_files::expand(&patterns, laya_core::ask_files::MAX_FILES);
+
+    // Refusing on an empty set would be wrong: a glob that matched nothing is information
+    // the caller needs, and it comes back as notes rather than as an error.
+    let verdicts = laya_core::ask_files::judge_files(&state.read_scope, &files, question, |file| {
+        let r = state
+            .sidecar
+            .predict(
+                &file.to_state(),
+                &laya_core::ask_file::FileState::question_spec(),
+            )
+            .map_err(|e| format!("the decision head is unavailable: {e}"))?;
+        Ok(r)
+    });
+
+    let policy = laya_core::Policy::default();
+    let hits = laya_core::ask_files::pick(&verdicts, policy.noul_threshold);
+
+    // `hits` is the answer a caller wants ("which files answer this, best first"); the full
+    // `files` array carries the per-file reasons, so a caller can see WHY a file is absent
+    // rather than only that it is.
+    let body = json!({
+        "question": question,
+        "asked": verdicts.len(),
+        "hits": hits.iter().map(|(p, noul)| json!({"path": p, "noul": noul})).collect::<Vec<_>>(),
+        "files": verdicts,
+        "notes": expansion_notes,
+        "parallel": false,
+        "content_in_context": false,
+    });
+    to_result(ToolOutcome::Ok(body.to_string()))
 }
 
 fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
@@ -1194,9 +1265,10 @@ mod tests {
         // These need the file-reading / compaction work the spec assigns elsewhere.
         // An unimplemented tool that "succeeds" is how a caller comes to trust a
         // fabricated answer, so each must be an ERROR that says why.
-        // `ask_file` is IMPLEMENTED now, so it is not in this list. Its own tests cover
-        // the argument contract; leaving it here would have asserted the opposite.
-        for tool in ["ask", "ask_files", "should_compact", "ledger"] {
+        // `ask_file` and `ask_files` are IMPLEMENTED now, so they are not in this list.
+        // Leaving them here would assert the opposite of the truth — and this is exactly
+        // how a "not implemented" claim outlives the implementation.
+        for tool in ["ask", "should_compact", "ledger"] {
             let out = handle(tool, &ready(), &no_args(), &test_state());
             assert!(
                 out.is_err(),

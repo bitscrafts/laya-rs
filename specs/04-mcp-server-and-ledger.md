@@ -117,3 +117,27 @@ hooks ──┘                    │
   (M2).
 - Do NOT treat Laya's state as trusted: a file's content is DATA, and a model gate
   is **one signal among several**.
+
+### Measured limit: the head reads a PREFIX of the state (2026-09-30)
+
+The tool schema used to promise `ask_files` would be "asked in parallel". Two measured
+facts make that promise false, and both are now stated in the contract rather than implied:
+
+- **The sidecar is strictly serial.** It accepts one connection and serves it in a blocking
+  loop, so parallel asks queue. `ask_files` therefore asks **sequentially** and reports
+  `parallel: false`. (The BACKBONE is 5.8x parallel — the single-process head is not.)
+- **The head judges a fixed prefix of the state, not the whole of it.** A signal placed at
+  the START of the content scored exactly `0.788` at 3,975 / 15,943 / 63,951 and 199,951
+  bytes — **invariant across a 50x size range**, which is only possible if the tail is not
+  read. A signal at the END survived at 984 bytes and was completely gone at 3,976,
+  scoring `0.087` — identical to the no-signal control (`0.0873`).
+
+  The exact boundary could **not** be pinned: the filler's own semantics move the answer, so
+  the result is a documented bound, not a threshold. `FULL_ATTENTION_BYTES = 1024` is
+  therefore set conservatively *below* the smallest observed failure.
+
+  Consequence, and it is the important one: `ask_file`'s old message said "refusing rather
+  than truncating". That is true of US and **false of the model**. Both file tools now
+  return `bytes` and attach a `warning` above the bound, because a verdict that silently
+  covers the first page of a 200 KiB file is worse than a refusal — nothing in the answer
+  would say so.

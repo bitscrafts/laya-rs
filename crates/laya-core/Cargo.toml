@@ -12,6 +12,7 @@ description = "Pure decision logic: prompt construction, answer parsing, confide
 
 [dependencies]
 laya-abi = { path = "../laya-abi" }
+glob = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
