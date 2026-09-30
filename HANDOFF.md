@@ -1,9 +1,13 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 (5) · **Status**: GREEN — **SPEC 03 IS COMPLETE, every spec 01–06 done.**
-`EXIT CRITERIA: pass=22 fail=0 prose=3` — **no unchecked box remains anywhere in `specs/`**.
-`scripts/verify-all.sh` PASS · **344 tests** · clippy 0 workspace-wide · fmt clean ·
+**Date**: 2026-09-30 (6) · **Status**: GREEN — **SPEC 03 IS COMPLETE, every spec 01–06 done.**
+`EXIT CRITERIA: pass=22 fail=0 prose=2` — **no unchecked box remains anywhere in `specs/`.**
+`scripts/verify-all.sh` PASS · **345 tests** · clippy 0 workspace-wide · fmt clean ·
 61 doc links 0 broken · doc-honesty 27 docs every citation resolves.
+
+The live corpus is a **gate step**, not a manual check: `verify-all.sh` §6c runs
+`scripts/live-corpus-parity.py`, so `LABEL AGREEMENT: 16/16 = 1.0000` is reported on every gate run
+rather than asserted here.
 
 ## Spec 03's live criterion, MEASURED
 
@@ -37,9 +41,9 @@ failed. That is what makes the port reachable and the criterion runnable.
 
 ## Spec 03 (P4): the head is reproduced against PyTorch itself
 
-Spec 04 is complete; spec 03 is the remaining one, and its offline half is now **proven** rather
-than asserted. The differential test is the point: it runs the **real** `nn.TransformerEncoderLayer`
-over synthetic hidden states and requires the Rust port to reproduce the logits.
+Spec 03 is complete on **every** half, offline and live. The differential test is the point: it runs
+the **real** `nn.TransformerEncoderLayer` over synthetic hidden states and requires the Rust port to
+reproduce the logits.
 
 ```
 crates/laya-head/src/math.rs       f32 primitives, per-branch MEASURED accuracy
@@ -60,12 +64,16 @@ row; an off-by-`n_heads` in the fused `in_proj` layout; and a fixture that was b
 (`round()` perturbs an f32; `repr()` emits a JSON *string*, so Rust parsed NaN and both sides
 failed identically).
 
-**In progress:** the tokenizer and `build_sequence` (delegated), with the same differential-fixture
-acceptance test.
+**DONE, not in progress:** the tokenizer and `build_sequence` landed with the same differential-fixture
+acceptance test — **exact** equality, not approximate: 91 corpus strings / 2,207 ids, 707 sequence
+cases / 83,411 ids, 2,705 markers. Special tokens are `50281`/`50282`/`50283`/`50284`, **not** the
+0–4 a reader would assume, and the fixture pins them. One new dependency was unavoidable and is
+recorded with its reason in the manifest: the GPT-2 split needs a NEGATIVE LOOKAHEAD (`\s+(?!\S)`),
+which the `regex` crate cannot express at all (its guarantee is linear time), so that one pattern
+runs on `fancy-regex` — measured against the reference's Onig engine over 4,007 fuzzed inputs, zero
+mismatches.
 
-## Earlier: the ledger, and `calibrate` is possible
-
-## The ledger exists now, and `calibrate` is possible
+## The ledger, and `calibrate` is possible
 
 Spec 04's second half was a contract with no implementation. It is implemented:
 `crates/laya-store` (redb 4.2.0), the server's per-process segment writing (F8), and
@@ -97,7 +105,7 @@ enforced by a test in our own code.
 test, so nothing outside this repository can move our behaviour silently. A DAG runner belongs
 HERE if we build one.
 
-## Six tools are real now (was 3 of 7)
+## The seven tools are real (this section previously said six of seven)
 
 | tool | state |
 |---|---|
@@ -107,7 +115,7 @@ HERE if we build one.
 | `ask_files` | real — globs expanded, capped at 64, `hits` ranked by belief |
 | `should_compact` | real — L7, four judgements in one call |
 | `ask` | real — L10, the CALLER writes the questions |
-| `ledger` | **stub** — needs `laya-store`, which is unwritten |
+| `ledger` | real — redb 4.2.0 (`laya-store`), `compact \| stats \| tail \| outcome`, per-process segments. The outcome path exists, which is what `calibrate` needed |
 
 ## THE SAFETY DEFECT THAT WAS FIXED (do not regress it)
 
@@ -282,43 +290,47 @@ diff).
 * A check missing from `by_check` is indistinguishable from a check that found nothing.
   Both cases were observed on this tree. Cross-check `proven` against the baseline.
 
-## Next (ranked, unchanged)
+## Next — there is no remaining work in specs 01–06; the next item is a NEW spec
 
-1. `ask_file` / `ask_files` — highest value; everything needed now exists.
-2. The **near-tie margin** in the payload (top1−top2), before P4: the measured
-   Δp = 0.0006 between backends can flip a near-tie, so it must escalate, not decide.
-3. `should_compact`, then `ledger` (needs an outcome path first).
-4. **P4** — the Rust head, which also wires `temperature_was_clamped` / `temp_tag` /
-   `with_criteria` or deletes them.
+Everything this section used to list is **done**: `ask_file`/`ask_files`, the near-tie margin in
+the payload, `should_compact`, `ledger` with its outcome path, and **P4 (the Rust head)**. The list
+below is what remains, and none of it is a gap in an existing spec.
 
-## Next (ranked, superseded by the section above)
-
-
-1. **`ask_file` / `ask_files`** — the highest-value tools (a file judged without ever
-   entering the agent's context). Everything needed to build them now exists.
-2. **`should_compact`**, then `ledger` (needs an outcome-recording path before
-   `calibrate` can mean anything — ECE needs `(confidence, correct)` pairs).
-3. **The near-tie guard** must land before P4: the payload should carry the top1−top2
-   margin so a Δp=0.0006-scale flip escalates instead of deciding silently.
-4. **P4 Rust head** — removes torch, and with it the sidecar. Not before (1)–(3).
+1. **Spec 07 — the generic DAG executor.** A **new capability**, documented and deliberately *not*
+   written in `_docs/03-reference/GRAPH-SPEC.md` (which presents it as a *suggestion*). This is the
+   only real unit of work left. `laya-rs` has **no** graph implementation today — it has
+   `route_payload.rs`, the contract a graph `route` node matches on, restated here and pinned by test.
+2. **The open research questions** in `_docs/06-research/03-four-architecture-questions.md`
+   (threading, redb config, the graph runner, absorb-vs-supersede). Research, not implementation.
+3. **The commit-hygiene decision (register A24)** — needing *the user*, not an agent.
 
 ## Known gaps (honest)
 
-* Five of seven tools are unimplemented — they error rather than pretend.
-* The sidecar is supervised; **the MCP client session is not** — a session holding a
-  pre-rebuild binary keeps its old behaviour (MCP clients do not hot-reload).
-* `laya doctor` reads the socket env var at call time while `laya-mcp` reads it at
-  startup. Same default, so no drift today, but a relocated socket can diverge.
-* `calibrate` has no ground truth: the ledger records decisions, not outcomes.
+* **No tool is unimplemented.** All seven error only on real error conditions; this section previously
+  said "five of seven tools are unimplemented", which was true several sessions ago and false now.
+* The sidecar is **unsupervised** (`nohup` only). Nothing in-container can supervise a daemon; a host
+  systemd unit is the fix, and it is not in this repo.
+* The sidecar is **strictly serial** (the backbone at `:8083` is ~5.8x parallel; the head is not).
+* **The MCP client session is not supervised** — a session holding a pre-rebuild binary keeps its old
+  behaviour (MCP clients do not hot-reload), so a rebuild needs a client restart to take effect.
+* `laya doctor` reads the socket env var at call time while `laya-mcp` reads it at startup. Same
+  default, so no drift today, but a relocated socket can diverge.
+* **`calibrate` waits on data, not code.** The outcome path exists (`laya ledger outcome`); what is
+  missing is recorded outcomes. `laya ledger stats` prints **NO OUTCOMES RECORDED** while there are
+  none, so the gap is visible rather than implied.
 
-## Verified state (all measured, not asserted)
+## Verified state at an EARLIER point — kept for the progression, NOT the current state
+
+**Read the header for the current numbers.** This block is a snapshot from when the workspace had
+148 tests and five unimplemented tools; it is retained because the shape of the progression is
+itself informative (each number below is what the earlier sections were written against).
 
 ```
 cargo xtask gate        -> PASS (fmt + clippy -D warnings + test)
-tests, whole workspace  -> 148 passing, 0 failing
+tests, whole workspace  -> 148 passing, 0 failing        <-- then; 345 now
 clippy --workspace      -> 0 warnings
 cargo fmt --all --check -> clean
-doc links               -> 45 relative links checked, 0 broken
+doc links               -> 45 relative links checked, 0 broken   <-- then; 61 now
 laya doctor             -> READY, exit 0 (against the live server)
 laya doctor --url <bad> -> NOT READY, exit 1, actionable diagnostic on stderr
 ```
