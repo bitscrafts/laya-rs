@@ -181,6 +181,9 @@ pub struct ServerState {
     /// How to reach the decision head. The head needs torch, so it is a separate
     /// pinned process — see `laya_backbone::sidecar`.
     pub sidecar: laya_backbone::Sidecar,
+    /// The roots `ask_file`/`ask_files` may read. Resolved ONCE at construction, so the
+    /// boundary cannot change between two calls that appear to use the same server.
+    pub read_scope: laya_core::ask_file::Scope,
 }
 
 impl ServerState {
@@ -200,7 +203,15 @@ impl ServerState {
             endpoint: endpoint.into(),
             readiness: std::sync::Mutex::new(ReadinessCache::new()),
             sidecar: socket,
+            read_scope: laya_core::ask_file::Scope::new(Vec::new()),
         }
+    }
+
+    /// Set the read scope (`ask_file`/`ask_files`).
+    #[must_use]
+    pub fn with_read_scope(mut self, paths: Vec<std::path::PathBuf>) -> Self {
+        self.read_scope = laya_core::ask_file::Scope::new(paths);
+        self
     }
 
     /// Point at a specific sidecar socket (tests, or a non-default deployment).
@@ -335,7 +346,11 @@ fn tool_meta(name: &str) -> (String, serde_json::Map<String, serde_json::Value>)
 
 /// Arguments a tool call may carry. One flat struct keeps the dynamic dispatcher
 /// simple; each tool validates what it needs.
-#[derive(Debug, Deserialize)]
+///
+/// `Default` is derived so the all-`None` literals in tests and the deserialisation
+/// fallback do not have to be edited whenever a field is added — adding a field then
+/// gives a compile error only where it genuinely matters.
+#[derive(Debug, Default, Deserialize)]
 pub struct RawArgs {
     #[serde(default)]
     state: Option<String>,
@@ -345,6 +360,14 @@ pub struct RawArgs {
     irreversible: Option<bool>,
     #[serde(default)]
     path: Option<String>,
+    /// The question `ask_file` asks about the file. Separate from `path` on purpose:
+    /// keeping them in distinct fields is what stops content being concatenated into the
+    /// question, which is how a file's text could become an instruction.
+    #[serde(default)]
+    question: Option<String>,
+    /// The paths `ask_files` asks about.
+    #[serde(default)]
+    paths: Option<Vec<String>>,
     #[serde(default)]
     op: Option<String>,
     /// Laya's own question map. Kept as a `Value` in the POC; a typed
@@ -467,6 +490,15 @@ pub fn handle(
             }
             decide_via_sidecar(args, state)
         }
+        "ask_file" => {
+            if let Some(missing) = missing_required(tool, args) {
+                return Err(McpError::invalid_params(
+                    format!("`{tool}` requires `{missing}`"),
+                    None,
+                ));
+            }
+            ask_file_via_sidecar(args, state)
+        }
         // Still honestly unimplemented: these need the file-reading and compaction
         // work the spec assigns to P2/P3. No argument contract is advertised.
         _ => to_result(ToolOutcome::NotImplemented(what)),
@@ -528,6 +560,49 @@ fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResul
 }
 
 /// The `decide` tool: typed questions -> route-shaped payloads.
+/// The `ask_file` tool: read a file inside the scope and ask a typed question about it.
+///
+/// The file NEVER enters the caller's context — only the typed answer is returned. That is
+/// the entire value of the tool (measured: 9,089 tokens judged for $0.00049, against
+/// $0.091 at a frontier model, paid again every turn until compaction).
+///
+/// Order of operations, and every step is deliberate:
+///   1. arguments validated by the caller (`path`, `question`)
+///   2. the read scope is enforced **before** the file is opened (spec 04 F7) — a refusal
+///      costs nothing and discloses nothing
+///   3. size and encoding limits are enforced, refusing rather than truncating
+///   4. the content is placed under `data` as UNTRUSTED (spec 04 F9)
+///   5. only then is the head asked
+fn ask_file_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let path = args.path.as_deref().unwrap_or_default();
+    let question = args.question.as_deref().unwrap_or_default();
+
+    let file = laya_core::ask_file::read_for_question(&state.read_scope, path, question)
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+    let answers = state
+        .sidecar
+        .predict(
+            &file.to_state(),
+            &laya_core::ask_file::FileState::question_spec(),
+        )
+        .map_err(|e| {
+            McpError::internal_error(
+                format!("laya-mcp: the decision head is unavailable: {e}"),
+                None,
+            )
+        })?;
+
+    // Reported with the path it came from so a caller cannot confuse which file a verdict
+    // belongs to — and `content_in_context: false` states the property explicitly rather
+    // than leaving the caller to infer it.
+    let mut out = json!({ "path": file.path, "answers": answers });
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("content_in_context".into(), json!(false));
+    }
+    to_result(ToolOutcome::Ok(out.to_string()))
+}
+
 fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
     // The caller supplies the questions as Laya's own shape in this POC; a typed
     // `laya_abi::Question` array is the next step and the adapter above is ready for
@@ -558,7 +633,7 @@ fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolRes
 pub fn missing_required(tool: &str, args: &RawArgs) -> Option<&'static str> {
     let needs: &[&str] = match tool {
         "decide" => &["state"],
-        "ask_file" => &["path"],
+        "ask_file" => &["path", "question"],
         "ask_files" => &["paths"],
         "gate" => &["action"],
         "should_compact" => &["turns_summary"],
@@ -572,8 +647,18 @@ pub fn missing_required(tool: &str, args: &RawArgs) -> Option<&'static str> {
         "path" => args.path.as_deref().is_none_or(str::is_empty),
         "op" => args.op.as_deref().is_none_or(str::is_empty),
         "irreversible" => args.irreversible.is_none(),
-        // The structured arguments are not in `RawArgs` yet: the decision path owns
-        // them, so they are not required from a caller until it exists.
+        // `question` is required by the schema and now checked. Two reasons it must be
+        // checked HERE rather than left to the scope check that runs next: an empty
+        // question would otherwise reach the model (a question with no question is not a
+        // question), and the error a caller sees would be about their PATH, sending them
+        // to fix the wrong argument.
+        "question" => args.question.as_deref().is_none_or(str::is_empty),
+        "paths" => args
+            .paths
+            .as_ref()
+            .is_none_or(|v| v.iter().all(|s| s.trim().is_empty())),
+        // The remaining structured arguments are not in `RawArgs` yet: the decision path
+        // owns them, so they are not required from a caller until it exists.
         _ => false,
     })
 }
@@ -767,14 +852,7 @@ fn dispatch_shim(
     let state = Arc::clone(&ctx.service.state);
 
     Box::pin(async move {
-        let args: RawArgs = serde_json::from_value(args_value).unwrap_or(RawArgs {
-            state: None,
-            action: None,
-            irreversible: None,
-            path: None,
-            op: None,
-            questions: None,
-        });
+        let args: RawArgs = serde_json::from_value(args_value).unwrap_or_default();
 
         // Readiness FIRST, every call. A fresh cached verdict is reused; otherwise the
         // caller must re-probe, and an absent verdict is treated as NOT ready — the
@@ -826,36 +904,55 @@ impl ServerHandler for LayaMcpServer {}
 // editing it changed what the server advertises, and it would not.
 // To change the advertised capabilities, add the sibling handler attribute
 // (`#[prompt_handler]`, etc.) or implement `get_info` on the impl block itself.
-/// The `ask_file` read scope: paths a file tool may read.
+// NOTE: `ask_file`/`ask_files` do NOT define their own read scope here.
+//
+// The containment rule lives in `laya_core::ask_file::Scope` — ONE implementation, so it
+// cannot drift, and so the rule that decides a refusal is testable without a server.
+// A duplicate `ReadScope` used to sit at this spot. It differed from the core rule in a
+// way that mattered: it had no parent-resolution, so it could not place a path that does
+// not exist, and would have reported a missing in-scope file as "outside the scope".
+
+/// The env var listing the roots `ask_file`/`ask_files` may read, colon-separated.
 ///
-/// A configured root set rather than a blanket workspace grant, so "read any file"
-/// is not the default a tool inherits.
-#[derive(Debug, Clone)]
-pub struct ReadScope {
-    roots: Vec<std::path::PathBuf>,
-}
+/// **There is deliberately no default of `/`.** With the variable unset, the scope is the
+/// process's working directory — a real, bounded place — and the resolved roots are
+/// logged at startup so the boundary in force is visible rather than inferred. A tool that
+/// silently defaults to the whole filesystem is a tool nobody can reason about.
+pub const READ_ROOTS_ENV: &str = "LAYA_READ_ROOTS";
 
-impl ReadScope {
-    /// A scope restricted to `roots`.
-    #[must_use]
-    pub const fn new(roots: Vec<std::path::PathBuf>) -> Self {
-        Self { roots }
-    }
-
-    /// Whether `candidate` is inside the scope, after canonicalisation.
-    ///
-    /// Canonicalising both sides is what makes this a containment check rather than a
-    /// string-prefix check — a prefix check would accept `/work/../etc/passwd` for a
-    /// `/work` root.
-    #[must_use]
-    pub fn allows(&self, candidate: &std::path::Path) -> bool {
-        let Ok(target) = candidate.canonicalize() else {
-            return false;
-        };
-        self.roots
-            .iter()
-            .any(|r| r.canonicalize().is_ok_and(|root| target.starts_with(&root)))
-    }
+/// Resolve the configured read scope.
+///
+/// Colon-separated (`:`), matching `PATH`. An entry that does not exist is dropped and
+/// REPORTED, because a silently-dropped root looks like a scope that refuses everything
+/// for no reason.
+#[must_use]
+pub fn resolve_read_scope(raw: Option<&str>) -> (laya_core::ask_file::Scope, Vec<String>) {
+    let mut notes = Vec::new();
+    let roots: Vec<std::path::PathBuf> = match raw {
+        Some(v) if !v.trim().is_empty() => v
+            .split(':')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| {
+                let p = std::path::PathBuf::from(s);
+                if p.is_dir() {
+                    Some(p)
+                } else {
+                    notes.push(format!("read root `{s}` is not a directory; ignored"));
+                    None
+                }
+            })
+            .collect(),
+        _ => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            notes.push(format!(
+                "{READ_ROOTS_ENV} is unset, so the read scope is the working directory: {}",
+                cwd.display()
+            ));
+            vec![cwd]
+        }
+    };
+    (laya_core::ask_file::Scope::new(roots), notes)
 }
 
 #[cfg(test)]
@@ -885,14 +982,7 @@ mod tests {
     }
 
     fn no_args() -> RawArgs {
-        RawArgs {
-            state: None,
-            action: None,
-            irreversible: None,
-            path: None,
-            op: None,
-            questions: None,
-        }
+        RawArgs::default()
     }
 
     // ---- the tool surface ---------------------------------------------------
@@ -1049,7 +1139,9 @@ mod tests {
         // These need the file-reading / compaction work the spec assigns elsewhere.
         // An unimplemented tool that "succeeds" is how a caller comes to trust a
         // fabricated answer, so each must be an ERROR that says why.
-        for tool in ["ask", "ask_file", "ask_files", "should_compact", "ledger"] {
+        // `ask_file` is IMPLEMENTED now, so it is not in this list. Its own tests cover
+        // the argument contract; leaving it here would have asserted the opposite.
+        for tool in ["ask", "ask_files", "should_compact", "ledger"] {
             let out = handle(tool, &ready(), &no_args(), &test_state());
             assert!(
                 out.is_err(),
@@ -1076,14 +1168,20 @@ mod tests {
         }
     }
 
+    /// Arguments for `ask_file`: a path and the question to ask about it.
+    fn args_ask_file(path: &str, question: &str) -> RawArgs {
+        RawArgs {
+            path: Some(path.to_string()),
+            question: Some(question.to_string()),
+            ..RawArgs::default()
+        }
+    }
+
     fn args_with(state: Option<&str>, action: Option<&str>) -> RawArgs {
         RawArgs {
             state: state.map(str::to_string),
             action: action.map(str::to_string),
-            irreversible: None,
-            path: None,
-            op: None,
-            questions: None,
+            ..RawArgs::default()
         }
     }
 
@@ -1248,7 +1346,7 @@ mod tests {
     #[test]
     fn a_scope_allows_a_path_inside_its_root() {
         let root = std::env::temp_dir();
-        let scope = ReadScope::new(vec![root.clone()]);
+        let scope = laya_core::ask_file::Scope::new(vec![root.clone()]);
         let inside = root.join("laya-scope-probe.txt");
         std::fs::write(&inside, b"x").unwrap_or_default();
         assert!(
@@ -1260,7 +1358,7 @@ mod tests {
 
     #[test]
     fn a_scope_refuses_a_path_outside_its_root() {
-        let scope = ReadScope::new(vec![std::path::PathBuf::from("/tmp")]);
+        let scope = laya_core::ask_file::Scope::new(vec![std::path::PathBuf::from("/tmp")]);
         assert!(
             !scope.allows(std::path::Path::new("/etc/passwd")),
             "a blanket grant is exactly what we must not do"
@@ -1271,14 +1369,97 @@ mod tests {
     fn a_scope_refuses_a_traversal_that_escapes_the_root() {
         // The reason `allows` canonicalises rather than doing a string-prefix check:
         // a prefix check accepts `/tmp/../etc/passwd` for a `/tmp` root.
-        let scope = ReadScope::new(vec![std::path::PathBuf::from("/tmp")]);
+        let scope = laya_core::ask_file::Scope::new(vec![std::path::PathBuf::from("/tmp")]);
         assert!(!scope.allows(std::path::Path::new("/tmp/../etc/passwd")));
     }
 
     #[test]
-    fn a_nonexistent_path_is_refused_not_guessed() {
-        let scope = ReadScope::new(vec![std::path::PathBuf::from("/tmp")]);
-        assert!(!scope.allows(std::path::Path::new("/tmp/definitely-not-here-9f3a")));
+    fn a_nonexistent_path_inside_the_scope_is_in_scope_and_reads_as_missing() {
+        // CORRECTED, matching the core module's correction: a missing path inside the scope
+        // is IN scope and then fails as missing. The old assertion here had it backwards —
+        // it conflated "absent" with "forbidden", which would report a typo as a
+        // permissions problem. The rule that actually guards against an existence oracle
+        // is that an OUT-of-scope path fails identically whether or not it exists, and
+        // that is pinned in the core module.
+        let scope = laya_core::ask_file::Scope::new(vec![std::path::PathBuf::from("/tmp")]);
+        assert!(
+            scope.allows(std::path::Path::new("/tmp/definitely-not-here-9f3a")),
+            "a missing path inside the scope is still inside the scope"
+        );
+    }
+    #[test]
+    fn ask_file_needs_a_path_and_a_question_and_says_which_is_missing() {
+        for (a, want) in [
+            (args_with(None, None), "path"),
+            (args_ask_file("/tmp/x", ""), "question"),
+        ] {
+            let out = handle("ask_file", &ready(), &a, &test_state());
+            let msg = format!(
+                "{:?}",
+                out.as_ref()
+                    .err()
+                    .map_or_else(String::new, |e| format!("{e:?}"))
+            );
+            assert!(out.is_err(), "ask_file must require its arguments");
+            assert!(msg.contains(want), "must name `{want}`: {msg}");
+        }
+    }
+
+    #[test]
+    fn ask_file_refuses_an_out_of_scope_path_even_when_the_head_is_up() {
+        // ORDER: the scope is enforced before the model is consulted. A refusal must not
+        // depend on a network round trip, and must not be reachable by asking nicely.
+        let t =
+            ServerState::new("http://x:1").with_read_scope(vec![std::path::PathBuf::from("/tmp")]);
+        let a = args_ask_file("/etc/hostname", "what is this?");
+        let out = handle("ask_file", &ready(), &a, &t);
+        let msg = format!(
+            "{:?}",
+            out.as_ref()
+                .err()
+                .map_or_else(String::new, |e| format!("{e:?}"))
+        );
+        assert!(out.is_err(), "an out-of-scope path must be refused");
+        assert!(
+            msg.contains("read scope"),
+            "the reason must name the scope: {msg}"
+        );
+    }
+
+    #[test]
+    fn ask_file_with_an_empty_scope_refuses_everything() {
+        // FAIL CLOSED. `test_state()` has no roots configured, so nothing is readable.
+        // A default-open scope is how "least privilege" becomes a slogan.
+        let a = args_ask_file("/tmp/whatever.txt", "q");
+        let out = handle("ask_file", &ready(), &a, &test_state());
+        assert!(
+            out.is_err(),
+            "with no roots configured, ask_file must refuse"
+        );
+    }
+
+    #[test]
+    fn resolve_read_scope_drops_a_bad_root_and_reports_it() {
+        let (scope, notes) = resolve_read_scope(Some("/tmp:/definitely/not/a/dir/xyzzy:/usr"));
+        assert_eq!(scope.roots().len(), 2, "the bogus root must be dropped");
+        assert!(
+            notes.iter().any(|n| n.contains("xyzzy")),
+            "a dropped root must be REPORTED, not silent: {notes:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_read_scope_without_the_env_var_defaults_to_the_cwd_and_says_so() {
+        let (scope, notes) = resolve_read_scope(None);
+        assert_eq!(scope.roots().len(), 1);
+        assert!(
+            notes.iter().any(|n| n.contains("unset")),
+            "the default must be visible, not inferred: {notes:?}"
+        );
+        assert!(
+            !scope.roots().iter().any(|r| r == std::path::Path::new("/")),
+            "the default must NEVER be the filesystem root"
+        );
     }
 
     #[test]

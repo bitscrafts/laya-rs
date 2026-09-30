@@ -21,6 +21,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ask_file;
 pub mod policy;
 pub mod queue;
 pub mod readiness;

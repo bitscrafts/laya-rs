@@ -23,7 +23,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use laya_backbone::DEFAULT_ENDPOINT;
-use laya_mcp::{LayaMcpServer, ServerState, clock, probe};
+use laya_mcp::{LayaMcpServer, READ_ROOTS_ENV, ServerState, clock, probe, resolve_read_scope};
 use rmcp::serve_server;
 use rmcp::transport::stdio;
 
@@ -42,7 +42,25 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let state = Arc::new(ServerState::new(endpoint.clone()));
+    // Resolved ONCE at startup, and the boundary in force is PRINTED. A file-reading tool
+    // whose boundary must be inferred is one nobody can reason about, and printing it makes
+    // a misconfigured deployment visible in the log rather than only in a refusal.
+    let (scope, scope_notes) = resolve_read_scope(std::env::var(READ_ROOTS_ENV).ok().as_deref());
+    for n in &scope_notes {
+        eprintln!("laya-mcp: {n}");
+    }
+    eprintln!(
+        "laya-mcp: ask_file scope = {}",
+        scope
+            .roots()
+            .iter()
+            .map(|r| r.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    let state =
+        Arc::new(ServerState::new(endpoint.clone()).with_read_scope(scope.roots().to_vec()));
     // The verdict is stamped with the SHARED clock, so it is genuinely fresh —
     // recording it at 0 (the original code) made it always stale, which made the
     // server behave as though Laya were down. Found by the end-to-end test.
