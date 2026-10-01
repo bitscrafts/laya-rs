@@ -125,3 +125,47 @@ pub enum FlowError {
         actual: String,
     },
 }
+
+/// Every way running a lowered [`crate::graph::Graph`] can be refused before
+/// — or independently of — any node's own result.
+///
+/// A node's exit code, an `mcp` tool error, and a stopped run are never an
+/// `Err` here: they are DATA on [`crate::run::NodeRecord`] and
+/// [`crate::run::RunReport`] (R11, R12), because a consumer needs the full
+/// report even when the run failed. `RunError` is reserved for conditions the
+/// scheduler itself cannot proceed from at all.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum RunError {
+    /// `limit` was zero. Refused rather than silently clamped to 1: a
+    /// zero-permit fan-out would deadlock the ready set before a single node
+    /// could ever run (R9).
+    #[error("the concurrency limit must be at least 1, got {limit}")]
+    BadLimit {
+        /// The limit that was rejected.
+        limit: usize,
+    },
+
+    /// An edge names a node id the graph does not declare.
+    ///
+    /// Defensive: a graph produced by [`crate::lower::lower`] from a
+    /// [`crate::validate::validate`]d flow cannot have one — but `Graph`'s
+    /// fields are public, so nothing stops a hand-built `Graph` from being
+    /// malformed, and a silently-dropped node is exactly the "looks complete"
+    /// failure mode this part exists to prevent.
+    #[error("edge names node `{node_id}`, which the graph does not declare")]
+    UnknownNode {
+        /// The dangling id.
+        node_id: String,
+    },
+
+    /// A node's own scheduling task could not be joined — an executor bug
+    /// (e.g. a panic in the scheduler's own spawned task), never a node's
+    /// reported exit code or tool error. Those stay DATA on its
+    /// [`crate::run::NodeRecord`] (R12) and surface through
+    /// [`crate::run::RunReport::stopped_early`] (R11), never as `Err`.
+    #[error("a node's task could not be joined: {reason}")]
+    NodeTaskFailed {
+        /// What `tokio` reported about the join failure.
+        reason: String,
+    },
+}

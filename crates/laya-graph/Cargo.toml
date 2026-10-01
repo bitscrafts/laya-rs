@@ -19,6 +19,11 @@ thiserror = { workspace = true }
 # silently change the parent's behaviour. Already a workspace dependency
 # (the ledger uses it) — no second hash crate (N5).
 blake3 = { workspace = true }
+# The scheduler's bounded fan-out (R9) and writer mutual exclusion (R10) run
+# on this. The workspace pin is `default-features = false`, so the runtime
+# features actually needed are stated explicitly here, as `laya-mcp` already
+# does — a bare `workspace = true` gives a tokio that cannot spawn tasks.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
 [lints]
 workspace = true

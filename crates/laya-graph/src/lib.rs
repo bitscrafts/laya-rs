@@ -20,6 +20,10 @@
 //!   cycle by name rather than hang (R6, R7).
 //! * [`render`] — the Mermaid render, provably lossy and labelled (R14).
 //! * [`error`] — every refusal, named.
+//! * [`node`] — `shell` and `mcp` node executors (R12).
+//! * [`run`] — run records: pure data, carrying `run_id` + `node_id` (R13).
+//! * [`sched`] — the scheduler: deterministic order, bounded concurrent
+//!   fan-out, fail-fast (R8, R9, R10, R11).
 
 #![forbid(unsafe_code)]
 
@@ -28,15 +32,21 @@ pub mod expand;
 pub mod flow;
 pub mod graph;
 pub mod lower;
+pub mod node;
 pub mod on_expr;
 pub mod render;
+pub mod run;
+pub mod sched;
 pub mod validate;
 
-pub use error::FlowError;
+pub use error::{FlowError, RunError};
 pub use expand::{Library, expand};
 pub use flow::{Flow, Kind, Node, Retry};
 pub use graph::{Edge, Graph, GraphNode, NodeBody, RouteRule};
 pub use lower::lower;
+pub use node::{Executed, McpCaller, execute_mcp, execute_shell};
 pub use on_expr::PayloadField;
 pub use render::{MermaidRender, render};
+pub use run::{NodeRecord, RunReport};
+pub use sched::{RunOptions, run, topo_order};
 pub use validate::validate;
