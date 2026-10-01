@@ -173,10 +173,10 @@ it.**
 
 **New in this part** (each run against the pre-implementation tree and watched to fail):
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance the_control_a_forced_label_reaches_the_other_branch 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R-ACC's control: the routing is real
-- [ ] `cd /projects/laya-rs && curl -sf http://10.10.10.217:8083/health >/dev/null && cargo test -p laya-graph --test acceptance` — R-ACC: the live end-to-end flow. **Needs the backbone**; when `:8083` is down this FAILS rather than skipping, because an unmeasured acceptance test is not an acceptance test
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R19/R20. **Scoped to the `graph` filter on purpose**: a bare `cargo test -p laya-cli` criterion was measured to pass pre-implementation on the crate's *existing* 16 tests, certifying nothing. The `graph` filter matches zero tests before this part, so the `[1-9]` guard does its job
-- [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -qE '07-graph-executor-part4.md.*IMPLEMENTED'` — this spec is discovered AND no longer pending
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance the_control_a_forced_label_reaches_the_other_branch 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R-ACC's control: the routing is real
+- [x] `cd /projects/laya-rs && curl -sf http://10.10.10.217:8083/health >/dev/null && cargo test -p laya-graph --test acceptance` — R-ACC: the live end-to-end flow. **Needs the backbone**; when `:8083` is down this FAILS rather than skipping, because an unmeasured acceptance test is not an acceptance test
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R19/R20. **Scoped to the `graph` filter on purpose**: a bare `cargo test -p laya-cli` criterion was measured to pass pre-implementation on the crate's *existing* 16 tests, certifying nothing. The `graph` filter matches zero tests before this part, so the `[1-9]` guard does its job
+- [x] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -qE '07-graph-executor-part4.md.*IMPLEMENTED'` — this spec is discovered AND no longer pending
 
   **Why the pattern is this specific.** The first draft was `grep -q
   '07-graph-executor-part4'`, which was measured to **already pass before the
@@ -186,19 +186,19 @@ it.**
   spec's status line as `=== <name>   [<status>]`, so anchoring on `=== <name>` plus
   `[IMPLEMENTED` can only match once the status line has actually flipped — which
   is the same signal that makes the runner stop counting the criteria as PENDING.
-- [ ] `cd /projects/laya-rs && test -f crates/laya-cli/Cargo.toml && grep -q 'laya-graph' crates/laya-cli/Cargo.toml` — N2: the surface depends on the engine
+- [x] `cd /projects/laya-rs && test -f crates/laya-cli/Cargo.toml && grep -q 'laya-graph' crates/laya-cli/Cargo.toml` — N2: the surface depends on the engine
 
 **Carried re-checks** (pass before implementation by design — not evidence this part is done):
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph` — the whole crate; parts 1–3 still green (N3). Carried: the crate exists and is green, so this cannot fail before this part's work
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity, carried for the same reason
-- [ ] `cd /projects/laya-rs && test -f crates/laya-mcp/Cargo.toml && ! grep -q 'laya-graph' crates/laya-mcp/Cargo.toml` — N2/N8: the judge does not depend on the executor (the `!` is mandatory)
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib route_is_not_a_tool 2>&1 | grep -qE '^test result: ok\. [1-9]'` — N8: `route` is still absent from the MCP tools. **The test already exists** (`crates/laya-mcp/src/lib.rs:1739`, which asserts `!is_known_tool("route")`), so this spec does not add a duplicate — it re-runs the existing pin, because this part is where an engine surface most plausibly leaks into the tool list
-- [ ] `cd /projects/laya-rs && git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` — formatted (N3)
-- [ ] `cd /projects/laya-rs && test -z "$(git status --porcelain crates/laya-head/)"` — this spec touches nothing in the head. **Corrected 2026-10-01**: the original was `git status --porcelain crates/laya-head/ | grep -qv .`, which is a criterion that can NEVER pass — `-q` suppresses grep's output, so `-v .` has nothing to match and grep exits 1 on both empty and non-empty input (measured). It reported FAIL on a clean tree, which is how it was found: it survived in the spec because the earlier gate discarded exit codes, so a permanently-failing criterion was never distinguishable from a passing one
-- [ ] `cd /projects/laya-rs && cargo test --workspace` — no regression
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph` — the whole crate; parts 1–3 still green (N3). Carried: the crate exists and is green, so this cannot fail before this part's work
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity, carried for the same reason
+- [x] `cd /projects/laya-rs && test -f crates/laya-mcp/Cargo.toml && ! grep -q 'laya-graph' crates/laya-mcp/Cargo.toml` — N2/N8: the judge does not depend on the executor (the `!` is mandatory)
+- [x] `cd /projects/laya-rs && cargo test -p laya-mcp --lib route_is_not_a_tool 2>&1 | grep -qE '^test result: ok\. [1-9]'` — N8: `route` is still absent from the MCP tools. **The test already exists** (`crates/laya-mcp/src/lib.rs:1739`, which asserts `!is_known_tool("route")`), so this spec does not add a duplicate — it re-runs the existing pin, because this part is where an engine surface most plausibly leaks into the tool list
+- [x] `cd /projects/laya-rs && git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` — formatted (N3)
+- [x] `cd /projects/laya-rs && test -z "$(git status --porcelain crates/laya-head/)"` — this spec touches nothing in the head. **Corrected 2026-10-01**: the original was `git status --porcelain crates/laya-head/ | grep -qv .`, which is a criterion that can NEVER pass — `-q` suppresses grep's output, so `-v .` has nothing to match and grep exits 1 on both empty and non-empty input (measured). It reported FAIL on a clean tree, which is how it was found: it survived in the spec because the earlier gate discarded exit codes, so a permanently-failing criterion was never distinguishable from a passing one
+- [x] `cd /projects/laya-rs && cargo test --workspace` — no regression
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
 
 **Prose criteria** (human-checked, stated unambiguously):
 
