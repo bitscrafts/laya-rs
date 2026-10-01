@@ -1,14 +1,78 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-09-30 (7) · **Status**: GREEN — **SPEC 03 IS COMPLETE, every spec 01–06 done.**
-**Spec 07 is written and split into four parts** (see Next); its 62 exit criteria are reported
-`pending` — counted and named by the criteria runner, never silently skipped.
-`EXIT CRITERIA: pass=22 fail=0 prose=2 pending=62` — **no unchecked box remains anywhere in
-`specs/` for specs 01–06.**
-`scripts/verify-all.sh` PASS · **345 tests** · clippy 0 workspace-wide · fmt clean ·
-61 doc links 0 broken · doc-honesty 32 docs every citation resolves.
+**Date**: 2026-10-01 (8) · **Status**: GREEN — **SPEC 07 IS COMPLETE. All seven specs (01–07) are implemented.**
+`EXIT CRITERIA: pass=91 fail=0 prose=2 pending=0` — **every criterion in the repo is now evaluated.**
+`scripts/verify-all.sh` → `VERDICT: ALL CHECKS PASS` · **414 tests** · clippy 0 workspace-wide · fmt clean ·
+61 doc links 0 broken · doc-honesty 32 docs every citation resolves · live corpus 16/16.
 
-The live corpus is a **gate step**, not a manual check: `verify-all.sh` §6c runs
+## Spec 07 — the graph executor — is COMPLETE, in four parts
+
+| part | what | commit |
+|---|---|---|
+| 1 | the flow, its refusals, the `decide`→`route` lowering (+ the R15 runner fix) | `a9e9310` |
+| 2 | subflow expansion, and a render that names the fields it drops | `9cf2aa4` |
+| 3 | the scheduler, `shell`/`mcp` executors, run records | `574354b` |
+| 4 | the `laya graph` CLI surface, and R-ACC end to end | `f42cd52` |
+
+**The claim the whole spec existed to test, measured through the real path:**
+
+```
+ROUTE RECORD (positive fixture): {"on":"$.payload.label","selected_port":"branch_positive","value":"positive"}
+NODES RAN   (positive fixture): ["classify","classify/route","branch_positive"]
+
+ROUTE RECORD (negative fixture): {"on":"$.payload.label","selected_port":"branch_negative","value":"negative"}
+NODES RAN   (negative fixture): ["classify","classify/route","branch_negative"]
+```
+
+Two fixtures, two **different** branches, driven by the real model's label — the pairing is what makes
+it routing rather than coincidence (a hardcoded route passes the first and fails the second). The live
+`laya graph run` on the same flow returns `label="positive" confidence=0.8401 band="mid"`, selects
+`branch_positive`, and exits 0 with `stopped_early=false`. The acceptance test spawns the **real**
+`laya-mcp` over stdio and fails with a labelled reason if the binary is absent — it never stubs the
+caller, which would have made the test a re-enactment. Backbone down: reported in 78.9µs, bounded by 3s.
+
+It now runs as **gate step 7c**, so R-ACC is bound rather than remembered.
+
+## Five verification defects found while landing this (all fixed, all of the same family)
+
+The theme: **a check that reports the wrong thing passes while the live path is broken.** Each was
+invisible until the previous one was fixed.
+
+1. **`verify-all.sh` discarded every check's exit code** — `set -uo pipefail`, no aggregation, so its
+   exit status was its last `echo`'s. `check-doc-citations.py` exited 1 with three unresolved citations
+   while the wrapper printed `gate: PASS` and `GATE EXIT=0`. Every check now runs through `chk` and the
+   verdict is derived from the accumulated failures. Control: one injected bad citation → exit 1.
+2. **Parts 1–3 still read "not yet dispatched"** despite being implemented and committed, and the
+   runner treats `SPECIFIED` as PENDING — so **53 criteria for landed code had never been evaluated**.
+   `pass=22 → pass=77` once the status lines were corrected. This is R15's own defect, one level up.
+3. **Criteria that invoked the criteria runner** re-entered it: **18 nested runner processes**, each
+   doing whole-workspace cargo runs. It did not hang, it *multiplied*. Fixed with a `--list-specs` mode
+   (runs no criterion, 0.06s) plus a re-entrancy guard.
+4. **`grep -qv .` in part 4** — a criterion that can never pass: `-q` suppresses output so `-v .` has
+   nothing to match, and grep exits 1 on empty *and* non-empty input. It reported FAIL on a clean tree.
+5. **Parts 1–2 asserted a crate-wide prohibition** (`! grep std::process src/`) which part 3's `shell`
+   executor legitimately violates — failing on *correct* code. Narrowed per part, each with a near-miss
+   control so the `!` is not matching nothing.
+
+**Two of my own helper scripts also lied, and were caught by their own controls:** `verify-spec-part.sh`
+asserted `git status -- specs/` was clean while calling it "worker did not commit" (a different
+property — it fired on the orchestrator's own spec edits), and its `specs/ untouched` check fired on
+correct work. Both replaced with checks that assert what their names claim.
+
+## Commit hygiene — broken three more times, then made mechanical
+
+The rule (never name an AI assistant or tool in a message, author name **or email**) was broken in the
+bodies of three spec-07 commits this session, with clean authors every time — because A24 fixed the
+**author** and nothing scanned the **body**. Guarded in one of three places is half a rule.
+
+`scripts/check-commit-msg.sh` now refuses a tool name in a message and is installed as the
+`commit-msg` hook (controls: refuses the verbatim bad text, accepts a clean message, does not flag
+"topic" but does flag a bare two-letter tool name, and a real `git commit` was refused with HEAD
+unmoved). It is also a gate step with an explicit baseline — measured, **8 of 49 commits** name a tool
+(4 from this session's work, 4 older and descriptive rather than authorship). Fix forward, do not
+rewrite; the gate prints the count so the debt is named, not forgotten.
+
+`scripts/verify-all.sh` §6c runs
 `scripts/live-corpus-parity.py`, so `LABEL AGREEMENT: 16/16 = 1.0000` is reported on every gate run
 rather than asserted here.
 
@@ -293,23 +357,33 @@ diff).
 * A check missing from `by_check` is indistinguishable from a check that found nothing.
   Both cases were observed on this tree. Cross-check `proven` against the baseline.
 
-## Next — spec 07 is WRITTEN and SPLIT; the next action is to dispatch part 1
+## Next — nothing in this repo is blocked; ranked
 
-Everything this section used to list is **done**: `ask_file`/`ask_files`, the near-tie margin in
-the payload, `should_compact`, `ledger` with its outcome path, and **P4 (the Rust head)**.
+**Spec 07 is complete.** All seven specs (01–07) are implemented, gated and committed. What remains is
+not "finish the spec" — it is the work the specs deliberately deferred, plus one piece of supervision.
 
-1. **Spec 07 — the generic DAG executor — is now specified** (`specs/07-graph-executor.md`), split
-   into four parts, committed `9bd702a`. It is the only real unit of work left. `laya-rs` still has
-   **no** graph implementation — it has `route_payload.rs`, the contract a graph `route` node
-   matches on, restated here and pinned by test. **Next action: implement part 1**, which is
-   dependency-free and process-free (the flow, its refusals, the lowering, and the fix to the
-   criteria runner).
-2. **The open research questions** in `_docs/06-research/03-four-architecture-questions.md`
-   (threading, redb config, the graph runner, absorb-vs-supersede). Research, not implementation.
-3. **The commit-hygiene decision (register A24)** — CLOSED 2026-09-30.
+1. **Supervise the sidecar** — it is `nohup` only, and nothing in-container can supervise a daemon. A
+   host systemd unit is the fix and it is NOT in this repo, so this needs a host-side action. Until
+   then a container or host restart silently removes the reference oracle the live corpus needs.
+2. **The deferred graph capabilities**, each with its reason already recorded in the master spec:
+   `agent` / `quorum` node kinds (R2/R17), cancellation of in-flight work, and **resume-from-crash**
+   (the hardest thing being absorbed; research §4: *"that is now ours to earn"*). `writes: true` nodes
+   get mutual exclusion today, deliberately, and v1 creates no git worktrees.
+3. **`laya-graph` has no store** — run records live in `RunReport` and `DecisionRow` already carries
+   `run_id`/`node_id` for the day a consumer persists a run. Persisting runs is a later spec, and it
+   would mean touching `laya-store`, which was out of scope here.
+4. **The open research questions** in `_docs/06-research/03-four-architecture-questions.md`
+   (threading, redb config, absorb-vs-supersede). Research, not implementation.
+5. **Commit-hygiene debt (register A24 residual)** — 8 of 49 commits name a tool. Fix-forward chosen;
+   the gate prints the count. Do NOT rewrite history: the SHAs are cited across the registers.
 
 ## Known gaps (honest)
 
+* **The `laya` binary in `~/.local/bin` was stale at one point during this session** (no `graph`
+  subcommand) and was reinstalled from the release build. `laya-mcp` was NOT refreshed: it is held open
+  by three live Hermes MCP connections (`Text file busy`), and this session changed nothing in that
+  crate, so the installed binary is current. If `laya-mcp` is ever changed, the MCP connections must be
+  restarted before the install can be replaced.
 * **No tool is unimplemented.** All seven error only on real error conditions; this section previously
   said "five of seven tools are unimplemented", which was true several sessions ago and false now.
 * The sidecar is **unsupervised** (`nohup` only). Nothing in-container can supervise a daemon; a host
