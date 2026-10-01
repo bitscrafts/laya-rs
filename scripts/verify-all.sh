@@ -1,13 +1,47 @@
 #!/usr/bin/env bash
 # Full end-to-end verification of the laya-rs foundation.
+#
+# EVERY CHECK IS BINDING. This script previously ran each check and discarded its
+# exit code: `set -uo pipefail` without `set -e` and with no aggregation, so the
+# script's exit status was its LAST command's -- an `echo`, always 0 -- and
+# `GATE EXIT=0` was reported while `check-doc-citations.py` had exited 1 with three
+# unresolved citations. Measured 2026-10-01. A report that says PASS while a check
+# below it failed is exactly the "check that cannot fail" class this repo has paid
+# for repeatedly, so the fix is aggregation, not a louder echo.
+#
+# VERDICT is derived from the accumulated failures, never from the last command.
 set -uo pipefail
 export PATH="/usr/local/cargo/bin:$PATH"
 export CARGO_HOME=/usr/local/cargo
 export RUSTUP_HOME=/usr/local/rustup
 cd /projects/laya-rs
 
+# --- failure accounting -------------------------------------------------------
+# FAILS accumulates "step: what" for every check that exits non-zero. Each check
+# runs through `chk`, which RECORDS and still prints the full output, so the log
+# stays as informative as before.
+FAILS=()
+UNMEASURED=()
+
+chk() {  # chk <step-name> <command...>
+  local name="$1"; shift
+  "$@"
+  local rc=$?
+  if [ $rc -ne 0 ]; then
+    FAILS+=("$name (rc=$rc)")
+    echo "  >>> FAIL: $name (rc=$rc)"
+  fi
+  return 0   # do not abort the run: report ALL failures, not just the first
+}
+
 echo "########## 1. THE GATE (the documented command, run for real) ##########"
 cargo xtask gate 2>&1 | tail -14
+# `cargo xtask gate` is the fmt+clippy+test gate; its own exit code binds here.
+if ! cargo xtask gate > /tmp/_gate_inner.log 2>&1; then
+  FAILS+=("cargo xtask gate")
+  echo "  >>> FAIL: cargo xtask gate"
+  tail -6 /tmp/_gate_inner.log | sed 's/^/      /'
+fi
 echo
 
 echo "########## 2. TEST COUNT ##########"
@@ -18,14 +52,15 @@ echo
 echo "########## 3. CLIPPY WARNING COUNT (must be 0) ##########"
 C=$(cargo clippy --workspace --all-targets -- -D warnings 2>&1 | grep -cE '^(warning|error)')
 echo "count: $C"
+[ "$C" = "0" ] || { FAILS+=("clippy count $C (must be 0)"); echo "  >>> FAIL: clippy count is $C"; }
 echo
 
 echo "########## 4. FMT (must be clean) ##########"
-cargo fmt --all --check && echo "fmt: CLEAN"
+if cargo fmt --all --check; then echo "fmt: CLEAN"; else FAILS+=("cargo fmt --all --check"); echo "  >>> FAIL: fmt not clean"; fi
 echo
 
 echo "########## 5. DOC LINKS (must be 0 broken) ##########"
-python3 "$(dirname "$0")/regen-index.py" 2>&1 | tail -2
+chk "regen-index (doc links)" python3 "$(dirname "$0")/regen-index.py"
 echo
 
 echo "########## 5b. DOC CITATIONS (every citation must resolve) ##########"
@@ -33,7 +68,11 @@ echo "########## 5b. DOC CITATIONS (every citation must resolve) ##########"
 # not exist (`laya-core::validate`) and nothing caught it — prose is not compiled, and the link
 # check above only proves a RELATIVE LINK resolves, not that a CLAIM is true. This fails the gate
 # on an unresolvable citation, so a doc cannot drift away from the code it describes.
-python3 "$(dirname "$0")/check-doc-citations.py"
+#
+# AND ITS EXIT CODE MUST BIND. This check exited 1 on 2026-10-01 while the wrapper printed
+# "gate: PASS" and "GATE EXIT=0", because nothing aggregated it. `chk` is what makes it count.
+chk "doc citations (3 unresolved were ignored here on 2026-10-01)" \
+    python3 "$(dirname "$0")/check-doc-citations.py"
 echo
 
 echo "########## 6. SPECS PRESENT ##########"
@@ -44,7 +83,8 @@ echo "########## 6b. THE SPECS' OWN EXIT CRITERIA ##########"
 # Run every exit criterion from its OWN text. This is the check that would have caught a
 # criterion naming an example target the crate never had (spec 06 cited `queue_demo`, which
 # did not exist) — a spec can claim completion while its own check cannot run.
-python3 scripts/run-exit-criteria.py
+# run-exit-criteria exits non-zero on a FAILING criteria; PENDING is counted, not failed.
+chk "spec exit criteria" python3 scripts/run-exit-criteria.py
 echo
 
 echo "########## 7. THE PAYLOAD CONTRACT — live ##########"
@@ -57,21 +97,36 @@ echo "########## 7b. THE LIVE CORPUS — Rust vs the Python reference ##########
 # repo, so an unavailable one must be reported as UNMEASURED, not as a failure of the code.
 #
 # The gate is explicit and prints WHY. A silent skip would be a check that cannot fail, which is the
-# failure mode this repo has already paid for twice.
+# failure mode this repo has already paid for twice. UNMEASURED is tracked SEPARATELY from FAILS so
+# "not measured" can never be read as "passed" -- but it also does not fail the build.
 if ! curl -sf -m 5 http://10.10.10.217:8083/v1/models > /dev/null 2>&1; then
+  UNMEASURED+=("live corpus: backbone :8083 unreachable")
   echo "  UNMEASURED: the backbone at :8083 is not reachable, so the live corpus cannot run."
   echo "  This is NOT a pass — run it when the backbone is up:"
   echo "    python3 scripts/live-corpus-parity.py"
 elif [ ! -S "${LAYA_SIDECAR_SOCKET:-/run/laya/sidecar.sock}" ]; then
+  UNMEASURED+=("live corpus: sidecar socket absent")
   echo "  UNMEASURED: the Python reference sidecar is not up at ${LAYA_SIDECAR_SOCKET:-/run/laya/sidecar.sock}."
   echo "  This is NOT a pass — the reference is the oracle and there is nothing to compare against."
   echo "    scripts/laya-sidecar.py   (see the sidecar's own docs to start it)"
 else
-  python3 scripts/live-corpus-parity.py --json /tmp/laya-parity.json 2>&1 | tail -14
+  chk "live corpus parity" python3 scripts/live-corpus-parity.py --json /tmp/laya-parity.json
 fi
 echo
 
 echo "########## 8. THE TREE ##########"
 find . -path ./target -prune -o -type f \( -name '*.md' -o -name '*.rs' -o -name '*.toml' \) -print | sort | sed 's/^/  /'
 echo
-echo "########## DONE ##########"
+
+echo "########## VERDICT ##########"
+echo "  checks failed: ${#FAILS[@]}"
+for f in "${FAILS[@]:-}"; do [ -n "$f" ] && echo "    FAIL  $f"; done
+echo "  checks unmeasured (NOT passes): ${#UNMEASURED[@]}"
+for u in "${UNMEASURED[@]:-}"; do [ -n "$u" ] && echo "    ??    $u"; done
+
+if [ "${#FAILS[@]}" -gt 0 ]; then
+  echo "VERDICT: FAILURES PRESENT"
+  exit 1
+fi
+echo "VERDICT: ALL CHECKS PASS"
+exit 0
