@@ -257,13 +257,46 @@ Two honest limits:
 
 ```
 cargo xtask gate                     PASS (fmt + clippy -D warnings + test)
-tests                                148, whole workspace
+tests                                414, whole workspace
 clippy --workspace                   0 warnings
 cargo fmt --all --check              clean
-doc links                            48 checked, 0 broken
+doc links                            62 checked, 0 broken
 laya doctor                          READY (backbone + head)
+laya graph run <flow.json>           a decision routed through the live backbone
+                                     (acceptance test, gate step 7c)
 supervision                          kill the head -> restored in ~30 s, unattended
 ```
 
-Numbers above are from this container on 2026-09-29/30. Re-running the commands is the
-only way to keep them true.
+Numbers above are from this container on **2026-10-01**. Re-running the commands is the
+only way to keep them true — and `scripts/verify-all.sh` prints all of them in one run,
+including the specs' own exit criteria.
+
+## 11. Running a graph (`laya graph`)
+
+Spec 07 adds a generic DAG executor. All three subcommands take a flow file — a small JSON
+document, reviewable as text:
+
+```bash
+laya graph validate flow.json    # parse + validate; names the refusal, exit 1 if invalid
+laya graph render   flow.json    # mermaid, plus the list of fields mermaid cannot carry
+laya graph run      flow.json    # execute; run result as JSON on stdout, summary on stderr
+```
+
+A flow's `decide` node names a question and its options and maps each option to a port; the
+lowering turns it into an `mcp` node (calls the real `decide`) plus a `route` node (selects an
+edge by exact `label` match). **A catch-all port (`"_"`) is mandatory**, so a model-fed route
+can never produce an undefined edge.
+
+Things worth knowing before you rely on it:
+
+* **A stopped run exits non-zero** and reports `stopped_early: true` with the failing node id.
+  Exit 0 with `stopped_early: true` in the JSON would be a contradiction a caller resolves the
+  wrong way, so the CLI does not produce it.
+* **Concurrency is real and bounded.** Independent nodes fan out up to a declared limit, and
+  the effective worker count is reported. `writes: true` nodes never overlap — mutual
+  exclusion, not worktree isolation (v1 creates no worktrees).
+* **Only the schedule ORDER is deterministic**; the *interleaving* of a parallel fan-out is
+  not, and nothing claims otherwise.
+* **`laya graph` shells out** for `shell` nodes, so unlike `laya decide` it is not a pure read.
+  A `shell` node's non-zero exit is a **failure**, not data.
+

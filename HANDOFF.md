@@ -167,10 +167,15 @@ never modify, depend on, or cite another project's files or line numbers in our 
 we rely on from outside is stated as a **fact about an interface**, and its consequence is
 enforced by a test in our own code.
 
-**`laya-rs` has NO graph implementation.** It has `route_payload.rs`: the contract with a graph
-`route` node — the two field names a graph matches on — restated in our own crate and pinned by
-test, so nothing outside this repository can move our behaviour silently. A DAG runner belongs
-HERE if we build one.
+**The graph implementation now lives here** (spec 07, complete 2026-10-01): `crates/laya-graph`
+holds the flow, its validations, the `decide`→`route` lowering, subflow composition, the
+renderer, the bounded scheduler, the `shell`/`mcp` executors, and run records — plus the
+`laya graph validate|render|run` CLI in `crates/laya-cli`. `route_payload.rs` remains the
+contract a `route` node matches on (the two field names a graph matches, restated in our own
+crate and pinned by test), so nothing outside this repository can move our behaviour silently.
+*(This section previously read "`laya-rs` has NO graph implementation … A DAG runner belongs
+HERE if we build one." It was correct until 2026-10-01 and is kept here as the record of what
+changed.)*
 
 ## The seven tools are real (this section previously said six of seven)
 

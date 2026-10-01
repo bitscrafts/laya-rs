@@ -25,11 +25,28 @@ crates/laya-abi        the question/answer/payload contract (no I/O)
 crates/laya-core       pure logic: policy, bands, composite scoring (no I/O)
 crates/laya-backbone   the only crate that talks to the network
 crates/laya-head       the 26.5M decision head in pure Rust (no Python, no torch)
+crates/laya-graph      the generic DAG executor: flow, lowering, scheduler, executors
 crates/laya-store      redb: the append-only decision ledger
-crates/laya-mcp        the MCP stdio server  -> binary `laya-rs`
-crates/laya-cli        the terminal runner   -> binary `laya`
+crates/laya-mcp        the MCP stdio server  -> binary `laya-mcp`
+crates/laya-cli        the terminal runner   -> binary `laya` (`doctor|decide|ledger|graph`)
 xtask                  recurring tasks (`cargo xtask gate`)
 ```
+
+`laya-graph` is deliberately **not** a dependency of `laya-mcp`: the judge does not depend on the
+executor, and `route` stays out of the tool list. It depends on neither `laya-store` nor `redb` —
+run records are pure data in `RunReport`, and `DecisionRow` already carries the `run_id`/`node_id`
+join keys for the day a consumer persists a run. See [`specs/07-graph-executor.md`](specs/07-graph-executor.md).
+
+## The graph executor
+
+`laya graph validate|render|run <flow.json>` runs a flow end to end: a `decide` node's answer is
+lowered to `mcp` + `route` nodes, the `route` node selects an edge by exact `label` match (with a
+**mandatory catch-all**), and the selected branch runs. Independent nodes fan out concurrently up
+to a declared limit; `writes: true` nodes are mutually exclusive; a failure stops the run and
+reports `stopped_early` with the failing node id; a stopped run **exits non-zero**.
+
+The acceptance test drives the identical path and spawns the real MCP server — it never stubs the
+caller, because a stub would make it a re-enactment rather than a test. It runs as a gate step.
 
 ## The seven MCP tools
 

@@ -20,3 +20,6 @@
 
 # Logs
 *.log
+
+# graphify code knowledge graph (local, regenerable: graphify .)
+graphify-out/
