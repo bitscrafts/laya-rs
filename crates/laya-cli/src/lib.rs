@@ -16,8 +16,12 @@
 
 pub mod decide;
 pub mod embedder;
+pub mod graph;
+pub mod mcp_client;
 
 pub use decide::{DecideArgs, DecideOutput, decide};
 pub use embedder::{HttpEmbedder, parse_embedding};
+pub use graph::graph;
 pub use laya_backbone::{DEFAULT_ENDPOINT, PROBE_TIMEOUT_MS};
 pub use laya_core::readiness::{Readiness, ReadinessFailure};
+pub use mcp_client::{LiveMcpCaller, resolve_mcp_binary};

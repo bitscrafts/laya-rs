@@ -639,10 +639,12 @@ dependencies = [
  "laya-abi",
  "laya-backbone",
  "laya-core",
+ "laya-graph",
  "laya-head",
  "laya-store",
  "serde",
  "serde_json",
+ "tokio",
  "ureq",
 ]
 

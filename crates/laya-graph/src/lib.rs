@@ -24,6 +24,9 @@
 //! * [`run`] — run records: pure data, carrying `run_id` + `node_id` (R13).
 //! * [`sched`] — the scheduler: deterministic order, bounded concurrent
 //!   fan-out, fail-fast (R8, R9, R10, R11).
+//! * [`route_exec`] — threads a `decide` node's real answer into its `route`
+//!   node before scheduling anything downstream (R-ACC, spec 07 part 4): the
+//!   piece [`node`]'s own docs name as deliberately out of scope for part 3.
 
 #![forbid(unsafe_code)]
 
@@ -35,6 +38,7 @@ pub mod lower;
 pub mod node;
 pub mod on_expr;
 pub mod render;
+pub mod route_exec;
 pub mod run;
 pub mod sched;
 pub mod validate;
@@ -47,6 +51,7 @@ pub use lower::lower;
 pub use node::{Executed, McpCaller, execute_mcp, execute_shell};
 pub use on_expr::PayloadField;
 pub use render::{MermaidRender, render};
+pub use route_exec::run_flow;
 pub use run::{NodeRecord, RunReport};
 pub use sched::{RunOptions, run, topo_order};
 pub use validate::validate;

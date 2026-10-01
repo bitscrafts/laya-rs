@@ -397,14 +397,15 @@ fn main() -> ExitCode {
         Some("doctor") => doctor(&endpoint),
         Some("ledger") => ledger(&rest),
         Some("decide") => decide(&rest, &endpoint),
+        Some("graph") => laya_cli::graph(&rest),
         Some(other) => {
             eprintln!(
-                "laya: unknown command `{other}`\nusage: laya <doctor|decide|ledger> [--url URL]"
+                "laya: unknown command `{other}`\nusage: laya <doctor|decide|ledger|graph> [--url URL]"
             );
             ExitCode::FAILURE
         }
         None => {
-            eprintln!("usage: laya <doctor|decide|ledger> [--url URL]");
+            eprintln!("usage: laya <doctor|decide|ledger|graph> [--url URL]");
             ExitCode::FAILURE
         }
     }
@@ -471,5 +472,18 @@ mod tests {
         let a = parse_args(&args(&["--url", "http://y:2", "doctor"])).unwrap_or_default();
         assert_eq!(a.0.as_deref(), Some("doctor"));
         assert_eq!(a.1, "http://y:2");
+    }
+
+    /// R19: `graph` follows the SAME verbatim pass-through rule `ledger`
+    /// already does — the top-level parser must not reject a `run`-specific
+    /// flag it has no idea about. This is the top-level-parser half of the
+    /// guarantee; `graph.rs`'s own tests cover what the subcommand does once
+    /// it receives those arguments.
+    #[test]
+    fn the_graph_subcommand_arguments_are_passed_through_verbatim() {
+        let (c, _e, rest) = parse_args(&args(&["graph", "run", "flow.json", "--flag", "x"]))
+            .unwrap_or_else(|e| panic!("must parse: {e}"));
+        assert_eq!(c.as_deref(), Some("graph"));
+        assert_eq!(rest, vec!["run", "flow.json", "--flag", "x"]);
     }
 }

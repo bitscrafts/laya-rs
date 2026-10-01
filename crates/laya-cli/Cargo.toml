@@ -25,6 +25,15 @@ laya-backbone = { path = "../laya-backbone" }
 laya-head = { path = "../laya-head" }
 laya-abi = { path = "../laya-abi" }
 ureq = { workspace = true }
+# The engine surface (R19): `laya graph` parses, lowers and runs a flow via
+# laya-graph; laya-cli itself stays thin (parse, call, print).
+laya-graph = { path = "../laya-graph" }
+# `laya_graph::run_flow` is `pub async fn` and this crate had no runtime
+# before this part. Same runtime features `laya-mcp` already uses (its
+# Cargo.toml is the citation): the workspace pin is
+# `default-features = false`, so a bare `workspace = true` would give a
+# tokio that cannot spawn tasks.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util", "sync", "time"] }
 
 [lints]
 workspace = true

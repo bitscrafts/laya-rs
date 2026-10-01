@@ -1,0 +1,22 @@
+{
+  "flow": "sentiment-route-positive",
+  "version": 1,
+  "description": "R-ACC fixture A: a state whose real answer is `positive`. Its pairing fixture (sentiment-negative.json) asks the identical question with a state whose real answer is `negative` — the two must reach DIFFERENT branches, which is the whole point of the control.",
+  "nodes": [
+    {
+      "id": "classify",
+      "kind": "decide",
+      "question": "Is this feedback about the product positive or negative?",
+      "options": ["positive", "negative"],
+      "prompt": "This update is fantastic — exactly the fix I needed, and it works perfectly. Thank you so much for shipping this so quickly!",
+      "ports": {
+        "positive": "branch_positive",
+        "negative": "branch_negative",
+        "_": "branch_fallback"
+      }
+    },
+    { "id": "branch_positive", "kind": "shell", "run": "echo branch:positive" },
+    { "id": "branch_negative", "kind": "shell", "run": "echo branch:negative" },
+    { "id": "branch_fallback", "kind": "shell", "run": "echo branch:fallback" }
+  ]
+}

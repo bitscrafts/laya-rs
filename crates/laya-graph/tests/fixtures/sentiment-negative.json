@@ -1,0 +1,22 @@
+{
+  "flow": "sentiment-route-negative",
+  "version": 1,
+  "description": "R-ACC's pairing control: the IDENTICAL question and ports as sentiment-positive.json, with only the state changed to one whose real answer is `negative`. If routing were hardcoded (or the fallback always won), this fixture would reach the same branch as its pairing — only a real, answer-driven route reaches the OTHER one.",
+  "nodes": [
+    {
+      "id": "classify",
+      "kind": "decide",
+      "question": "Is this feedback about the product positive or negative?",
+      "options": ["positive", "negative"],
+      "prompt": "This update is terrible — it broke the feature I rely on every day and wasted my entire afternoon. I'm furious.",
+      "ports": {
+        "positive": "branch_positive",
+        "negative": "branch_negative",
+        "_": "branch_fallback"
+      }
+    },
+    { "id": "branch_positive", "kind": "shell", "run": "echo branch:positive" },
+    { "id": "branch_negative", "kind": "shell", "run": "echo branch:negative" },
+    { "id": "branch_fallback", "kind": "shell", "run": "echo branch:fallback" }
+  ]
+}
