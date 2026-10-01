@@ -206,3 +206,110 @@ error" lesson matches our validator — and it exposes that two things we might 
 separate `criteria` field (1), the free-id observation (2) and `Option` for unreported values
 (3). The most useful sentence in the whole stream is the author's own disclaimer, at 01:28:16:
 *"there's no really deeper stuff."*
+
+---
+
+## 7. CORRECTION AND ADDITIONS (2026-10-01, later) — the REPOSITORIES, which the first review missed
+
+The review above was built from the **video transcript only**. That was incomplete: the video is a
+vendor walkthrough, while **the repositories carry the design**. Two matter, and one of them names a
+defect we actually have. Added here rather than rewriting the sections above, so the first pass and
+what it missed are both on the record.
+
+### 7.1 The ecosystem is not one crate — it is a typed layer over a transport layer
+
+| crate | role | notable |
+|---|---|---|
+| `typesafe-ai-sdk` (aoprisan), `typesafeai-sdk`, `typesafe-rs` | **transport**: HTTP, retries, error classification, forward-compatible decoding | mirrors the official Python SDK (`typesafe-sdk` 0.6.0); `Client` is explicitly *cheap to clone; clones share the connection pool* |
+| **`s1-rs`** (AbdelStark) — `s1`, `s1-derive`, `s1-test`, `s1-cli` | **the type system**: derive macros, typed answers, gating policies, test helpers | PRD v1.0, 16 Sep 2026, explicitly a **draft**; target v0.1 in 3 weeks |
+
+`s1-rs`'s thesis, in its own words: *"Today every System One integration in every language is
+stringly typed … The wire format delivers typed outputs; the developer experience still hands you
+strings. Rust's type system can close that last mile completely."*
+
+That is a **sharper statement of the problem than anything in the video**, and it is the sentence
+this project should be measured against.
+
+### 7.2 The gap it names, and where WE have it
+
+The PRD's motivating example:
+
+```rust
+let dept = resp.answer("department").and_then(|a| a.choice()); // Option<&str>
+match dept { Some("billing") => …, Some("technical") => …, _ => … } // typo = silent bug
+```
+
+> "Question keys, option labels, and score levels are strings. **Rename a variant and nothing fails
+> to compile.** Add an option to the criteria and no `match` warns you."
+
+**Measured in this repo on 2026-10-01 — a flow whose `ports` mis-keys one option:**
+
+```
+options: ["positive", "negative"]
+ports  : ["positve", "negative", "_"]          // "positve" is a typo
+"positive" has a port? False
+
+$ laya graph validate typo-flow.json
+laya graph validate: … is valid                exit 0   ← ACCEPTED
+```
+
+The flow validates, the render emits an edge labelled `positve`, and **`branch_positive` is
+unreachable**. The mandatory catch-all is what keeps this from crashing — so it degrades *quietly*
+instead of loudly, which is the worse failure. **A typo in a port key silently orphans a branch.**
+
+This is a genuine defect, found by reading the repositories rather than the video, and it is the
+highest-value item either source produced. It should become a spec:
+
+- validate must refuse a `decide` node when **every declared option does not have a port**, and must
+  refuse a port key that matches neither an option nor `"_"` — with a **control** proving the
+  valid flow still passes (a negative is satisfied by refusing everything);
+- `laya graph render` should mark unreachable branches, so the state is visible before a run;
+- and the flow author should be able to *see* the option↔port mapping as a checked relation rather
+  than trusting two hand-written string lists to agree.
+
+The longer-term version of the same idea is what `s1-rs` proposes with derives:
+
+```rust
+#[derive(Choice)]
+enum Department { #[s1("Payment, invoice, refund…")] Billing, … }
+
+#[derive(Questions)]
+struct Triage { department: Department, urgent: bool }
+```
+
+…where the enum *is* the question and a renamed variant **fails to compile**. We do not need the
+derive machinery (`01-design.md` §F13 already chose author-time validation), but the *principle*
+— make a mismatched label impossible rather than merely discouraged — is one this repo already
+believes in and has not finished applying to flow port keys.
+
+### 7.3 What the repositories add that the video did not
+
+- **Confidence is first-class, and gated.** `ChoiceAnswer` carries `selected label, per-label
+  probabilities, confidence`; `ScoreAnswer` carries `probability-weighted level, legend, per-level
+  probabilities, confidence`. The SDK example gates on it: `if dept.confidence > 0.5 { route to … }`.
+  The video never showed a confidence number being acted on; the SDK does. **Our payload already
+  carries `confidence`, `band`, `margin` and `near_tie`** — this is independent convergence on the
+  same shape, and it means the design choice is not idiosyncratic.
+- **`Score` is resolved**: a probability-weighted level plus a legend and per-level probabilities,
+  with confidence. The video named `score` three times and never explained it; that is now answered.
+- **Retry semantics are specified, not improvised**: exponential backoff with *subtractive jitter*,
+  `Retry-After`/`retry-after-ms` honoured, a max retry count, and a **total time budget that stops
+  before a sleep that would exceed it**. Worth comparing against our own retry story.
+- **Client-cloning discipline**: "cheap to clone; clones share the connection pool" — the same
+  conclusion the video reached with `Arc<Inner>`, now stated as an API contract.
+- **Forward-compatible response decoding** is an explicit goal, and `cost: Option<f64>` is the
+  mechanism the earlier section already noted.
+- **Batch, moderation and routing examples ship as first-class examples** — the SDK treats the
+  "ask 150 functions which are needed" use case as a documented pattern, not a remark in the last
+  minute of a stream.
+- **`wiremock` as a dev-dependency** for testing the client without a network. Directly relevant to
+  our own test-hardening question: a transport can be tested against a fake server.
+
+### 7.4 Verdict, revised
+
+The earlier verdict — *"confirmation, not revelation"* — **holds for the video and is wrong for the
+ecosystem**. The repositories contain a real problem statement (`s1-rs`), a real defect in our code
+(the unvalidated option↔port relation), and specifications the video only gestured at (score
+semantics, retry policy, confidence gating). Reading the transcript is enough to say *what the idea
+is*; it is not enough to say *where ours is weak*. The lesson worth keeping: **when a talk links a
+repository, the repository is the primary source and the talk is the trailer.**
