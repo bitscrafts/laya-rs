@@ -16,20 +16,27 @@
 //! * [`validate`] — every refusal, including cycle detection.
 //! * [`lower`] — `decide` -> `mcp` + `route` + edges, fallback rule last.
 //! * [`graph`] — the execution form those stages produce.
+//! * [`expand`] — subflow expansion: prefix, bind, hash-verify, refuse a
+//!   cycle by name rather than hang (R6, R7).
+//! * [`render`] — the Mermaid render, provably lossy and labelled (R14).
 //! * [`error`] — every refusal, named.
 
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod expand;
 pub mod flow;
 pub mod graph;
 pub mod lower;
 pub mod on_expr;
+pub mod render;
 pub mod validate;
 
 pub use error::FlowError;
+pub use expand::{Library, expand};
 pub use flow::{Flow, Kind, Node, Retry};
 pub use graph::{Edge, Graph, GraphNode, NodeBody, RouteRule};
 pub use lower::lower;
 pub use on_expr::PayloadField;
+pub use render::{MermaidRender, render};
 pub use validate::validate;

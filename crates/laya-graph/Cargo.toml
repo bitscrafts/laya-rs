@@ -15,6 +15,10 @@ laya-core = { path = "../laya-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# Content-hashes a subflow's definition (R6), so an edited child cannot
+# silently change the parent's behaviour. Already a workspace dependency
+# (the ledger uses it) — no second hash crate (N5).
+blake3 = { workspace = true }
 
 [lints]
 workspace = true

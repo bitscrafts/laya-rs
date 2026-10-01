@@ -86,4 +86,42 @@ pub enum FlowError {
     /// only select among ports an author already drew.
     #[error("`on` expression `{0}` is not member access on a field the route payload carries")]
     BadOnExpr(String),
+
+    /// A `subflow` node's `uses` reference (by name, chasing through any
+    /// intermediate subflows) eventually names itself. Expansion is refused
+    /// rather than recursed, because an expansion cycle is infinite
+    /// expansion with nothing to interrupt it — a hang, not a crash.
+    #[error("subflow expansion cycle: {}", .chain.join(" -> "))]
+    ExpansionCycle {
+        /// The reference chain that closes the cycle, e.g. `["x", "y", "x"]`.
+        chain: Vec<String>,
+    },
+
+    /// A `subflow` node's child declares an input in its own `inputs` list
+    /// that the parent's `with` map never binds. Refused at load, not
+    /// discovered at run time.
+    #[error(
+        "subflow `{subflow_id}` does not bind argument `{argument}`, which its child declares as an input"
+    )]
+    UnboundArgument {
+        /// The id of the `subflow` node whose `with` map is incomplete.
+        subflow_id: String,
+        /// The child's declared input that nobody bound.
+        argument: String,
+    },
+
+    /// A `subflow` node's declared `content_hash` does not match the
+    /// blake3 hash of the child's actual definition — the child was edited
+    /// in place after the parent pinned it.
+    #[error(
+        "subflow `{subflow_id}` declares content_hash `{declared}` but the child's actual hash is `{actual}`"
+    )]
+    HashMismatch {
+        /// The id of the `subflow` node with the mismatched hash.
+        subflow_id: String,
+        /// The hash the parent declared.
+        declared: String,
+        /// The hash the child's actual definition hashes to.
+        actual: String,
+    },
 }
