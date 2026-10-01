@@ -75,6 +75,33 @@ chk "doc citations (3 unresolved were ignored here on 2026-10-01)" \
     python3 "$(dirname "$0")/check-doc-citations.py"
 echo
 
+echo "########## 5c. COMMIT HYGIENE (no tool named in a commit) ##########"
+# HARD RULE 0c. This was broken for 35 commits (register row A24) and THREE more on
+# 2026-10-01 while implementing spec 07 -- with a clean author in every case, because
+# A24 fixed the author field and nothing scanned the MESSAGE. A rule enforced on one
+# of the three places it applies is half a rule, and half a rule fails silently.
+#
+# THE BASELINE. A24's decision was fix-forward, never rewrite history, so the SHAs
+# cited across the registers stay valid. That means some pre-existing commits DO name
+# a tool. They are recorded in one place below rather than allowed to make the rule
+# unenforceable: anything NOT on the list fails the gate. New violations cannot hide
+# behind old ones, and the accepted debt is counted and named instead of forgotten.
+#
+# Measured 2026-10-01: 8 of 49 commits. Four are recent and mine (spec 03/07); four
+# are older and mostly descriptive rather than authorship -- e.g. "the pi backend",
+# "pi-improved is a REFERENCE". A strict reading still refuses the bare tool name, so
+# they are listed rather than argued away. The number is printed by the gate: if it
+# grows, someone changed history, and if the list ever shrinks without a rewrite,
+# that is worth explaining.
+KNOWN_HYGIENE_DEBT="a02af96 9cf2aa4 a9e9310 75806d0 b55ba08 002cf28 09d8760 4b471e4"
+chk "commit hygiene: no NEW commit names a tool (accepted pre-fix debt: $(echo $KNOWN_HYGIENE_DEBT | wc -w))" \
+    bash -c "for sha in \$(git log --format=%h -60); do
+               case ' $KNOWN_HYGIENE_DEBT ' in *\" \$sha \"*) continue ;; esac
+               git log -1 --format=%B \"\$sha\" | scripts/check-commit-msg.sh /dev/stdin >/dev/null 2>&1 || {
+                 echo \"commit \$sha names a tool:\"; git log -1 --format=%s \"\$sha\"; exit 1; }
+             done"
+echo
+
 echo "########## 6. SPECS PRESENT ##########"
 ls specs/*.md | sed 's/^/  /'
 echo
