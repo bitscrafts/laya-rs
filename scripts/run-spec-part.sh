@@ -165,17 +165,38 @@ echo "$PRE_HEAD" > "$STATE_DIR/part${PART}.head"
 echo "  pre-dispatch HEAD: ${PRE_HEAD:0:9}  (recorded for the commit check)"
 
 echo "=== final result object ==="
-tail -1 "$LOG" | python3 -c "
-import json,sys
-try:
-    d=json.loads(sys.stdin.read())
-    for k in ('subtype','stop_reason','terminal_reason','num_turns','total_cost_usd','duration_ms'):
-        if k in d: print(f'  {k}: {d[k]}')
-    r=d.get('result')
-    if isinstance(r,str): print('  result:', r[:400])
-except Exception as e:
-    print('  (could not parse final line:', e, ')')
-" 2>/dev/null
+# THE RESULT EVENT IS NOT THE LAST LINE. Measured 2026-10-01: `type: result` sat at
+# line 12146 and a `system/task_notification` followed at 12149, so `tail -1` parsed
+# the notification and printed only `subtype: task_notification` -- losing
+# `stop_reason`, `num_turns` and the cost. Exactly the class this project keeps
+# finding: a report that does not correspond to the property it names. Scan for the
+# result event instead of trusting its position.
+python3 - "$LOG" <<'PY' 2>/dev/null
+import json, sys
+res = None
+with open(sys.argv[1], errors="ignore") as fh:
+    for line in fh:
+        try:
+            d = json.loads(line.strip())
+        except Exception:
+            continue
+        if d.get("type") == "result":
+            res = d            # keep the LAST one, if several
+if res is None:
+    print("  (no `type: result` event in the log -- the run may have died before finishing)")
+else:
+    for k in ("subtype", "stop_reason", "terminal_reason", "is_error",
+              "num_turns", "total_cost_usd", "duration_ms", "session_id"):
+        if k in res:
+            print(f"  {k}: {res[k]}")
+    r = res.get("result")
+    if isinstance(r, str):
+        print("  result:", r[:400])
+    # A turn cap is the documented wall, and it is NOT the same as success.
+    if res.get("subtype") == "error_max_turns":
+        print("  >>> TURN CAP HIT: the tree may hold partial work. Verify it, then"
+              " resume this session with only what remains (see MAX_TURNS).")
+PY
 
 echo "=== tree state (exit code is NOT evidence; the tree is) ==="
 git -C "$REPO" status --porcelain
