@@ -625,6 +625,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "laya-graph"
+version = "0.1.0"
+dependencies = [
+ "laya-abi",
+ "laya-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "laya-head"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,20 @@
+[package]
+name = "laya-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "The generic DAG engine: parse, validate and lower a flow document into its execution form. Laya supplies a value; the graph owns every edge."
+
+[dependencies]
+laya-abi = { path = "../laya-abi" }
+laya-core = { path = "../laya-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

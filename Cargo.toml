@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/laya-abi",
     "crates/laya-core",
+    "crates/laya-graph",
     "crates/laya-backbone",
     "crates/laya-head",
     "crates/laya-store",
