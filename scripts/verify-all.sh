@@ -114,6 +114,21 @@ else
 fi
 echo
 
+echo "########## 7c. THE GRAPH ACCEPTANCE TEST — laya-mcp as judge (spec 07 part 4) ##########"
+# R-ACC's own gate: a real flow must route a decision through the REAL laya-mcp,
+# spawned over stdio, exactly as `laya graph run` does. Same shape as §7b: gated on
+# the live backbone, reported as UNMEASURED (never a silent pass) when it is down —
+# an unmeasured acceptance test is not an acceptance test (the spec's own words).
+if ! curl -sf -m 5 http://10.10.10.217:8083/health > /dev/null 2>&1; then
+  UNMEASURED+=("graph acceptance: backbone :8083 unreachable")
+  echo "  UNMEASURED: the backbone at :8083 is not reachable, so R-ACC cannot run."
+  echo "  This is NOT a pass — run it when the backbone is up:"
+  echo "    cargo test -p laya-graph --test acceptance"
+else
+  chk "graph acceptance (R-ACC, laya-mcp live)" cargo test -p laya-graph --test acceptance
+fi
+echo
+
 echo "########## 8. THE TREE ##########"
 find . -path ./target -prune -o -type f \( -name '*.md' -o -name '*.rs' -o -name '*.toml' \) -print | sort | sed 's/^/  /'
 echo
