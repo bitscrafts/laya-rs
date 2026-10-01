@@ -2,7 +2,7 @@
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: subflows are what make a flow library reusable; the renderer is what keeps the execution form auditable, and it must exist BEFORE any store.
-- **Status**: SPECIFIED — not yet dispatched
+- **Status**: **IMPLEMENTED (2026-10-01)** — subflow expansion and the render; 33 tests in the crate, commit `9cf2aa4`.
 - **Source**: graph capability discussion — `_docs/03-reference/GRAPH-SPEC.md` §Composition + Part 3; `_docs/06-research/03-four-architecture-questions.md` §2.3, §3.6 (2026-09-30)
 - **Depends-On**: **part 1** (`07-graph-executor-part1.md`) — needs the flow model, `FlowError`, and the lowering.
 - **Master spec**: [`07-graph-executor.md`](07-graph-executor.md) — this part implements R6, R7 and R14.
@@ -152,8 +152,12 @@ happened to print the surviving ones in the same order.
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_render_round_trips_the_derived_edge_set 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R14: the renderer is trustworthy
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib two_uses_of_one_subflow_do_not_collide 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R6: the prefix rule
 - [ ] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings` — zero (N3)
-- [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py 2>&1 | grep -q '07-graph-executor-part2'` — this spec's criteria are discovered and run (R15, landed in part 1)
-- [ ] `cd /projects/laya-rs && test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/` — N4: still process-free (the `test -d` guard is mandatory — see part 1)
+- [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part2'` — this spec is discovered by the runner (R15, landed in part 1). `--list-specs` rather than a bare run: the latter recursed (18 nested runners, measured 2026-10-01)
+- [ ] `cd /projects/laya-rs && test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/{expand,render}.rs` — N4: part 2's own modules are still process-free (the `test -d` guard is mandatory — see part 1). **Scope narrowed to `expand.rs` and `render.rs` on 2026-10-01**: the crate-wide form began failing on *correct* code once part 3 added `std::process` for the `shell` executor. A criterion scoped to the whole crate cannot express "this part is process-free" when a sibling part is allowed to use the same tool
+
+  **Control for the line above** — the same pattern with the `!` removed must match a file that genuinely uses it, so the prohibition is not a pattern that can never match:
+
+- [ ] `cd /projects/laya-rs && grep -qE 'std::process' crates/laya-graph/src/node.rs` — near-miss control (part 3's `shell` executor is where `std::process` legitimately lives)
 - [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'blake3' crates/laya-graph/Cargo.toml` — N5: hashing reuses the existing workspace hash crate
 - [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -q 'sha2' crates/laya-graph/Cargo.toml` — N5: no second hash crate
 

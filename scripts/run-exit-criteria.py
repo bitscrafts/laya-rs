@@ -20,6 +20,7 @@ Discovering rather than listing means a NEW spec needs no edit here — which is
 whole point: the previous design required someone to remember, and nobody did.
 """
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -101,7 +102,51 @@ def main() -> int:
         help="ALSO run the criteria of specs declared SPECIFIED (slower; for auditing "
              "that pending work really does fail)",
     )
+    ap.add_argument(
+        "--list-specs",
+        action="store_true",
+        help="print each spec's status line and exit WITHOUT running any criterion. "
+             "This is the mode a spec's own 'is my spec discovered?' criterion must use "
+             "-- see the re-entrancy note below.",
+    )
     args = ap.parse_args()
+
+    # RE-ENTRANCY. A criterion of the form
+    #   python3 scripts/run-exit-criteria.py 2>&1 | grep -q '<spec name>'
+    # is evaluated BY this script, so running it starts another full evaluation,
+    # which runs the criterion again, which starts another... Measured 2026-10-01:
+    # four spec parts each carried such a criterion and the run left **18 nested
+    # runner processes**, each doing whole-workspace cargo runs. It did not hang --
+    # it multiplied, which is worse, because it looks like slow progress.
+    #
+    # Two fixes, both here:
+    #   1. `--list-specs` gives those criteria a mode that touches no criterion, so
+    #      it cannot recurse by construction. A spec must use it (spec-author says so).
+    #      It is checked BEFORE the guard and is deliberately EXEMPT: it is a leaf
+    #      that runs nothing, so a child doing it is not a recursion, it is the point.
+    #   2. The guard makes a FULL nested evaluation fail loudly instead of recursing,
+    #      so a spec that still carries the old form is corrected rather than allowed
+    #      to multiply.
+    if args.list_specs:
+        # Cheap and non-recursive: status lines only, no criterion is executed.
+        for path in discover():
+            criteria = [ln for ln in path.read_text().splitlines() if CHECKBOX.match(ln)]
+            status = status_of(path)
+            mark = "--" if not criteria else "  "
+            print(f"{mark} {path.name}   [{status}]   ({len(criteria)} criteria)")
+        return 0
+
+    if os.environ.get("LAYA_EXIT_CRITERIA_RUNNING"):
+        print(
+            "REFUSING TO RE-ENTER: run-exit-criteria.py is already running (this is a "
+            "criterion invoking the runner that is evaluating it -- that multiplies "
+            "processes instead of measuring anything). A criterion that asks 'is my "
+            "spec discovered?' must use `--list-specs`, which runs no criteria.",
+            file=sys.stderr,
+        )
+        return 2
+
+    os.environ["LAYA_EXIT_CRITERIA_RUNNING"] = "1"
 
     npass = nfail = nprose = 0
     pending = 0

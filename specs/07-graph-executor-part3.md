@@ -2,7 +2,7 @@
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: this is where a graph stops being a document and starts doing work — and where every failure mode that "looks like success" lives.
-- **Status**: SPECIFIED — not yet dispatched
+- **Status**: **IMPLEMENTED (2026-10-01)** — the scheduler, `shell`/`mcp` executors, run records; 51 tests in the crate, commit `574354b`.
 - **Source**: graph capability discussion — `_docs/03-reference/GRAPH-SPEC.md` Stage 4; `_docs/06-research/03-four-architecture-questions.md` §3.4, §3.5 (2026-09-30)
 - **Depends-On**: **part 1** and **part 2** (both committed before this is dispatched).
 - **Master spec**: [`07-graph-executor.md`](07-graph-executor.md) — this part implements R8, R9, R10, R11, R12, R13 and R16.
@@ -206,7 +206,7 @@ is what stops a blanket `stopped_early: true` from passing.
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_completed_run_does_not_say_stopped_early 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R11's control
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_shell_node_exiting_zero_succeeds 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R12's control
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_concurrent_run_attribution_is_still_correct 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R13 under concurrency
-- [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py 2>&1 | grep -q '07-graph-executor-part3'` — this spec's criteria are discovered and run
+- [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part3'` — this spec is discovered by the runner. `--list-specs` rather than a bare run: the latter recursed (18 nested runners, measured 2026-10-01)
 - [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'tokio' crates/laya-graph/Cargo.toml` — N5: the existing runtime is reused
 - [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'rt-multi-thread' crates/laya-graph/Cargo.toml` — N5: the tokio feature set is stated explicitly, as `laya-mcp`'s is. The workspace pin is `default-features = false`, so a bare `workspace = true` gives a tokio that cannot spawn tasks
 

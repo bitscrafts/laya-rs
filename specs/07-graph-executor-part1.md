@@ -2,7 +2,7 @@
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: the foundation everything else in spec 07 builds on; pure and process-free, so it is the safest part to land first.
-- **Status**: SPECIFIED — not yet dispatched
+- **Status**: **IMPLEMENTED (2026-10-01)** — the flow, its refusals and the lowering; 18 tests, commit `a9e9310`.
 - **Source**: graph capability discussion — `_docs/03-reference/GRAPH-SPEC.md` + `_docs/06-research/03-four-architecture-questions.md` §3 (2026-09-30)
 - **Depends-On**: none. Specs 01–06 are complete.
 - **Master spec**: [`07-graph-executor.md`](07-graph-executor.md) — this part implements R1–R5 and R15 of it.
@@ -156,8 +156,12 @@ pre-implementation failure: the crate does not exist yet.)
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib on_refuses_anything_that_is_not_member_access 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R3: the determinism guarantee
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib agent_and_quorum_are_not_supported_kinds 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R2: the deferred kinds are refused, not silently accepted
 - [ ] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings` — zero, not below baseline (N3)
-- [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py 2>&1 | grep -q '07-graph-executor-part1'` — R15: this spec's own criteria are discovered and run. **Measured pre-implementation: FAILS** — the runner lists exactly `01..06` and never mentions spec 07, which is the defect R15 exists to fix
-- [ ] `cd /projects/laya-rs && test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/` — N4: part 1 is process-free. **The `test -d` guard is mandatory**: without it, `! grep -r` on a missing directory exits 2, which `!` inverts to success — the check would pass on a crate that was never created
+- [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part1'` — R15: this spec is discovered by the runner. **Measured pre-implementation: FAILS** — the runner listed exactly `01..06` and never mentioned spec 07, which is the defect R15 exists to fix. **Uses `--list-specs`, not a bare run**: a bare `run-exit-criteria.py | grep` makes the runner evaluate a criterion that re-runs the runner, and it recursed (measured 2026-10-01: 18 nested processes). `--list-specs` runs no criterion, so it cannot recurse
+- [ ] `cd /projects/laya-rs && test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/{flow,validate,lower,on_expr,graph,error}.rs` — N4: part 1's own modules are process-free. **The `test -d` guard is mandatory**: without it, `! grep -r` on a missing directory exits 2, which `!` inverts to success — the check would pass on a crate that was never created. **Scope narrowed to part 1's six files on 2026-10-01**: the criterion originally grepped the whole `src/`, and part 3 legitimately added `std::process` (the `shell` executor, N4 for *that* part says process IS used), so the crate-wide form started failing on correct code. A criterion scoped to the whole crate cannot express "this part is process-free" once another part may use the same tool"
+
+  **Control for the line above** — the pattern must still match a file that genuinely *does* use `std::process`, or the `!` is proving nothing. `crates/laya-graph/src/node.rs` is exactly that file (part 3's `shell` executor), so the same pattern with the `!` removed must SUCCEED there:
+
+- [ ] `cd /projects/laya-rs && test -f crates/laya-graph/src/node.rs && grep -qE 'std::process' crates/laya-graph/src/node.rs` — near-miss control: the pattern matches where the symbol legitimately exists, so its absence from part 1's six files is a real result rather than a pattern that can never match
 
 **Carried re-checks** — these guard earlier work against a regression introduced by
 this part. They pass before implementation *by design*, so their passing is not

@@ -123,6 +123,14 @@ cd "$REPO" || exit 1
 # tool-use count alone is NOT a stall signal (a long thinking block freezes it
 # while the log keeps growing; measured 2026-10-01).
 #
+# `--permission-mode bypassPermissions` IS LOAD-BEARING -- do not remove it, and do
+# not weaken it to the default. Measured 2026-09-09 and recorded in amem: `claude -p`
+# in print mode WITHOUT the skip-permissions flag gets STUCK requesting an
+# interactive file-write approval that print mode cannot surface. The symptom is a
+# silent hang, not an error, so it costs a full timeout before anyone notices. This
+# is why the wrapper exports IS_SANDBOX=1 as well (required for bypassPermissions as
+# root).
+#
 # The brief is handed over as a POINTER, never inlined. `$(cat brief)` puts the
 # whole brief on the command line, and worker-output-acceptance records the
 # measured failure: a 3,577-byte brief arriving as 248 bytes, silently, producing
