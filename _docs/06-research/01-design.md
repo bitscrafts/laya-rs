@@ -299,6 +299,21 @@ the levels that pay.
 
 ## 12. Sources
 
+### 12.0 The upstream layer — read this before citing the line below
+
+The JEV lineage has an **upstream** source, reviewed 2026-10-01:
+[`04-jev-typesafe-ai-video-review.md`](04-jev-typesafe-ai-video-review.md) — Jeremy Chone
+building his own Rust client against the vendor "type safe AI" / "System One" API, live,
+2h44m. Two findings there that bind anything written below:
+
+- **The upstream never claims determinism.** `deterministic`, `constrain`, `grammar` and
+  `logit` occur zero times; the API returns a **probability** per question. So this repo's
+  determinism is a property of **its own Rust head** (spec 03, measured to 4.05e-6 against
+  PyTorch) and must never be justified by citing the JEV line.
+- **The three question types converge independently**: the vendor's `choice` / `score` /
+  `null` are exactly our `QTYPES = {choice:0, score:1, noul:2}`. That is corroboration of the
+  shape, not a source for it.
+
 ### 12.1 The video and its repository
 
 **Video** — "Ten Levels of Jev" (IndyDevDan), `https://youtu.be/_U-O5lYhJ7Q`
