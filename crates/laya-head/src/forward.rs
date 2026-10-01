@@ -456,14 +456,20 @@ impl Head {
         // Slice each token's projected row ONCE, outside the loops.
         //
         // This is not a micro-optimisation, it is the difference between usable and unusable. The
-        // first version selected q/k/v inside the inner loops with `chunks_exact(..).nth(..)`, which
-        // is a LINEAR scan per call — so the attention, already O(seq^2 * head_dim) of arithmetic,
-        // became O(seq^3) of ITERATING as well. Measured: a 512-token sequence spent over four
-        // minutes CPU-bound under that version, where the reference answers in seconds.
+        // first version selected q/k/v inside the inner loops with `chunks_exact(..).nth(..)`.
+        //
+        // CORRECTED 2026-10-01: the original note here said `nth` is a LINEAR scan and that this
+        // made the attention O(seq^3). That is wrong — `ChunksExact::nth` is O(1) (measured: 10^6
+        // random-index calls, 0.003 s), so it cannot have been the cause. The measured causes of
+        // the four-minute run are the scalar strict-order reduction in `math.rs` (whose order is
+        // part of the contract) and the missing weight reuse across tokens. Hoisting the offsets
+        // is still correct and still a real win; it is just not the explanation. Recorded because
+        // the wrong explanation points a reader at `nth` and away from the reduction, which is
+        // where the remaining cost is. See spec 12 and _docs/04-development/ANALYSIS-2026-10-02.md.
         //
         // A row is `[q_0..q_{d-1}, k..., v...]` chunked into `3 * n_heads` pieces, so q head h is
         // piece h, k head h is piece `n_heads + h`, and v head h is piece `2 * n_heads + h`. Those
-        // offsets are computed once per head instead of searched for per element. (The offsets were
+        // offsets are computed once per head instead of sliced per element. (The offsets were
         // also the site of an off-by-`n_heads` that the differential test caught on its first case.)
         let rows: Vec<&[f32]> = qkv.chunks_exact(3 * dim).collect();
         for head in 0..n_heads {

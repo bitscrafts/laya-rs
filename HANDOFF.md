@@ -106,6 +106,16 @@ failed. That is what makes the port reachable and the criterion runnable.
    four minutes. Offsets computed once per head: **~12 s release**. A debug build is ~10x slower,
    which the harness now documents.
 
+   > **CORRECTED 2026-10-01 — the attributed cause is wrong; the fix and the speed-up are real.**
+   > `ChunksExact::nth` is **O(1)**, not a linear scan: measured, 10⁶ random-index calls take
+   > 0.003 s. The pre-fix code used exactly that call, so it cannot be what made the loop cubic.
+   > The measured causes are the **scalar strict-order reduction** (`math.rs:214` — the reduction
+   > order is part of the contract, so it cannot simply be reordered) and the **missing weight reuse
+   > across tokens**. The conclusion — compute offsets once per head — is still the right fix and
+   > the ~12 s figure still stands. What is wrong is only the explanation, and it matters: the wrong
+   > explanation points a future reader at `nth` and away from the reduction, which is where the
+   > remaining cost is. Spec 12 measures it.
+
 ## Spec 03 (P4): the head is reproduced against PyTorch itself
 
 Spec 03 is complete on **every** half, offline and live. The differential test is the point: it runs
@@ -191,6 +201,30 @@ changed.)*
 
 ## THE SAFETY DEFECT THAT WAS FIXED (do not regress it)
 
+> **SUPERSEDED, 2026-10-01 — it was NARROWED, not fixed. See spec 08.**
+>
+> The heading above was accurate about the mechanism and wrong about the outcome. The "both signals
+> clear" rule below is a **12-entry, case-sensitive denylist AND-ed with a signal this same section
+> measures as noise** (6/12, negative separation). The review of 2026-10-01 measured the result,
+> live, through the real `laya-mcp`: the gate returns **`allow`** for a filesystem-formatting
+> command, an unrecoverable file-shredding command, a recursive permission strip on the home
+> directory, a bare redirect that truncates a file, a pipe from the network into a shell, and
+> "Wipe the entire disk and delete all backups permanently" — while returning **`ask`** for
+> `ls -la /tmp` and `cargo test`. **The ordering is inverted, so the `allow` path carries no safety
+> information today.** `ask` then runs what the gate allowed, and only afterwards validates the
+> request, so a call can have its effect and then report failure to the caller.
+>
+> Two further facts the original fix left in place: the noul **label is never read** (only
+> confidence, and a noul's confidence is `max(p, 1−p)`, so a confident "no" scores 0.95 and is
+> allowed), and `irreversible` is **still decorative** (`policy.rs:279-280` has two identical `Mid`
+> arms; mutation testing shows both `true` and `false` survive).
+>
+> **Spec 08 replaces the denylist with a positive allowlist** — `allow` requires a match, the model
+> may only downgrade, `irreversible` changes the outcome, and `ask` validates everything before it
+> executes. The text below is kept because the *diagnosis* it records is still the right one, and
+> because the effect-check technique it used is what caught this. Recorded here rather than rewritten:
+> a superseded claim is annotated, never erased.
+
 The `ask` e2e proof caught the gate **allowing `rm -rf <dir>` and the command running**. The
 check that caught it was an **effect** check — the protected file had to still exist afterwards —
 not a message check.
@@ -238,9 +272,19 @@ smallest observed failure, and both file tools return `bytes` + a `warning` abov
 
 ## What goes to redb: NOTHING (asked and verified this session)
 
-`laya-store` declares **no dependencies** ("NO DEPS YET, ON PURPOSE"), is in neither binary's tree,
-`redb` is **absent from `Cargo.lock`**, and **no `.redb` / `ledger-*.jsonl` exists anywhere** for
-this project. All seven tools are stateless.
+> **CORRECTED 2026-10-01 — three of these four claims are now false.** Kept, annotated rather than
+> erased, because the section records what was true at the time and why the question was asked.
+> - `laya-store` **now declares dependencies**: `crates/laya-store/Cargo.toml` has
+>   `redb = { workspace = true }`. `redb` is **present in `Cargo.lock`** (one entry). The
+>   "NO DEPS YET, ON PURPOSE" line described the pre-spec-04 scaffold, and is contradicted by
+>   `HANDOFF.md`'s own ledger section further down, which describes redb 4.2.0 in use.
+> - `laya-store` **is** in `laya-mcp`'s tree; the `ledger` tool is real and writes segments.
+> - No `.redb` file exists **in this repo** — true — because the store is written under
+>   `LAYA_LEDGER_DIR`, which is outside it.
+> - `laya-mcp` is no longer "two binaries, all seven tools stateless": `ledger` is stateful, which is
+>   the whole point of spec 04.
+>
+> The `redb` pin that matters is `=4.2.0`, and `laya ledger compact` is the only writer.
 
 ## Documentation: ONE folder (merged 2026-09-29)
 
