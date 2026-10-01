@@ -83,7 +83,17 @@ row "fmt clean" cargo fmt --all --check
 
 if [ "$QUICK" = 0 ]; then
   # --- 3. guardrails ----------------------------------------------------------
-  row "specs/ untouched"                bash -c 'git diff --quiet -- specs/'
+  # "specs/ untouched" was WRONG and fired on correct work. specs/ legitimately
+  # changes: the worker may update `specs/README.md`'s status column, and the
+  # ORCHESTRATOR owns every spec's own Status line. The property that actually
+  # matters is that no spec's CONTRACT was rewritten -- so this asserts that the
+  # only changed lines under specs/*.md (README excluded) are Status lines.
+  row "no spec's contract was rewritten (only Status lines changed)" \
+      bash -c 'set -e
+        changed=$(git diff --name-only -- specs/ | grep -v "specs/README.md" || true)
+        [ -z "$changed" ] && exit 0
+        bad=$(git diff -U0 -- $changed | grep -E "^[-+]" | grep -vE "^(\+\+\+|---)" | grep -vE "^[-+]-? ?\*\*Status" || true)
+        [ -z "$bad" ] || { echo "contract lines changed in: $changed"; echo "$bad" | head -5; exit 1; }'
   row "payload contract untouched"      bash -c 'git diff --quiet -- crates/laya-core/src/route_payload.rs'
   row "G16 no laya-store dep"           bash -c '! grep -qE "^laya-store|^redb" crates/laya-graph/Cargo.toml'
   row "G16 no store access in source"   bash -c '! grep -rqE "redb|Ledger::open" crates/laya-graph/src/'

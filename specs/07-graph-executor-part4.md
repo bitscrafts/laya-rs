@@ -2,7 +2,7 @@
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: last by dependency — the acceptance test is what converts the whole design from argument into evidence, and it needs parts 1–3 landed.
-- **Status**: SPECIFIED — not yet dispatched
+- **Status**: **IMPLEMENTED (2026-10-01)** — the `laya graph` CLI surface (`validate`/`render`/`run`) and R-ACC: a real flow routes a decision through the live backbone and the real `laya-mcp`, with the two fixtures reaching DIFFERENT branches. 59 tests in `laya-graph` (incl. 3 acceptance).
 - **Source**: graph capability discussion — `_docs/06-research/03-four-architecture-questions.md` §3.4, §5 item 6 ("one real flow end to end with `laya-mcp` as judge") (2026-09-30)
 - **Depends-On**: **parts 1, 2 and 3** (each committed before this is dispatched).
 - **Master spec**: [`07-graph-executor.md`](07-graph-executor.md) — this part implements R-ACC and adds the CLI surface.
@@ -196,7 +196,7 @@ it.**
 - [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib route_is_not_a_tool 2>&1 | grep -qE '^test result: ok\. [1-9]'` — N8: `route` is still absent from the MCP tools. **The test already exists** (`crates/laya-mcp/src/lib.rs:1739`, which asserts `!is_known_tool("route")`), so this spec does not add a duplicate — it re-runs the existing pin, because this part is where an engine surface most plausibly leaks into the tool list
 - [ ] `cd /projects/laya-rs && git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
 - [ ] `cd /projects/laya-rs && cargo fmt --all --check` — formatted (N3)
-- [ ] `cd /projects/laya-rs && git status --porcelain crates/laya-head/ | grep -qv .` — this spec touches nothing in the head
+- [ ] `cd /projects/laya-rs && test -z "$(git status --porcelain crates/laya-head/)"` — this spec touches nothing in the head. **Corrected 2026-10-01**: the original was `git status --porcelain crates/laya-head/ | grep -qv .`, which is a criterion that can NEVER pass — `-q` suppresses grep's output, so `-v .` has nothing to match and grep exits 1 on both empty and non-empty input (measured). It reported FAIL on a clean tree, which is how it was found: it survived in the spec because the earlier gate discarded exit codes, so a permanently-failing criterion was never distinguishable from a passing one
 - [ ] `cd /projects/laya-rs && cargo test --workspace` — no regression
 - [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
 
