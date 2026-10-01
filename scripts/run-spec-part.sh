@@ -19,20 +19,29 @@
 #     needs it and it is the only handle on a run that stopped early.
 #
 # USAGE
-#   scripts/run-spec-part.sh 3            # dispatch part 3 (fresh)
-#   scripts/run-spec-part.sh 3 --resume   # resume part 3's LAST session
-#   scripts/run-spec-part.sh 3 --resume ac864d00-...   # resume a specific one
+#   scripts/run-spec-part.sh 08           # dispatch spec 08 (fresh)
+#   scripts/run-spec-part.sh 08 --resume  # resume spec 08's LAST session
+#   scripts/run-spec-part.sh 08 --resume 9f2c1a4e-...   # resume a specific one
+#   scripts/run-spec-part.sh part3        # legacy: spec 07, part 3
 #   scripts/run-spec-part.sh --list       # what has been dispatched
 #
-# A part's brief lives at /projects/_tmp/brief-spec07-part<N>.md and its spec at
-# specs/07-graph-executor-part<N>.md. Both are checked before dispatch: a dispatch
-# with a missing brief fails here, not 120 turns later.
+# The spec is found by GLOB: `N` selects the first `specs/<N>-*.md`, so a new
+# numbered spec needs no edit here. `part<N>` still selects spec 07's part, which
+# is how that spec was split.
+#
+# A spec's brief lives at /projects/_tmp/brief-spec<N>.md. Both spec and brief are
+# checked before dispatch: a dispatch with a missing brief fails here, in one
+# second, not after 120 turns.
+#
+# GENERALISED 2026-10-02 -- it was hardcoded to spec 07, so the six specs the
+# architectural review produced could not be dispatched from it at all, which
+# would have pushed the dispatch back into an inline command (HARD RULE 0d).
 
 set -uo pipefail
 
 REPO=/projects/laya-rs
 BRIEF_DIR=/projects/_tmp
-STATE_DIR=/projects/_tmp/spec07-dispatch
+STATE_DIR=/projects/_tmp/spec-dispatch
 MODEL=sonnet
 MAX_TURNS=120
 
@@ -49,22 +58,22 @@ if [ -f /root/.hermes/.env ]; then set -a; . /root/.hermes/.env; set +a; fi
 mkdir -p "$STATE_DIR"
 
 usage() {
-  sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
 list_dispatched() {
-  echo "=== dispatched parts (state in $STATE_DIR) ==="
+  echo "=== dispatched specs (state in $STATE_DIR) ==="
   local found=0
-  for f in "$STATE_DIR"/part*.session; do
+  for f in "$STATE_DIR"/*.session; do
     [ -f "$f" ] || continue
     found=1
-    local part sid started
-    part=$(basename "$f" .session)
+    local key sid started
+    key=$(basename "$f" .session)
     sid=$(cat "$f")
     started=$(stat -c %y "$f" 2>/dev/null | cut -d. -f1)
-    printf '  %-6s session %s\n         started %s\n' "$part" "$sid" "$started"
-    printf '         resume:  %s %s --resume %s\n' "$0" "${part#part}" "$sid"
+    printf '  %-8s session %s\n           started %s\n' "$key" "$sid" "$started"
+    printf '           resume:  %s %s --resume %s\n' "$0" "$key" "$sid"
   done
   [ "$found" = 1 ] || echo "  (none)"
 }
@@ -76,25 +85,30 @@ case "${1:-}" in
   --help|-h) usage 0 ;;
 esac
 
-PART="${1#part}"
+ARG="${1#part}"
+# `part<N>` keeps its meaning: spec 07's part N, which is how that spec was split.
+case "${1:-}" in
+  part*) KEY="07-part${ARG}"; SPEC="$REPO/specs/07-graph-executor-part${ARG}.md" ;;
+  *)     KEY="$ARG";         SPEC=$(ls "$REPO"/specs/"$ARG"-*.md 2>/dev/null | head -1) ;;
+esac
+PART="$KEY"
 RESUME_SID=""
 if [ "${2:-}" = "--resume" ]; then
   RESUME_SID="${3:-}"
   if [ -z "$RESUME_SID" ]; then
-    # No id given: resume this part's own last session.
-    if [ -f "$STATE_DIR/part${PART}.session" ]; then
-      RESUME_SID=$(cat "$STATE_DIR/part${PART}.session")
+    # No id given: resume this spec's own last session.
+    if [ -f "$STATE_DIR/${KEY}.session" ]; then
+      RESUME_SID=$(cat "$STATE_DIR/${KEY}.session")
     else
-      echo "!! no session recorded for part ${PART}; pass an explicit id" >&2
+      echo "!! no session recorded for ${KEY}; pass an explicit id" >&2
       exit 1
     fi
   fi
 fi
 
-SPEC="$REPO/specs/07-graph-executor-part${PART}.md"
-BRIEF="$BRIEF_DIR/brief-spec07-part${PART}.md"
-LOG="$BRIEF_DIR/spec07-part${PART}.log"
-ERR="$BRIEF_DIR/spec07-part${PART}.err"
+BRIEF="$BRIEF_DIR/brief-spec${KEY}.md"
+LOG="$BRIEF_DIR/spec${KEY}.log"
+ERR="$BRIEF_DIR/spec${KEY}.err"
 
 # Preconditions -- fail HERE, cheaply, rather than after a long run.
 [ -f "$SPEC" ]  || { echo "!! missing spec:  $SPEC"  >&2; exit 1; }
@@ -151,8 +165,8 @@ echo "  (brief delivered as a pointer to $BRIEF, not inlined -- see the note abo
 # Capture the session id -- the only handle for a resume.
 SID=$(grep -o '"session_id":"[^"]*"' "$LOG" 2>/dev/null | head -1 | cut -d'"' -f4)
 if [ -n "$SID" ]; then
-  echo "$SID" > "$STATE_DIR/part${PART}.session"
-  echo "  session_id: $SID  (recorded; resume with: $0 $PART --resume)"
+  echo "$SID" > "$STATE_DIR/${KEY}.session"
+  echo "  session_id: $SID  (recorded; resume with: $0 $KEY --resume)"
 fi
 
 # Record the PRE-DISPATCH HEAD so `verify-spec-part.sh` can prove the worker did
@@ -161,7 +175,7 @@ fi
 # ORCHESTRATOR's own uncommitted spec corrections. A check whose name and assertion
 # disagree certifies nothing (the class this project keeps re-finding).
 PRE_HEAD=$(git -C "$REPO" rev-parse HEAD)
-echo "$PRE_HEAD" > "$STATE_DIR/part${PART}.head"
+echo "$PRE_HEAD" > "$STATE_DIR/${KEY}.head"
 echo "  pre-dispatch HEAD: ${PRE_HEAD:0:9}  (recorded for the commit check)"
 
 echo "=== final result object ==="
