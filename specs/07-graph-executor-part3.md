@@ -13,7 +13,17 @@
 
 - `crates/laya-graph/src/graph.rs` — the lowered graph and its edge set, **created by part 1 and committed**. The scheduler consumes it and must not change it.
 - `crates/laya-store/src/lib.rs:493,521,544` — `Ledger::open_writer`, `Ledger::read_only`, `insert_if_new` exist. `open_writer` takes the **single** write lock, so exactly one writer can hold the store.
-- `crates/laya-store/src/lib.rs:178-205` — `Record` has an identity and `ts_nanos()`. Run persistence must attribute `run_id` + `node_id` (research §3.4: append order is not execution order once nodes run in parallel).
+- `crates/laya-store/src/lib.rs:178-205` — `Record` is an **enum with exactly two
+  variants**, `Decision(DecisionRow)` and `Outcome(OutcomeRow)`, and `identity()`
+  / `ts_nanos()` are its methods.
+- `crates/laya-store/src/lib.rs:100-105` — and this is the part that matters:
+  `DecisionRow` **already carries `run_id: Option<String>` and
+  `node_id: Option<String>`**, documented as *"the join key to the consumer's own
+  run / node, when it has one"*. Those two fields are the whole mechanism R13
+  needs, and they already exist. **No new record type is introduced and
+  `laya-store` is not modified** — a `shell` node's result has no variant to live
+  in, so run records are held in `RunReport` and the store sees attribution
+  through these two fields when a decision is persisted.
 - Registers A23 / spec 04 — **a held READER blocks a WRITER** in redb (measured, opposite of the intuitive assumption), so the scheduler opens the store for writing and node executors must NOT open it at all.
 - `crates/laya-mcp/src/lib.rs:2225` — a test **fails the build** if `PriorityQueue` appears in production code, with its reason recorded: *"could never fill and its 'queue is full, fail closed' error could never fire. It read as protection and provided none."*
 - `crates/laya-core/src/queue.rs` — `PriorityQueue<T>` is a plain struct (`lanes: [VecDeque<T>; 3]`), no `Mutex`, no `Condvar`, no wake mechanism.
@@ -42,10 +52,15 @@ satisfies in appearance only:
    recorded — but a node that says `exit 3` has failed, and no amount of reporting
    may turn that into success.
 
-The store is written by **one** process: the scheduler. Node executors return
-records to it. That is not tidiness — redb admits a single writer, and a held
-reader blocks a writer (measured), so an executor that opens the store would
-deadlock against the scheduler that spawned it.
+Records are attributed **explicitly, never positionally**: each node record
+carries its `run_id` and its `node_id`. That is not tidiness — once nodes run in
+parallel, append order is not execution order, so a consumer reading "the last
+row" would attribute a result to the wrong node. `laya-graph` does not touch the
+store at all: `laya-store`'s `Record` is an enum of exactly two variants
+(`Decision`, `Outcome`), so a `shell` result has no variant to live in, and the
+attribution fields a persisted decision would need (`run_id`, `node_id`) already
+exist on `DecisionRow` — so no new record type is introduced and `laya-store` is
+reused as-is.
 
 ---
 
@@ -73,7 +88,12 @@ deadlock against the scheduler that spawned it.
   raw output into a node record.
 - **R13 — every record carries `run_id` and `node_id`.** Append order is not
   execution order once nodes run in parallel, so a consumer reading "the last row"
-  would be wrong. **The scheduler is the only writer of the store for a run.**
+  would be wrong. Each node record in `RunReport` carries both, and any
+  `DecisionRow` the run causes carries both through the fields that already exist
+  for exactly this (`crates/laya-store/src/lib.rs:100-105`). **Attribution is explicit,
+  never positional.** `laya-graph` does **not** depend on `laya-store` and does
+  **not** write to the store: `Record` has no variant a `shell` result could live
+  in, and adding one would mean modifying `laya-store`, which is out of scope.
 - **R16 — the `PriorityQueue`-forbidding test keeps a real guarantee.** The
   bounded fan-out added here is a **concurrency limit, not `PriorityQueue`**. The
   test must either still pass unchanged or be amended so it still guards
@@ -108,7 +128,6 @@ flowchart TD
     S2 -->|"tools/call"| M["laya-mcp"]
     S1 --> REC["node record<br/>run_id + node_id — R13"]
     S2 --> REC
-    REC --> W["scheduler = ONLY writer<br/>laya-store"]
     B -->|a failure| FF["fail fast — R11<br/>stopped_early + node id"]
 ```
 
@@ -118,10 +137,14 @@ limiter is *how many may overlap*. Conflating them is what the forbidding test
 exists to prevent: a queue that cannot fill reads as protection and provides none.
 The queue remains unused and its test remains meaningful (R16).
 
-**Key decision — the scheduler is the only store writer.** redb admits one writer
-and a held reader blocks a writer (measured), so an executor opening the store
-would block the scheduler that spawned it. Executors return records; the scheduler
-appends. This also makes R13's attribution trivial to guarantee in one place.
+**Key decision — run records are data, not store rows.** `laya-graph` depends on
+neither `laya-store` nor `redb`. `Record` is a two-variant enum (`Decision`,
+`Outcome`), so a `shell` node's result has nowhere to go; inventing a variant
+would mean modifying `laya-store`, which is out of scope. R13 is satisfied
+*inside* the run: every node record carries `run_id` + `node_id`, and the fields a
+persisted decision needs already exist on `DecisionRow`
+(`crates/laya-store/src/lib.rs:100-105`). This also removes the deadlock class entirely —
+a crate that never opens the store cannot hold its write lock.
 
 **Key decision — `writes: true` means mutual exclusion, and the spec says so.**
 Research §3.5 measured that a branch is checkoutable in exactly one worktree, so
@@ -177,22 +200,33 @@ is what stops a blanket `stopped_early: true` from passing.
 
 **New in this part** (each run against the pre-implementation tree and watched to fail):
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph` — the whole crate; parts 1–2 still green (N3)
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_two_read_only_nodes_may_overlap 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R10's control: concurrency is real
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_serial_limit_runs_one_at_a_time 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R9's control
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_the_run_and_reports_stopped_early 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R11
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_completed_run_does_not_say_stopped_early 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R11's control
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_shell_node_exiting_zero_succeeds 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R12's control
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_concurrent_run_attribution_is_still_correct 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R13 under concurrency
-- [ ] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings` — zero (N3)
 - [ ] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py 2>&1 | grep -q '07-graph-executor-part3'` — this spec's criteria are discovered and run
 - [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'tokio' crates/laya-graph/Cargo.toml` — N5: the existing runtime is reused
+- [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'rt-multi-thread' crates/laya-graph/Cargo.toml` — N5: the tokio feature set is stated explicitly, as `laya-mcp`'s is. The workspace pin is `default-features = false`, so a bare `workspace = true` gives a tokio that cannot spawn tasks
+
+**Prohibitions — "this must NOT exist after the work"** — plus a near-miss control for
+each, because a prohibition cannot fail before the work by construction and would
+otherwise certify nothing. **Expected to pass** at check time; a failure here means
+the pattern is wrong, not that the work is undone:
+
 - [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -qE '^async-std|^smol|^futures-executor' crates/laya-graph/Cargo.toml` — N5: no second async runtime
-- [ ] `cd /projects/laya-rs && test -d crates/laya-graph/src && ! grep -rq 'worktree' crates/laya-graph/src/` — N4: v1 creates no worktrees, so no partial worktree code path exists
+- [ ] `cd /projects/laya-rs && grep -qE '^tokio' crates/laya-mcp/Cargo.toml` — **near-miss control** for the line above: the same pattern *does* match where such a dependency legitimately exists, so the `!` is a real prohibition and not a pattern that never matches anything. (`laya-mcp` is the only crate with a line-anchored `tokio`; measured.)
+- [ ] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -qE '^laya-store|^redb' crates/laya-graph/Cargo.toml` — **G16**: the crate opens no store and cannot hold its write lock
+- [ ] `cd /projects/laya-rs && grep -qE '^redb' crates/laya-store/Cargo.toml` — **near-miss control**: the pattern matches a real `redb` dependency, so its absence in `laya-graph` is meaningful
+- [ ] `cd /projects/laya-rs && test -d crates/laya-graph/src && ! grep -rqE 'redb|Ledger::open' crates/laya-graph/src/` — **G16**: no store access in the source, not merely the manifest
+- [ ] `cd /projects/laya-rs && grep -rqE 'Ledger::open_writer' crates/laya-cli/src/ crates/laya-mcp/src/` — **near-miss control**: `Ledger::open_writer` does occur in the workspace, so `! grep` finding none in `laya-graph` is a real result
 
 **Carried re-checks** (pass before implementation by design — not evidence this part is done):
 
+- [ ] `cd /projects/laya-rs && cargo test -p laya-graph` — the whole crate; parts 1–2 still green (N3). Carried: the crate already exists and is green, so this cannot fail before the work
+- [ ] `cd /projects/laya-rs && cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity, carried for the same reason
+- [ ] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings` — zero (N3), carried
 - [ ] `cd /projects/laya-rs && git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
 - [ ] `cd /projects/laya-rs && cargo fmt --all --check` — formatted (N3)
 - [ ] `cd /projects/laya-rs && cargo test --workspace` — no regression
@@ -219,9 +253,12 @@ is what stops a blanket `stopped_early: true` from passing.
 Guardrails: see `07-graph-executor.md` §Guardrails (G1–G10), plus those unique to
 this part:
 
-- **G16 — do NOT open the store from a node executor.** The scheduler is the only
-  writer (R13). redb admits one writer and a held reader blocks a writer, so an
-  executor opening it blocks the scheduler that spawned it.
+- **G16 — `laya-graph` does NOT open the store, and does not depend on
+  `laya-store`.** R13's attribution lives in `RunReport`; `DecisionRow` already
+  carries `run_id`/`node_id` (`crates/laya-store/src/lib.rs:100-105`) for the day a
+  consumer persists a run. If this crate opened the store it would take the single
+  write lock, and a held reader blocks a writer (measured) — so the executor would
+  block whoever spawned it.
 - **G17 — do NOT delete the `PriorityQueue`-forbidding test** in
   `crates/laya-mcp/src/lib.rs`. R16 permits amending it to keep a real guarantee;
   removal is forbidden.
@@ -253,10 +290,10 @@ this part:
 |------|--------|-----|
 | `crates/laya-graph/src/sched.rs` | new: ready set, bounded fan-out, fail-fast policy | R8, R9, R10, R11 |
 | `crates/laya-graph/src/node.rs` | new: `shell` and `mcp` executors | R12 |
-| `crates/laya-graph/src/run.rs` | new: the run record writer (scheduler-only store access) | R13 |
+| `crates/laya-graph/src/run.rs` | new: `RunReport` / node records — carries `run_id` + `node_id`. **Pure data; opens no store.** | R13 |
 | `crates/laya-graph/src/error.rs` | add `RunError` variants (bad limit, node failure) | R9, R11, R12 |
 | `crates/laya-graph/src/lib.rs` | register the new modules | — |
-| `crates/laya-graph/Cargo.toml` | add `laya-store` and `tokio` (both workspace) | N5 |
+| `crates/laya-graph/Cargo.toml` | add `tokio` (workspace, with the runtime features `laya-mcp` already enables). **No `laya-store`** — R13 is satisfied by fields that already exist, and `Record` has no variant a `shell` result could live in | N5 |
 | `specs/README.md` | status for part 3 | — |
 
 **Not modified**: `crates/laya-core/src/route_payload.rs` (G4),

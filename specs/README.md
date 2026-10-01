@@ -20,7 +20,7 @@ Specs are the **implementation contract**, not documentation. Each one carries:
 | [`04-mcp-server-and-ledger.md`](04-mcp-server-and-ledger.md) | P1 | **COMPLETE (2026-09-30)** — the stdio server (all 7 tools) + the redb ledger |
 | [`05-laya-must-be-running.md`](05-laya-must-be-running.md) | P1 | **IMPLEMENTED** — judgement + probe parsers + `laya doctor`, all tested |
 | [`06-priority-queue.md`](06-priority-queue.md) | P1 | **IMPLEMENTED** — the bounded priority queue, 16 tests |
-| [`07-graph-executor.md`](07-graph-executor.md) | P5 | **SPECIFIED** — the generic DAG executor, split into 4 parts: [1](07-graph-executor-part1.md) the flow+lowering+R15 · [2](07-graph-executor-part2.md) composition+render · [3](07-graph-executor-part3.md) the scheduler · [4](07-graph-executor-part4.md) CLI+acceptance |
+| [`07-graph-executor.md`](07-graph-executor.md) | P5 | **SPECIFIED** — the generic DAG executor, split into 4 parts: [1](07-graph-executor-part1.md) the flow+lowering+R15 · [2](07-graph-executor-part2.md) composition+render · [3](07-graph-executor-part3.md) **IMPLEMENTED** — the scheduler, `shell`/`mcp` executors, run records (51 tests in `laya-graph`) · [4](07-graph-executor-part4.md) CLI+acceptance |
 
 **345 tests pass across the workspace, clippy is at zero warnings, fmt is clean, and
 `cargo xtask gate` passes all three steps.** Run `scripts/verify-all.sh` for the whole picture,
