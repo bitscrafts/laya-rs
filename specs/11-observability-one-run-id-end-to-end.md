@@ -120,6 +120,10 @@ where this system's evidence lives; the ledger is, and that is where the join mu
 | R3 | `bucket_clamped_is_not_a_copy_of_saturated` | payload `saturated: true` | `bucket_clamped == None` |
 | R5 | `a_record_separates_queue_wait_from_execution` | `limit:1`, two `sleep 0.3` nodes | second node `queued_ms ≥ 250`, `duration_ms ≥ 250`; first node `queued_ms < 100` |
 | R6 | `each_tool_call_emits_one_structured_event` | one `gate` call through `handle` with an injected writer | exactly one JSON line, `event == "tool_call"`, `tool == "gate"` |
+| R4 | `the_ledger_state_is_announced_at_startup` | a server started with `LAYA_LEDGER_DIR` set | one startup event `{"event":"ledger","enabled":true,"dir":…}` |
+| R4 | `the_control_an_unset_ledger_directory_is_announced_as_off` | a server with no `LAYA_LEDGER_DIR` | the same event says `enabled:false`, and it is a **warning**, not silence |
+| R7 | `stats_reports_per_tool_latency_and_gate_decisions` | rows for `decide` and `gate` in a tmp ledger | `stats` prints a per-tool block; `gate` shows `allow/ask/deny` counts and an `executed` count |
+| R7 | `the_control_stats_opens_the_store_read_only` | a `compact` holding the writer | `stats` still answers, rather than failing on the write lock |
 | N2 | `an_old_segment_without_the_new_fields_still_compacts` | a segment line from today's schema | compacts; new fields `None` |
 
 **Stub sidecar.** R1/R2/R3 need a predictable answer without the live model (AGENTS rule 9). This
@@ -139,6 +143,13 @@ cannot be offline.
 - [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib bucket_clamped_is_not_a_copy_of_saturated 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_record_separates_queue_wait_from_execution 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R5
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance the_ledger_row_joins_the_run_report -- --include-ignored 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1 end to end (**live**; see spec 13 R1 for why it is ignored by default)
+- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib the_ledger_state_is_announced_at_startup 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
+- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib the_control_an_unset_ledger_directory_is_announced_as_off 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4's control — the off state must be **announced**, which is the whole point of the requirement, and the deployment failure this spec answers
+- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib each_tool_call_emits_one_structured_event 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R6
+- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib events_carry_the_run_and_node_id 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R6 — an event without the ids answers nothing, so the ids are the requirement, not the JSON shape
+- [ ] `cd /projects/laya-rs && cargo test -p laya-store --lib stats_reports_per_tool_latency_and_gate_decisions 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7
+- [ ] `cd /projects/laya-rs && cargo test -p laya-store --lib stats_opens_the_store_read_only 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7 — a read must not take the exclusive write lock
+- [ ] `cd /projects/laya-rs && python3 scripts/check-observability.py`: **live**. It drives the deployed server, asserts a ledger segment is written for a `gate` call, that the row carries `run_id`/`node_id` when they are supplied, and that the command text never appears in the segment. Exits non-zero if the ledger is off — because "off" and "broken" must not look the same
 
 **Carried re-checks:**
 
