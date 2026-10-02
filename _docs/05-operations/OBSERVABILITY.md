@@ -279,3 +279,71 @@ all-time), and **"which head produced this decision"** is unanswerable because `
 `backbone_sha256` are always `None` and no requirement fills them. Both are recorded in
 `specs/11` as open, with criteria. `run_id` threading from the graph runner is also still open —
 the field exists and the tools accept it, but nothing in `laya-graph` supplies it yet.
+
+## Is it USED? A different question from "does it work" (measured 2026-10-02)
+
+`laya ledger stats` answers *did the tool run*. It cannot answer *is the tool used*, because a
+tool that is never called writes no rows — and a tool that is called and a tool that is ignored
+both show a healthy, empty ledger. Only the caller's own history can answer it.
+
+Measured against the agent session store on this host — every tool call ever made:
+
+```
+tool calls, all tools      63,886
+tool calls, laya                3   (0.0047%)
+
+by tool:   mcp__laya__gate   3
+by day :   2026-09-29        2
+           2026-09-30        1
+
+every call:
+  2026-09-29T23:48:13Z  mcp__laya__gate   (action: 'rm -rf node_modules && npm i')
+  2026-09-29T23:48:13Z  mcp__laya__gate   (the paired result)
+  2026-09-30T00:03:07Z  mcp__laya__gate
+```
+
+**So: three calls, ever, and none in the last day.** Both of the first two were made *before* the
+spec-08 fix, i.e. against the gate whose ordering was inverted — the one that returned `allow` for
+`mkfs.ext4 /dev/sda1`. Nothing has called it since the fix landed.
+
+### Why, and it is not a bug in laya
+
+Driving the deployed gate with the commands an agent actually issues:
+
+```
+command                        verdict  model
+git status                     allow    allow
+ls -la                         allow    allow
+cargo test                     allow    allow
+cargo build --release          ask      allow     <- the build an agent needs
+mkdir -p /tmp/x                ask      allow
+rm -rf target/                 ask      allow
+git push --force               ask      allow
+curl -s https://example.com    ask      allow
+sed -i 's/a/b/' file.txt       ask      allow
+chmod 777 /etc/passwd          ask      ask
+```
+
+Every verdict is **correct** — nothing destructive is allowed. But `allow` requires a positive
+match against a **13-entry read-only list** (`Policy::gate_allow`: `ls`, `pwd`, `cat`, `head`,
+`tail`, `wc`, `git status|diff|log|show`, `cargo check|test|clippy`). Anything outside it gets
+`ask`, and an agent that must stop and ask before `cargo build` will simply not call the gate.
+
+**So the honest answer to "can it be used on everyday tasks" is: it answers correctly, and it is
+too conservative to be worth calling.** Widening the allowlist is a policy decision, not a code
+change — the list is the thing that decides what an agent may do unattended — so it is left to
+the operator rather than widened here.
+
+### The review commands
+
+Two scripts, one question each, and they live on opposite sides of the boundary on purpose:
+
+| question | command | where it lives |
+|---|---|---|
+| is it recording, and what did it cost? | `laya ledger stats` | in the project — laya's own ledger |
+| is it being USED, by whom, when? | `~/.hermes/scripts/laya-usage.py` | Hermes-side |
+
+The usage script is deliberately **outside** this repository: it reads the agent session store,
+and laya must not know the agent exists. It reads that store **read-only** and reports both ledger
+locations, because reporting only one is how the "7 rows on disk, `stats` says 0" state went
+unnoticed — a review that counted only segments or only the store would call either case healthy.
