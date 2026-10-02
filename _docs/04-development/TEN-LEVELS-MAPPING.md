@@ -179,3 +179,67 @@ nobody enumerated (`find . -delete`), the pattern catches the idioms the model w
 to miss. `mid_edit` at 1/6 and this gate at 6/12 are the same discovery twice: **ask this head
 to CLASSIFY CONTENT, not to REASON ABOUT CONSEQUENCES.** "Is there a bug?" scored 0.80
 correctly; "is this safe?" is a coin flip.
+
+---
+
+## Verified against the deployed tool, 2026-10-02 — all ten levels work
+
+Each level was called through the deployed `laya-mcp` over stdio, with the operating environment the
+host now passes. The mapping above was written from the design; this is what the running system does.
+
+| L | surface | result | evidence |
+|---|---|---|---|
+| 1 | `decide` + `noul` | works | `label=yes band=mid conf=0.7766` |
+| 2 | `decide`, N questions in one call | works | two questions answered in one call |
+| 3 | `decide` + `score` | works | `label=2.8702 band=low conf=0.1462 score=2.8702` |
+| 4 | `gate`, bands from `Policy` | works | `decision=allow band=mid conf=0.8722` |
+| 5 | `choice` over the caller's harness list | works | `label=positive band=mid conf=0.889` |
+| 6 | `gate` as a guardrail | works | destructive => `decision=ask`, 2 signals |
+| 7 | `should_compact` | works | 4 judgements answered |
+| 8 | `ask_file` | works | answered; file content **not** in the response |
+| 9 | `ask_files` | works | `asked=1 hits=1` |
+| 10 | `ask` | works | `command_ran=True timed_out=False` |
+
+### The measurement that nearly became a false finding
+
+A first pass reported levels 2, 3 and 5 as **failing**, with `AttributeError: 'NoneType' object has no
+attribute 'items'` for `choice` and `TypeError: 'NoneType' object is not iterable` for `score`. Those
+errors are real, and they are reproducible through the shipped tool:
+
+```
+decide {questions: {verdict: {type: choice, question: …, instructions: …, options: [positive, negative]}}}
+  -> FAIL  AttributeError: 'NoneType' object has no attribute 'items'
+
+decide {questions: {quality: {type: score, question: …, instructions: …}}}
+  -> FAIL  TypeError: 'NoneType' object is not iterable
+```
+
+**The fault was in the probe, not the product.** The sidecar's question payload needs a **`criteria`**
+field, not `options`, and a `score` needs `criteria` even though it has no alternatives to list. With
+the right field name, through the same shipped tool:
+
+```
+choice + criteria -> {"label":"positive","band":"mid","confidence":0.889}
+score  + criteria -> {"label":"2.8702","band":"low","confidence":0.1462,"score":2.8702}
+```
+
+**What this cost, and what it teaches.** Two rounds were spent on a "defect" that was an argument name —
+first `options` (from this document's own example, and from a natural reading of the JEV sources), then
+a matrix of guesses. The honest lesson is recorded because it is the third time in this session that a
+check was wrong before the code was:
+
+- the probe asked for `options` because **this document's example says `options`** — so the doc, not the
+  code, was the source of the error, and the doc was never checked against the running system;
+- the error message did not help: `AttributeError: 'NoneType' object has no attribute 'items'` names
+  neither the missing field nor the question. A refusal that says *"choice question `verdict` needs
+  `criteria`"* would have ended this in one call. That is a real, small, worth-fixing observation about
+  the error path — and it is the same class as the `ask_file` argument-naming defect recorded against
+  spec 13 R5.
+- **Two independent facts were being conflated:** "the sidecar needs `criteria`" (a schema fact) and
+  "levels 2/3/5 are unimplemented" (a false conclusion). Separating them required reading the sidecar's
+  own accepted shape rather than trusting either the doc or the error.
+
+**Unchecked, and stated as such:** whether the field name should be `criteria` at all, or whether
+`options` ought to work and the sidecar's shape is the awkward one. The MCP schema advertises neither
+field for a question object, so a caller has to discover this by trying — which is how this document
+came to be wrong. Worth a decision, not asserted here.
