@@ -96,6 +96,13 @@ DOCS = {
         "escalate_on_near_tie is validated but inert; and a decide's question type is hardcoded to "
         "choice, so a flow can never ask the noul the head answers best."
     ),
+    "04-development/SCHEDULER-SINGLE-GUARD.md": (
+        "The scheduler's single guard, and the mutants that hang it",
+        "dependency_tables is the shared source of the graph's shape for topo_order, refuse_cycle and "
+        "the Tracker, and nothing checks it is about the graph at all. refuse_cycle is the only cycle "
+        "guard and is built on the same table. There is no spin bound anywhere, so a node that never "
+        "settles is waited on forever -- the two mutants the gate reports as timeouts."
+    ),
     "04-development/STALE-REFUSALS-2026-10-02.md": (
         "Stale refusals — a rule that outlives its reason is a defect too",
         "Spec 20 refused timeout and allow_failure on a decide 'until spec 17'. Spec 17 landed and the "

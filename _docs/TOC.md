@@ -27,6 +27,7 @@ reading order.
 - [Opus review — running generic graphs through laya](04-development/OPUS-REVIEW-GENERIC-GRAPHS.md)
 - [Analysis — why a generic graph cannot run today](04-development/GENERIC-GRAPHS-ANALYSIS.md)
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md)
+- [The scheduler's single guard, and the mutants that hang it](04-development/SCHEDULER-SINGLE-GUARD.md)
 - [Stale refusals — a rule that outlives its reason is a defect too](04-development/STALE-REFUSALS-2026-10-02.md)
 - [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md)
 
