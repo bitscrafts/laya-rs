@@ -46,6 +46,56 @@ for l in sys.stdin:
 "
 
 echo
+echo "################ 3b. spec 21 via the DEPLOYED binary: decide timeout + allow_failure ################"
+python3 - <<'PY'
+import json
+def flow(extra=None):
+    d = {"flow":"dt","version":1,"nodes":[
+      {"id":"d","kind":"decide","question":"Is the sky blue?","prompt":"the sky is blue",
+       "options":["yes","no"],"ports":{"yes":"y","no":"n","_":"n"}},
+      {"id":"y","kind":"shell","run":"echo y"},
+      {"id":"n","kind":"shell","run":"echo n"},
+      {"id":"sibling","kind":"shell","run":"echo sibling"}]}
+    if extra: d["nodes"][0].update(extra)
+    return d
+open('/tmp/smoke-dt.flow.json','w').write(json.dumps(flow({"timeout": 0})))
+open('/tmp/smoke-af.flow.json','w').write(json.dumps(flow({"prompt":"","allow_failure":True})))
+open('/tmp/smoke-dt-none.flow.json','w').write(json.dumps(flow()))
+PY
+echo "  the timeout refusal must be LIFTED: $(laya graph validate /tmp/smoke-dt.flow.json 2>&1 | head -1 | cut -c1-60)"
+printf "  decide with timeout: 0  -> "
+laya graph run /tmp/smoke-dt.flow.json 2>&1 | python3 -c "
+import sys,json
+for l in sys.stdin:
+    l=l.strip()
+    if l.startswith('{'):
+        d=json.loads(l)
+        errs=[str(r.get('error')) for r in d['records'] if r['node_id']=='d']
+        print('timed out =', bool(errs and 'timed out' in (errs[0] or '')), '| stopped_early =', d['stopped_early'])
+        break
+"
+printf "  CONTROL: same decide, no timeout -> "
+laya graph run /tmp/smoke-dt-none.flow.json 2>&1 | python3 -c "
+import sys,json
+for l in sys.stdin:
+    l=l.strip()
+    if l.startswith('{'):
+        d=json.loads(l)
+        print('completes =', not d['stopped_early'])
+        break
+"
+printf "  allow_failure on a decide -> the run must NOT stop: "
+laya graph run /tmp/smoke-af.flow.json 2>&1 | python3 -c "
+import sys,json
+for l in sys.stdin:
+    l=l.strip()
+    if l.startswith('{'):
+        d=json.loads(l)
+        print('stopped_early =', d['stopped_early'], '| sibling ran =', 'sibling' in [r['node_id'] for r in d['records']])
+        break
+"
+
+echo
 echo "################ 4. the gate still answers ################"
 laya-gate "git status" >/dev/null 2>&1; echo "  git status        -> exit $?"
 laya-gate "rm -rf /"   >/dev/null 2>&1; echo "  rm -rf /          -> exit $?  (1 = ask, correct)"
