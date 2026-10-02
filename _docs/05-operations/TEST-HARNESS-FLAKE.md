@@ -108,3 +108,35 @@ controlled rather than raced), the same technique spec 21 used to make its decid
 meaningful: an *instant* scripted caller finished before a zero deadline could fire, so the test was
 vacuous until a 200 ms `SlowCaller` was introduced. **A test whose control is a stopwatch is a test
 that will fail on someone else's machine.**
+
+---
+
+## A THIRD KIND OF DEFECT in this family: a check whose MECHANICS are wrong
+
+Not a flake, and not a broken criterion — a **measurement** that cannot report the truth. Two instances
+on 2026-10-02, both mine, both costing a wrong conclusion:
+
+**1. The exit status of a piped command is the LAST command's.**
+```sh
+timeout 900 bash scripts/verify-all.sh 2>&1 | tail -25
+echo "  verify-all exit=$?"        # <- TAIL's status, not the script's
+```
+This printed `exit=0` while the script was printing FAILs. **`verify-all.sh` exits 1 on failures and
+always has** (its own code: `if [ "${#FAILS[@]}" -gt 0 ]; then exit 1; fi`). The check was fine; the
+reading of it was not. Same family as:
+
+**2. `if cmd | grep -q pattern` tests `cmd`'s exit status, not the match** — under `set -o pipefail`,
+a refusal that fired correctly read as "no refusal".
+
+**The rule: a check has two parts — the command and the reading of it — and either can be wrong.**
+Before believing a negative or a zero, ask *what value am I actually reading?* In both cases the answer
+was "the exit status of something other than the program under test".
+
+### And a REAL defect the same output revealed
+
+`scripts/verify-all.sh` prepended the cargo bin to `PATH` and **inherited the rest**, so every criterion
+invoking the CLI failed with `laya: command not found` from any shell that lacked the install directory.
+Measured from a bare environment: all of them fail. Fixed — it now sets the install directory itself and
+**pins this tree's build** when one exists, so a criterion about this tree cannot silently test an
+installed older binary. That is the same defect that cost **three specs** a criterion correction in this
+session, so it is now impossible by construction in this script.
