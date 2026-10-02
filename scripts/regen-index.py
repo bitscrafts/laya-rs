@@ -52,6 +52,12 @@ DOCS = {
         "operating configuration, the measured cost per call, and the questions still unanswerable.",
     ),
     "05-operations/README.md": ("Operations", "Running the server, the ledger, budgets."),
+    "05-operations/TOKEN-ECONOMY.md": (
+        "Token economy — what it saves, what it costs, how it was measured",
+        "The measured answer: 101,840 tokens saved per triage round (43x), 0 tokens of context cost "
+        "on allow/ask, and 178 tokens ever on two blocks. Includes the 263x-overstated first "
+        "measurement and why a phrase match is not attribution."
+    ),
     "05-operations/RESUME-PROMPT-2026-10-02.md": (
         "Resume prompt — 2026-10-02 (read this first after the restart)",
         "The conversation's state in one page: the one open item (whether the gate fires for a live "
