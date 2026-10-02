@@ -243,3 +243,114 @@ check was wrong before the code was:
 `options` ought to work and the sidecar's shape is the awkward one. The MCP schema advertises neither
 field for a question object, so a caller has to discover this by trying — which is how this document
 came to be wrong. Worth a decision, not asserted here.
+
+---
+
+## Verified end to end, and the three contract defects that found (2026-10-02)
+
+`scripts/check-ten-levels.py` drives all ten through the **shipped MCP tools** over stdio — the
+surface an agent actually uses — so a level that passes here works for a caller, not just for a
+unit test. It carries a control: L10's command must be **refused by the gate** (`mkfs.ext4`) and
+never run, so the level cannot pass by executing whatever it is given.
+
+```
+  PASS  L1  single decision (noul)         label='yes' band='mid' conf=0.8219
+  PASS  L2  multiple questions, one call   answered ['a','b'] in one call
+  PASS  L3  composite scores               risk=2.4327, size=2.1257
+  PASS  L4  confidence gating              git status -> allow, mkfs.ext4 -> ask
+  PASS  L5  intent routing                 route label='cheap'
+  PASS  L6  guardrail hook                 2 signal(s); allow needs an allowlist
+  PASS  L7  should I compact               urgency='notice', 4 judgement(s)
+  PASS  L8  cheap read                     1 answer, content_in_context=False
+  PASS  L9  files at scale                 asked=2, 2 per-file answers, 2 ranked hits
+  PASS  L10 agentic                        1 answer, command_ran=True
+  PASS  L11 CONTROL: L10's command gated before it runs
+  11/11
+```
+
+### The defects, all in the tool's ADVERTISED contract
+
+Writing this harness exposed three things the documentation and `tools/list` get wrong. Each was
+found by an agent-shaped caller failing, which is the only kind of caller that matters.
+
+**1. `questions` is advertised as an array; the sidecar requires an object map.** `tools/list`
+declares `"questions": {"type": "array"}`, and sending an array yields
+`AttributeError: 'list' object has no attribute 'keys'` — measured. The working shape is a map
+keyed by question id.
+
+**2. The question's text field is `instructions`, not `text`.** The array form's `laya_abi::Question`
+carries `text`, but the wire format the sidecar reads requires `instructions`; sending the
+advertised shape yields `KeyError: 'instructions'`. So an agent following the schema fails twice
+over on the same argument.
+
+**3. A `score` requires `criteria` as a LIST of level descriptions.** Without it:
+`TypeError: 'NoneType' object is not iterable`. Nothing in the advertised schema says the field is
+required — and the levels are the scale the score is measured against, so an omitted `criteria`
+makes a score uninterpretable even when it does not raise.
+
+**A note on how these were found.** The first run of this harness reported 3/11, and eight of those
+failures were **the harness's own wrong inputs** — I invented the argument shape, sent `criteria`
+where the sidecar wants `options`, and then asserted on response fields the tools never had
+(`payloads` on `should_compact`, `answers`/`files_read` on `ask_files`, `command_ran: false` on a
+refusal that arrives as a JSON-RPC error). Each time, the check was at fault and the tool was
+right. The three defects above are the residue after correcting all of that, and they are real.
+
+---
+
+## The graph, exercised on the live backbone (2026-10-02)
+
+The flow → graph translation, run for real rather than described. Both fixtures ask the
+**identical question** with different states, so the pair is its own control — if the model's label
+did not reach the router, both runs would take the same branch.
+
+```
+$ laya graph run crates/laya-graph/tests/fixtures/sentiment-positive.json
+  classify        payload.label=positive  band=mid   conf=0.7001  margin=0.8936  180 ms
+  classify/route  on=$.payload.label       value=positive  -> selected_port=branch_positive
+  branch_positive echo branch:positive     exit=0
+  completed, 3 node(s) ran
+
+$ laya graph run crates/laya-graph/tests/fixtures/sentiment-negative.json
+  classify        payload.label=negative  band=high  conf=0.9566  margin=0.9906  181 ms
+  classify/route  on=$.payload.label       value=negative  -> selected_port=branch_negative
+  branch_negative echo branch:negative     exit=0
+  completed, 3 node(s) ran
+```
+
+And the control, side by side:
+
+```
+  positive  -> executed branch:positive
+  negative  -> executed branch:negative
+```
+
+**What this proves, in the order it matters:**
+
+1. **A real model decision drives control flow.** `conf=0.7001` and `conf=0.9566` came from the live
+   head, not from a fixture constant — the two states genuinely scored differently.
+2. **The route is pure member access.** `on = "$.payload.label"`, then exact `eq` against the port
+   keys. No arithmetic, no comparison, no ranges — which is the whole reason `band` is computed by
+   laya-rs (B5) rather than by a transform node: the graph's expression language cannot express
+   either.
+3. **Only the selected branch runs.** `records` holds three entries, not five: the unselected
+   branches are not executed and do not appear. Routing here is control flow, unlike Level 5's
+   `choice`, where the answer is a *route* returned to a caller.
+4. **A catch-all port is mandatory and present** (`"_": "branch_fallback"`), so a model-fed route
+   cannot produce an undefined edge — the rendering shows it as `n1 -->|_| n4`.
+
+### The four subcommands, and what each is for
+
+```
+laya graph validate <flow.json>   parse + validate; names the refusal, exit 1 if invalid
+laya graph render   <flow.json>   mermaid, plus what the renderer cannot carry
+laya graph run      <flow.json>   execute; run result as JSON, one summary line on stderr
+```
+
+`render` states its own limits rather than dropping them silently:
+`dropped: retry, timeout, allow_failure, writes, subflow with-bindings, subflow content_hash` — a
+rendering that quietly omitted the retry policy would make a retrying flow look identical to one
+that fails on the first error.
+
+**One caveat worth holding onto:** `laya graph` shells out for `shell` nodes, so unlike
+`laya decide` it is not a pure read — and a `shell` node's non-zero exit is a **failure**, not
+data. Both facts are load-bearing for anyone wiring a graph into automation.
