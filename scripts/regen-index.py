@@ -95,6 +95,14 @@ DOCS = {
         "been called. Includes the SDD+TDD gate graph, the paired control, and the break-the-control "
         "check that proves the pair means something."
     ),
+    "05-operations/RESUMING-OPUS.md": (
+        "Resuming the opus analysis session",
+        "How to continue the claude+opus review session instead of starting fresh: the session id, "
+        "the overridable BRIEF/REPORT variables, the exit code that means a dispatch failed, and the "
+        "two failure modes that cost a round on 2026-10-02 -- blocked tools answering from prior "
+        "context, and a prompt that hardcoded the round-1 brief while the preflight printed the "
+        "override."
+    ),
     "05-operations/TOKEN-ECONOMY.md": (
         "Token economy — what it saves, what it costs, how it was measured",
         "The measured answer: 101,840 tokens saved per triage round (43x), 0 tokens of context cost "
