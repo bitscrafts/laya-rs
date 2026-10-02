@@ -311,3 +311,58 @@ n2 -->|_| n5      %% judge/route -> escalate : _
   wire, measured (wc example §6.2).
 - Its numbers are IN `setup`'s command and nowhere else: swapping them between flows is the
   whole control story, and the prompt carries the placeholder, never a literal.
+
+---
+
+## Playing it: the game converges correctly but **cannot be won** (measured 2026-10-02)
+
+Because the graph has no loop, playing means running the flow repeatedly with the guess substituted —
+**the mode this document recommends**, driven here by a binary search that knows only what the graph
+tells it. Six rounds against a secret of 41:
+
+```
+round  guess  label  branch          advice
+    1     50  yes    advise_lower    the guess is too high -- go lower
+    2     25  no     advise_higher   the guess is not higher -- go higher
+    3     37  no     advise_higher   ...
+    4     43  yes    advise_lower    ...
+    5     40  no     advise_higher   ...
+    6     41  yes    advise_lower    <- 41 IS the secret, and it still said "too high"
+```
+
+**The routing is right every round and the search converges in 6** — the graph works. But the game has
+**no win condition**: the question is a two-option comparison, so when the guess *is* the secret the
+graph still answers "it is higher". The player can land on the secret and never be told.
+
+### The obvious fix is worse — measured, not assumed
+
+A three-option question (`lower` / `equal` / `higher`) was tried:
+
+| round | label | branch | verdict |
+|---|---|---|---|
+| guess 41 vs secret 41 | `equal` | `you_win` | correct |
+| **guess 90 vs secret 41** | **`equal`** | **`you_win`** | **WRONG — declares a win 49 away** |
+
+So it trades "cannot win" for **"declares a win on a wrong guess"**, which is the worse failure for a
+game. This matches the head's measured behaviour on question shapes: it tracks a two-option comparison of
+two numbers reliably, and does **not** track a three-way numeric judgement.
+
+Carrying three named ports on a `noul` is refused rather than silently mis-routed:
+
+```
+laya: decide node `judge` has port key `equal`, which is not one of the label values ["yes", "no"] or `_`
+```
+
+That refusal is correct — it is the check that stops a mistyped port key being hidden by the catch-all.
+
+### What to do instead
+
+**Equality is a shell job, not a judgement.** Keep the graph asking the comparison it answers well (two
+options, one boundary), and test the win condition outside the graph where the loop already lives — or
+in a shell node, which does exact arithmetic and has no opinion to be wrong about.
+
+The example is left as it is, and this section is the reason: it demonstrates the graph routing on a
+decision **correctly**, and it documents — from a real played game — exactly where that stops being
+enough. A reader who wants a winnable game now knows the shape to build, and knows that asking the model
+for a three-way numeric comparison is not it.
+
