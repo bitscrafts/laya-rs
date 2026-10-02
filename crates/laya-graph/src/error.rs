@@ -168,4 +168,13 @@ pub enum RunError {
         /// What `tokio` reported about the join failure.
         reason: String,
     },
+
+    /// The graph contains a cycle, so some nodes can never become ready.
+    /// Refused up front rather than returning the runnable part as `Ok`: a
+    /// partial run that reads as complete is the failure mode R11 names.
+    #[error("the graph has a dependency cycle; these nodes can never run: {nodes:?}")]
+    Cycle {
+        /// The ids left over once every runnable node was ordered, sorted.
+        nodes: Vec<String>,
+    },
 }

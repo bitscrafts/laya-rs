@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::Semaphore;
 use tokio::task::{JoinHandle, JoinSet};
@@ -110,7 +111,8 @@ pub struct RunOptions {
 ///
 /// # Errors
 /// [`RunError::BadLimit`] if `opts.limit` is zero. [`RunError::UnknownNode`]
-/// if an edge names a node the graph does not declare. [`RunError::NodeTaskFailed`]
+/// if an edge names a node the graph does not declare. [`RunError::Cycle`] if
+/// the graph is not a DAG — refused before anything runs. [`RunError::NodeTaskFailed`]
 /// if a spawned node's own scheduling task could not be joined — an executor
 /// bug, never a node's own reported failure (that lives in the returned
 /// `RunReport`, not here; see R11, R12).
@@ -131,6 +133,8 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
         }
     }
 
+    refuse_cycle(graph)?;
+
     let (mut indegree, successors) = dependency_tables(graph);
     let mut ready: BTreeSet<String> = indegree
         .iter()
@@ -138,19 +142,26 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
         .map(|(id, _)| id.clone())
         .collect();
 
-    let fanout = Arc::new(Semaphore::new(opts.limit));
-    let write_lock = Arc::new(Semaphore::new(1));
-    let mut joins: JoinSet<NodeRecord> = JoinSet::new();
+    let halt = Arc::new(AtomicBool::new(false));
+    let gates = Gates {
+        fanout: Arc::new(Semaphore::new(opts.limit)),
+        write_lock: Arc::new(Semaphore::new(1)),
+        halt: Arc::clone(&halt),
+    };
+    let mut joins: JoinSet<Outcome> = JoinSet::new();
     let mut records = Vec::new();
     let mut stopped_early = false;
     let mut failed_node: Option<String> = None;
     let mut stop_scheduling = false;
 
-    spawn_ready(graph, &mut ready, &mut joins, &opts, &fanout, &write_lock);
+    spawn_ready(graph, &mut ready, &mut joins, &opts, &gates);
 
     while let Some(outcome) = joins.join_next().await {
         let record = match outcome {
-            Ok(record) => record,
+            Ok(Outcome::Ran(record)) => record,
+            // Halted before its work began: it gets no record, and
+            // `nodes_without_record` accounts for it below (R2).
+            Ok(Outcome::Halted) => continue,
             Err(e) => {
                 return Err(RunError::NodeTaskFailed {
                     reason: e.to_string(),
@@ -183,11 +194,13 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
                     }
                 }
             }
-            spawn_ready(graph, &mut ready, &mut joins, &opts, &fanout, &write_lock);
+            spawn_ready(graph, &mut ready, &mut joins, &opts, &gates);
         }
 
         records.push(record);
     }
+
+    let not_started = nodes_without_record(graph, &records);
 
     Ok(RunReport {
         run_id: opts.run_id,
@@ -195,7 +208,57 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
         failed_node,
         worker_limit: opts.limit,
         records,
+        not_started,
     })
+}
+
+/// The shared gates every node passes before its work begins.
+struct Gates {
+    fanout: Arc<Semaphore>,
+    write_lock: Arc<Semaphore>,
+    /// Set by the failing node itself, before it releases its permits; checked after the permits
+    /// are held, so a node spawned but still queued never starts (R1).
+    halt: Arc<AtomicBool>,
+}
+
+/// What a spawned node task came to: its record, or that it was halted
+/// before its work began.
+enum Outcome {
+    Ran(NodeRecord),
+    Halted,
+}
+
+/// Refuse a graph `topo_order` cannot fully order, naming what is left over
+/// (R3). Runs before anything executes.
+fn refuse_cycle(graph: &Graph) -> Result<(), RunError> {
+    let ordered = topo_order(graph);
+    if ordered.len() >= graph.nodes.len() {
+        return Ok(());
+    }
+    let done: BTreeSet<&String> = ordered.iter().collect();
+    let nodes: BTreeSet<String> = graph
+        .nodes
+        .iter()
+        .filter(|n| !done.contains(&n.id))
+        .map(|n| n.id.clone())
+        .collect();
+    Err(RunError::Cycle {
+        nodes: nodes.into_iter().collect(),
+    })
+}
+
+/// Sorted ids of the graph's nodes with no record: halted tasks plus nodes
+/// never spawned because scheduling stopped (R2).
+fn nodes_without_record(graph: &Graph, records: &[NodeRecord]) -> Vec<String> {
+    let recorded: BTreeSet<&str> = records.iter().map(|r| r.node_id.as_str()).collect();
+    graph
+        .nodes
+        .iter()
+        .map(|n| n.id.clone())
+        .filter(|id| !recorded.contains(id.as_str()))
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect()
 }
 
 /// Spawn every currently-ready node, in id order (R8) — the dispatch ORDER is
@@ -205,10 +268,9 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
 fn spawn_ready(
     graph: &Graph,
     ready: &mut BTreeSet<String>,
-    joins: &mut JoinSet<NodeRecord>,
+    joins: &mut JoinSet<Outcome>,
     opts: &RunOptions,
-    fanout: &Arc<Semaphore>,
-    write_lock: &Arc<Semaphore>,
+    gates: &Gates,
 ) {
     while let Some(id) = pop_first(ready) {
         // Unreachable once `run` has validated every edge's endpoints exist,
@@ -218,37 +280,55 @@ fn spawn_ready(
             continue;
         };
         let run_id = opts.run_id.clone();
-        let fanout = Arc::clone(fanout);
-        let write_lock = Arc::clone(write_lock);
+        let fanout = Arc::clone(&gates.fanout);
+        let write_lock = Arc::clone(&gates.write_lock);
+        let halt = Arc::clone(&gates.halt);
         let mcp = Arc::clone(&opts.mcp);
-        joins.spawn(run_one(node, run_id, fanout, write_lock, mcp));
+        joins.spawn(run_one(node, run_id, fanout, write_lock, halt, mcp));
     }
 }
 
-/// Run one node: acquire its permits, do the work, release them. `writes`
-/// nodes additionally take the single write permit, so two of them can never
-/// both be inside this function's work section at once (R10).
+/// Run one node: acquire its permits, check the halt flag, do the work,
+/// release the permits. `writes` nodes additionally take the single write
+/// permit, so two of them can never both be inside this function's work
+/// section at once (R10).
 async fn run_one(
     node: GraphNode,
     run_id: String,
     fanout: Arc<Semaphore>,
     write_lock: Arc<Semaphore>,
+    halt: Arc<AtomicBool>,
     mcp: Arc<dyn McpCaller>,
-) -> NodeRecord {
+) -> Outcome {
     let Ok(_fanout_permit) = fanout.acquire_owned().await else {
-        return failed_record(run_id, node.id, "internal: fan-out semaphore closed");
+        return Outcome::Ran(failed_record(
+            run_id,
+            node.id,
+            "internal: fan-out semaphore closed",
+        ));
     };
     let _write_permit = if node.writes {
         match write_lock.acquire_owned().await {
             Ok(permit) => Some(permit),
             Err(_) => {
-                return failed_record(run_id, node.id, "internal: write-lock semaphore closed");
+                return Outcome::Ran(failed_record(
+                    run_id,
+                    node.id,
+                    "internal: write-lock semaphore closed",
+                ));
             }
         }
     } else {
         None
     };
 
+    // After the permits, before the work: a failure that landed while this
+    // task was queued must stop it from starting (R1).
+    if halt.load(Ordering::SeqCst) {
+        return Outcome::Halted;
+    }
+
+    let allow_failure = node.allow_failure;
     let executed = match node.body {
         NodeBody::Shell { run } => {
             join_executed(tokio::task::spawn_blocking(move || execute_shell(&run))).await
@@ -271,7 +351,14 @@ async fn run_one(
         },
     };
 
-    NodeRecord {
+    // Raised HERE, while this task still holds its permits: the next queued
+    // sibling can acquire the instant they drop, which can be before `run`'s
+    // loop has seen this record. Setting it in the loop alone would race (R1).
+    if !executed.success && !allow_failure {
+        halt.store(true, Ordering::SeqCst);
+    }
+
+    Outcome::Ran(NodeRecord {
         run_id,
         node_id: node.id,
         success: executed.success,
@@ -279,7 +366,7 @@ async fn run_one(
         output: executed.output,
         error: executed.error,
         duration_ms: executed.duration_ms,
-    }
+    })
 }
 
 async fn join_executed(handle: JoinHandle<Executed>) -> Executed {
@@ -395,6 +482,59 @@ mod tests {
         }
     }
 
+    /// Run `work` on its own thread and fail if it has not finished in 4s.
+    /// `tokio::time::timeout` alone cannot do this: a synchronous loop that
+    /// never yields starves the very runtime the timer lives on, so only a
+    /// watchdog outside that thread turns such a hang into a failure (R5).
+    fn within_4s<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(work());
+        });
+        rx.recv_timeout(Duration::from_secs(4))
+            .expect("the work hung past 4s")
+    }
+
+    /// Every scheduler test runs through this; the run is also wrapped in
+    /// `tokio::time::timeout` for an async hang (R5).
+    async fn run_bounded(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError> {
+        let graph = graph.clone();
+        tokio::task::spawn_blocking(move || {
+            within_4s(move || {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(4)
+                    .enable_time()
+                    .build()
+                    .expect("runtime")
+                    .block_on(async {
+                        tokio::time::timeout(Duration::from_secs(4), run(&graph, opts))
+                            .await
+                            .expect("the run hung past 4s")
+                    })
+            })
+        })
+        .await
+        .expect("watchdog task")
+    }
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("laya-sched-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create tmp dir");
+        dir
+    }
+
+    fn touch(id: &str, dir: &std::path::Path) -> GraphNode {
+        shell(id, &format!("touch {}", dir.join(id).display()))
+    }
+
+    fn opts(run_id: &str, limit: usize) -> RunOptions {
+        RunOptions {
+            run_id: run_id.to_string(),
+            limit,
+            mcp: Arc::new(NoopCaller),
+        }
+    }
+
     // ---- R8: deterministic topo order ---------------------------------------
 
     #[test]
@@ -403,10 +543,16 @@ mod tests {
             nodes: vec![mcp("c", "t"), mcp("a", "t"), mcp("b", "t")],
             edges: vec![edge("a", "c"), edge("b", "c")],
         };
-        let first = topo_order(&graph);
+        let first = within_4s({
+            let graph = graph.clone();
+            move || topo_order(&graph)
+        });
         for n in 0..50 {
             assert_eq!(
-                topo_order(&graph),
+                within_4s({
+                    let graph = graph.clone();
+                    move || topo_order(&graph)
+                }),
                 first,
                 "build {n} diverged from the first"
             );
@@ -419,7 +565,7 @@ mod tests {
             nodes: vec![mcp("z", "t"), mcp("a", "t")],
             edges: vec![],
         };
-        let order = topo_order(&graph);
+        let order = within_4s(move || topo_order(&graph));
         let pos_a = order.iter().position(|id| id == "a").expect("a present");
         let pos_z = order.iter().position(|id| id == "z").expect("z present");
         assert!(pos_a < pos_z, "`a` must precede `z`: {order:?}");
@@ -444,7 +590,7 @@ mod tests {
             edges: vec![],
         };
 
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r9-fanout".to_string(),
@@ -482,7 +628,7 @@ mod tests {
             edges: vec![],
         };
 
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r9-serial".to_string(),
@@ -509,7 +655,7 @@ mod tests {
             nodes: vec![shell("n1", "exit 0")],
             edges: vec![],
         };
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r9-report".to_string(),
@@ -542,7 +688,7 @@ mod tests {
             edges: vec![],
         };
 
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r10-writers".to_string(),
@@ -576,7 +722,7 @@ mod tests {
             edges: vec![],
         };
 
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r10-readers".to_string(),
@@ -609,7 +755,7 @@ mod tests {
             ],
             edges: vec![edge("n1", "n2"), edge("n2", "n3")],
         };
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r11-fail".to_string(),
@@ -637,7 +783,7 @@ mod tests {
             nodes: vec![shell("n1", "exit 0"), n2, shell("n3", "exit 0")],
             edges: vec![edge("n1", "n2"), edge("n2", "n3")],
         };
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r11-allow".to_string(),
@@ -670,7 +816,7 @@ mod tests {
             nodes: vec![shell("n1", "exit 0"), shell("n2", "exit 0")],
             edges: vec![edge("n1", "n2")],
         };
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r11-control".to_string(),
@@ -692,7 +838,7 @@ mod tests {
             nodes: vec![shell("n1", "exit 0"), shell("n2", "exit 0")],
             edges: vec![edge("n1", "n2")],
         };
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r13-basic".to_string(),
@@ -719,7 +865,7 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let report = run(
+        let report = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r13-concurrent".to_string(),
@@ -746,6 +892,146 @@ mod tests {
         }
     }
 
+    // ---- spec 09: halt flag, accounting, cycles -----------------------------
+
+    fn fail_slowly() -> GraphNode {
+        shell("a", "sleep 0.2; exit 1")
+    }
+
+    #[tokio::test]
+    async fn a_failure_stops_queued_siblings_from_starting() {
+        let dir = tmp_dir("halt");
+        let graph = Graph {
+            nodes: vec![
+                fail_slowly(),
+                touch("b", &dir),
+                touch("c", &dir),
+                touch("d", &dir),
+            ],
+            edges: vec![],
+        };
+        let report = run_bounded(&graph, opts("s9-halt", 1)).await.expect("run");
+        assert!(report.stopped_early);
+        for id in ["b", "c", "d"] {
+            assert!(
+                !dir.join(id).exists(),
+                "`{id}` ran after the run had failed"
+            );
+        }
+        assert_eq!(report.not_started, vec!["b", "c", "d"]);
+        assert_eq!(report.records.len(), 1, "{:?}", report.records);
+    }
+
+    #[tokio::test]
+    async fn the_control_allow_failure_does_not_halt_siblings() {
+        let dir = tmp_dir("nohalt");
+        let mut a = fail_slowly();
+        a.allow_failure = true;
+        let graph = Graph {
+            nodes: vec![a, touch("b", &dir), touch("c", &dir), touch("d", &dir)],
+            edges: vec![],
+        };
+        let report = run_bounded(&graph, opts("s9-nohalt", 1))
+            .await
+            .expect("run");
+        assert!(!report.stopped_early);
+        for id in ["b", "c", "d"] {
+            assert!(dir.join(id).exists(), "`{id}` should have run");
+        }
+        assert!(report.not_started.is_empty());
+    }
+
+    #[tokio::test]
+    async fn every_node_is_either_recorded_or_not_started() {
+        // a -> b -> d, a -> c -> d, plus independent e, f. `b` fails.
+        let graph = Graph {
+            nodes: vec![
+                shell("a", "exit 0"),
+                shell("b", "exit 1"),
+                shell("c", "sleep 0.1; exit 0"),
+                shell("d", "exit 0"),
+                shell("e", "exit 0"),
+                shell("f", "exit 0"),
+            ],
+            edges: vec![
+                edge("a", "b"),
+                edge("a", "c"),
+                edge("b", "d"),
+                edge("c", "d"),
+            ],
+        };
+        let report = run_bounded(&graph, opts("s9-acct", 2)).await.expect("run");
+        assert!(report.stopped_early);
+        assert_eq!(report.records.len() + report.not_started.len(), 6);
+        assert!(
+            report.not_started.contains(&"d".to_string()),
+            "{:?}",
+            report.not_started
+        );
+        let mut sorted = report.not_started.clone();
+        sorted.sort();
+        assert_eq!(sorted, report.not_started, "not_started must be sorted");
+        for id in &report.not_started {
+            assert!(
+                !report.records.iter().any(|r| &r.node_id == id),
+                "`{id}` is both recorded and not started"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cyclic_graph_is_refused_not_partially_run() {
+        let dir = tmp_dir("cycle");
+        let graph = Graph {
+            nodes: vec![touch("p", &dir), touch("q", &dir), touch("z", &dir)],
+            edges: vec![edge("p", "q"), edge("q", "p")],
+        };
+        let result = run_bounded(&graph, opts("s9-cycle", 2)).await;
+        assert_eq!(
+            result,
+            Err(RunError::Cycle {
+                nodes: vec!["p".to_string(), "q".to_string()]
+            })
+        );
+        assert!(
+            !dir.join("z").exists(),
+            "`z` ran although the graph was refused"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_control_a_diamond_is_not_a_cycle() {
+        let dir = tmp_dir("diamond");
+        let log = dir.join("order");
+        let step = |id: &str| shell(id, &format!("echo {id} >> {}", log.display()));
+        let graph = Graph {
+            nodes: vec![step("a"), step("b"), step("c"), step("d")],
+            edges: vec![
+                edge("a", "b"),
+                edge("a", "c"),
+                edge("b", "d"),
+                edge("c", "d"),
+            ],
+        };
+        let order = within_4s({
+            let graph = graph.clone();
+            move || topo_order(&graph)
+        });
+        assert_eq!(order.len(), 4);
+        assert_eq!(order.first().map(String::as_str), Some("a"));
+        assert_eq!(order.last().map(String::as_str), Some("d"));
+
+        let report = run_bounded(&graph, opts("s9-diamond", 4))
+            .await
+            .expect("run");
+        assert!(!report.stopped_early);
+        let lines = std::fs::read_to_string(&log).expect("order log");
+        let ran: Vec<&str> = lines.lines().collect();
+        assert_eq!(ran.iter().filter(|l| **l == "d").count(), 1, "{ran:?}");
+        assert_eq!(ran.last(), Some(&"d"), "d must run after b and c: {ran:?}");
+        assert_eq!(ran.first(), Some(&"a"), "{ran:?}");
+    }
+
     // ---- limit validation -------------------------------------------------------
 
     #[tokio::test]
@@ -754,7 +1040,7 @@ mod tests {
             nodes: vec![shell("n1", "exit 0")],
             edges: vec![],
         };
-        let result = run(
+        let result = run_bounded(
             &graph,
             RunOptions {
                 run_id: "r-zero".to_string(),

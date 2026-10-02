@@ -107,19 +107,19 @@ accident. Only the absence of their files proves they did not run.
 
 **New, each watched to FAIL on `b0ee704`** (the tests do not exist, so `ok. 0 passed` gives grep nothing to match):
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_queued_siblings_from_starting 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_allow_failure_does_not_halt_siblings 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1's control
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_node_is_either_recorded_or_not_started 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_cyclic_graph_is_refused_not_partially_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_non_string_route_value_is_data_not_an_error 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_queued_siblings_from_starting 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_allow_failure_does_not_halt_siblings 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1's control
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_node_is_either_recorded_or_not_started 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_cyclic_graph_is_refused_not_partially_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_non_string_route_value_is_data_not_an_error 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
 - [ ] `cd /projects/laya-rs && TMPDIR=/projects/_tmp/mutants-tmp cargo mutants --cargo-test-arg=--lib --gitignore true -f crates/laya-graph/src/sched.rs -o "$(mktemp -d /projects/_tmp/mutants-out-XXXX)"`: mutation score. cargo-mutants exits 0 only when every viable mutant is caught; it exits 2 for a missed mutant, 3 for a timeout and 4 for a failing baseline, so the check fails safe. Measured pre-implementation: 1 missed (`sched.rs:52`) and 5 timeouts.
   **`TMPDIR` and `--gitignore true` are load-bearing, not decoration.** cargo-mutants copies the tree into `TMPDIR` and, by default, **copies gitignored files too** — including this repo's `.venv-laya`, which is 5.4 GB. On 2026-10-01 that filled the container's root filesystem (`No space left on device`, `Failed to copy … libcusparseLt.so.0`) and the run died. Root `/` holds ~22 GB free; `/projects` holds ~188 GB. Measured on this box: with `TMPDIR` on `/projects` and `--gitignore true` the same command completes. Without them it can fill root and then fail *at random*, which is the worst failure mode for a gate.
 
 **Carried re-checks:**
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_the_run_and_reports_stopped_early`: the existing R11 chain test still passes
-- [ ] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings`
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_the_run_and_reports_stopped_early`: the existing R11 chain test still passes
+- [x] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings`
+- [x] `cd /projects/laya-rs && cargo fmt --all --check`
 
 ---
 

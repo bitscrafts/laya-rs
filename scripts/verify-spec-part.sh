@@ -61,7 +61,15 @@ cd "$REPO" || exit 1
 # The earlier version asserted `git status -- specs/` was empty and called that
 # "worker did not commit" -- which is a different property, and it failed on the
 # orchestrator's own spec corrections.
-HEAD_FILE="/projects/_tmp/spec07-dispatch/part${PART}.head"
+# The dispatch script writes `<KEY>.head`, keyed the same way it keys everything else:
+# `<N>` for spec N, `part<N>` for a spec-07 part. This path was hardcoded to
+# `/projects/_tmp/spec07-dispatch/part${PART}.head`, which was wrong twice over -- the directory
+# does not exist (dispatch writes `spec-dispatch/`) and the filename prefix does not match
+# (`N.head`, not `partN.head`). So the commit check silently SKIPPED for every spec dispatched
+# since the scripts were generalised, and reported "no recorded HEAD" instead of failing.
+# A check that cannot find its own input is not a passing check.
+STATE_DIR="${SPEC_STATE_DIR:-/projects/_tmp/spec-dispatch}"
+HEAD_FILE="$STATE_DIR/${PART}.head"
 if [ -f "$HEAD_FILE" ]; then
   PRE=$(cat "$HEAD_FILE")
   row "worker did not commit (HEAD == pre-dispatch ${PRE:0:9})" \

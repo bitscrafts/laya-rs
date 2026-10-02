@@ -162,8 +162,11 @@ fn graph_run_with(path: &str, mcp: Arc<dyn McpCaller>) -> ExitCode {
             println!("{json}");
             if report.stopped_early {
                 eprintln!(
-                    "laya graph run: STOPPED EARLY at `{}` (run {run_id})",
-                    report.failed_node.as_deref().unwrap_or("?")
+                    "laya graph run: STOPPED EARLY at `{}`, {} node(s) ran, {} not started: {:?} (run {run_id})",
+                    report.failed_node.as_deref().unwrap_or("?"),
+                    report.records.len(),
+                    report.not_started.len(),
+                    report.not_started
                 );
                 ExitCode::FAILURE
             } else {

@@ -59,6 +59,12 @@ pub struct RunReport {
     pub worker_limit: usize,
     /// One record per node that actually ran. A node skipped by a fail-fast
     /// stop (R11: "siblings not yet started are not started") has no record
-    /// here at all — it never ran.
+    /// here at all — it never ran; it is listed in `not_started` instead.
     pub records: Vec<NodeRecord>,
+    /// Sorted ids of the nodes that never started: spawned but halted before
+    /// their work began, or never spawned because fail-fast stopped
+    /// scheduling. For a stopped run, `records.len() + not_started.len()`
+    /// equals the graph's node count.
+    #[serde(default)]
+    pub not_started: Vec<String>,
 }

@@ -47,9 +47,10 @@ use crate::sched::{self, RunOptions};
 /// upstream is missing, is not an `mcp` node, or its chosen port names a node
 /// the graph does not declare — all defensive: [`crate::lower::lower`] cannot
 /// produce such a graph from a [`crate::validate::validate`]d flow.
-/// [`RunError::NodeTaskFailed`] if a route's upstream answer cannot be read
-/// as the payload shape `on` expects (malformed decide response), or if the
-/// blocking call to `McpCaller` could not be joined.
+/// [`RunError::NodeTaskFailed`] if the blocking call to `McpCaller` could not
+/// be joined. A route value that cannot be read as the string `on` expects
+/// (malformed or wrong-typed decide response) is DATA, not `Err`: the route
+/// node's record is `success: false` and the run is `stopped_early` (R4).
 pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError> {
     if opts.limit == 0 {
         return Err(RunError::BadLimit { limit: opts.limit });
@@ -78,17 +79,18 @@ pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunE
         remove_node(&mut nodes, &mut edges, &route_node.id);
 
         if upstream_failed && !upstream_node.allow_failure {
-            return Ok(RunReport {
-                run_id: opts.run_id,
-                stopped_early: true,
-                failed_node: Some(upstream_node.id),
-                worker_limit: opts.limit,
-                records,
-            });
+            return Ok(stopped_report(opts, upstream_node.id, records, &nodes));
         }
 
         let (route_record, unselected) =
             resolve_route(&opts.run_id, &route_node, &upstream_record.output)?;
+        if !route_record.success {
+            // A wrong-typed route value is an upstream fault, reported as
+            // data exactly like a failing upstream call (R4).
+            let failed = route_record.node_id.clone();
+            records.push(route_record);
+            return Ok(stopped_report(opts, failed, records, &nodes));
+        }
         records.push(route_record);
         prune_unreached(&mut nodes, &mut edges, unselected);
     }
@@ -108,7 +110,28 @@ pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunE
         failed_node: tail.failed_node,
         worker_limit: tail.worker_limit,
         records,
+        not_started: tail.not_started,
     })
+}
+
+/// The report for a run stopped before the tail: every node still live in
+/// `remaining` never started.
+fn stopped_report(
+    opts: RunOptions,
+    failed_node: String,
+    records: Vec<NodeRecord>,
+    remaining: &[GraphNode],
+) -> RunReport {
+    let mut not_started: Vec<String> = remaining.iter().map(|n| n.id.clone()).collect();
+    not_started.sort();
+    RunReport {
+        run_id: opts.run_id,
+        stopped_early: true,
+        failed_node: Some(failed_node),
+        worker_limit: opts.limit,
+        records,
+        not_started,
+    }
 }
 
 /// Find a `route` node still live in `nodes`, together with its upstream
@@ -184,10 +207,21 @@ fn resolve_route(
             node_id: route_node.id.clone(),
         });
     };
-    let value =
-        extract_on_value(upstream_output, &on).map_err(|reason| RunError::NodeTaskFailed {
-            reason: format!("route `{}`: {reason}", route_node.id),
-        })?;
+    let value = match extract_on_value(upstream_output, &on) {
+        Ok(value) => value,
+        Err(reason) => {
+            let record = NodeRecord {
+                run_id: run_id.to_string(),
+                node_id: route_node.id.clone(),
+                success: false,
+                exit_code: None,
+                output: String::new(),
+                error: Some(format!("route `{}`: {reason}", route_node.id)),
+                duration_ms: 0,
+            };
+            return Ok((record, BTreeSet::new()));
+        }
+    };
     let body = NodeBody::Route {
         on: on.clone(),
         rules: rules.clone(),
@@ -267,12 +301,27 @@ fn extract_on_value(output: &str, on: &str) -> Result<String, String> {
     let field = on.strip_prefix("$.payload.").unwrap_or(on);
     let parsed: Value =
         serde_json::from_str(output).map_err(|e| format!("output is not JSON: {e}: {output}"))?;
-    parsed
-        .get("payload")
-        .and_then(|p| p.get(field))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| format!("no string field `payload.{field}` in: {output}"))
+    let found = parsed.get("payload").and_then(|p| p.get(field));
+    match found {
+        Some(Value::String(s)) => Ok(s.clone()),
+        other => Err(format!(
+            "`payload.{field}` is {}, expected a string, in: {output}",
+            json_type(other)
+        )),
+    }
+}
+
+/// The JSON type of `value`, `missing` when absent — named in a route error.
+const fn json_type(value: Option<&Value>) -> &'static str {
+    match value {
+        None => "missing",
+        Some(Value::Null) => "null",
+        Some(Value::Bool(_)) => "bool",
+        Some(Value::Number(_)) => "number",
+        Some(Value::String(_)) => "string",
+        Some(Value::Array(_)) => "array",
+        Some(Value::Object(_)) => "object",
+    }
 }
 
 #[cfg(test)]
@@ -283,6 +332,54 @@ mod tests {
     use crate::flow::{Flow, Kind, Node};
     use crate::lower::lower;
     use crate::node::McpCaller;
+
+    /// Every test here runs through this: a hang becomes a failure the test
+    /// reports itself (R5). The run goes on its own thread under a watchdog,
+    /// because `tokio::time::timeout` cannot interrupt a synchronous loop that
+    /// never yields.
+    async fn bounded(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError> {
+        let graph = graph.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_time()
+                .build()
+                .map(|rt| {
+                    rt.block_on(async {
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(4),
+                            run_flow(&graph, opts),
+                        )
+                        .await
+                    })
+                });
+            let _ = tx.send(result);
+        });
+        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(4)))
+            .await
+            .expect("watchdog task")
+            .expect("the run hung past 4s")
+            .expect("runtime")
+            .expect("the run hung past 4s")
+    }
+
+    struct NoLabel;
+    impl McpCaller for NoLabel {
+        fn call(&self, _t: &str, _a: &Value) -> Result<String, String> {
+            Ok(r#"{"payload":{}}"#.to_string())
+        }
+    }
+
+    /// Answers `decide` with a fixed JSON `payload.label` of any type.
+    struct RawLabelCaller {
+        label: Value,
+    }
+    impl McpCaller for RawLabelCaller {
+        fn call(&self, _tool: &str, _arguments: &Value) -> Result<String, String> {
+            Ok(serde_json::json!({"payload": {"label": self.label}}).to_string())
+        }
+    }
 
     /// Answers `decide` with a fixed label, regardless of arguments — a
     /// controllable stand-in for the real model, used only to prove THIS
@@ -351,7 +448,7 @@ mod tests {
     #[tokio::test]
     async fn only_the_selected_branch_runs() {
         let graph = lower(&decide_flow()).expect("must lower");
-        let report = run_flow(
+        let report = bounded(
             &graph,
             RunOptions {
                 run_id: "sel-a".to_string(),
@@ -376,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn the_control_a_different_answer_reaches_the_other_branch() {
         let graph = lower(&decide_flow()).expect("must lower");
-        let report = run_flow(
+        let report = bounded(
             &graph,
             RunOptions {
                 run_id: "sel-b".to_string(),
@@ -398,7 +495,7 @@ mod tests {
     #[tokio::test]
     async fn an_unmatched_answer_takes_the_fallback() {
         let graph = lower(&decide_flow()).expect("must lower");
-        let report = run_flow(
+        let report = bounded(
             &graph,
             RunOptions {
                 run_id: "sel-fallback".to_string(),
@@ -422,7 +519,7 @@ mod tests {
     #[tokio::test]
     async fn the_route_record_carries_the_matched_value() {
         let graph = lower(&decide_flow()).expect("must lower");
-        let report = run_flow(
+        let report = bounded(
             &graph,
             RunOptions {
                 run_id: "sel-evidence".to_string(),
@@ -459,7 +556,7 @@ mod tests {
     #[tokio::test]
     async fn a_failing_decide_call_stops_the_run_rather_than_picking_a_branch() {
         let graph = lower(&decide_flow()).expect("must lower");
-        let report = run_flow(
+        let report = bounded(
             &graph,
             RunOptions {
                 run_id: "sel-fail".to_string(),
@@ -488,7 +585,7 @@ mod tests {
     #[tokio::test]
     async fn the_control_a_successful_decide_call_does_not_stop_the_run() {
         let graph = lower(&decide_flow()).expect("must lower");
-        let report = run_flow(
+        let report = bounded(
             &graph,
             RunOptions {
                 run_id: "sel-ok".to_string(),
@@ -518,7 +615,7 @@ mod tests {
             }],
         };
         let graph = lower(&flow).expect("must lower");
-        let report = run_flow(
+        let report = bounded(
             &graph,
             RunOptions {
                 run_id: "no-route".to_string(),
@@ -537,7 +634,7 @@ mod tests {
     #[tokio::test]
     async fn a_zero_limit_is_refused() {
         let graph = lower(&decide_flow()).expect("must lower");
-        let result = run_flow(
+        let result = bounded(
             &graph,
             RunOptions {
                 run_id: "zero".to_string(),
@@ -547,5 +644,95 @@ mod tests {
         )
         .await;
         assert_eq!(result, Err(RunError::BadLimit { limit: 0 }));
+    }
+
+    #[tokio::test]
+    async fn a_non_string_route_value_is_data_not_an_error() {
+        let graph = lower(&decide_flow()).expect("must lower");
+        for (label, ty) in [
+            (serde_json::json!(3), "number"),
+            (serde_json::json!(true), "bool"),
+            (Value::Null, "null"),
+            (serde_json::json!({"x": 1}), "object"),
+            (serde_json::json!(["a"]), "array"),
+        ] {
+            let report = bounded(
+                &graph,
+                RunOptions {
+                    run_id: "s9-route".to_string(),
+                    limit: 4,
+                    mcp: Arc::new(RawLabelCaller { label }),
+                },
+            )
+            .await
+            .expect("a wrong-typed route value is data, not Err");
+            assert!(report.stopped_early, "{ty}");
+            assert_eq!(report.failed_node.as_deref(), Some("classify/route"));
+            let route = report
+                .records
+                .iter()
+                .find(|r| r.node_id == "classify/route")
+                .expect("the route record exists");
+            assert!(!route.success);
+            let error = route.error.as_deref().unwrap_or_default();
+            assert!(
+                error.contains("label") && error.contains(ty),
+                "{ty}: {error}"
+            );
+            let ran: Vec<&str> = report.records.iter().map(|r| r.node_id.as_str()).collect();
+            assert!(
+                !ran.contains(&"handle_a") && !ran.contains(&"human"),
+                "{ran:?}"
+            );
+            assert_eq!(
+                report.records.len() + report.not_started.len(),
+                report.records.len() + 3,
+                "handle_a, handle_b and human never started"
+            );
+            assert_eq!(report.not_started, vec!["handle_a", "handle_b", "human"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_missing_route_field_names_missing() {
+        let graph = lower(&decide_flow()).expect("must lower");
+        let report = bounded(
+            &graph,
+            RunOptions {
+                run_id: "s9-missing".to_string(),
+                limit: 4,
+                mcp: Arc::new(NoLabel),
+            },
+        )
+        .await
+        .expect("data, not Err");
+        assert!(report.stopped_early);
+        let error = report
+            .records
+            .last()
+            .and_then(|r| r.error.clone())
+            .unwrap_or_default();
+        assert!(error.contains("missing"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn the_control_a_string_route_value_still_routes() {
+        let graph = lower(&decide_flow()).expect("must lower");
+        let report = bounded(
+            &graph,
+            RunOptions {
+                run_id: "s9-route-ok".to_string(),
+                limit: 4,
+                mcp: Arc::new(RawLabelCaller {
+                    label: serde_json::json!("a"),
+                }),
+            },
+        )
+        .await
+        .expect("must run");
+        assert!(!report.stopped_early);
+        assert!(report.not_started.is_empty());
+        let ran: Vec<&str> = report.records.iter().map(|r| r.node_id.as_str()).collect();
+        assert!(ran.contains(&"handle_a"), "{ran:?}");
     }
 }
