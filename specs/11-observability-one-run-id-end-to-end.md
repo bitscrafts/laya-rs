@@ -21,6 +21,19 @@
 - `crates/laya-store/src/lib.rs:807-823`: `Stats` has `latency_p50/p95/max` across **all** tools, with no per-tool split and no gate-decision distribution.
 - No crate uses `tracing` or `log`. `tracing 0.1.44` is already in `Cargo.lock` (pulled in by `rmcp`). **`tracing-subscriber` is not in the offline registry** (`/usr/local/cargo/registry/cache` checked), so a subscriber would need a network fetch.
 - `crates/laya-mcp/src/main.rs` has 9 `eprintln!`. `crates/laya-mcp/src/lib.rs:666` has 1 (the gate's fail-closed fallback). They are free text, with no request id, tool, latency or run id.
+- **Measured 2026-10-02, in the live Hermes deployment — the ledger has NEVER recorded anything.**
+  `LAYA_LEDGER_DIR` was **unset**, and absent from the MCP server entry in the host config, so
+  `record_decision`'s `?` returned early on every call. All from the deployed system: `laya ledger
+  stats` reported `decisions: 0, outcomes: 0, latency p50/p95/max: unknown`; the host's session store
+  (133 207 messages, ~65 000 tool calls) contains **3** calls to any `mcp_laya_*` tool and no row
+  attributed to the server; and no `ledger-*.jsonl` existed outside throwaway test directories. With
+  `LAYA_LEDGER_DIR` set on the same call, `decide` writes a segment immediately --
+  `{"tool":"decide","question_id":"paid","label":"yes","band":"mid","confidence":0.7872,
+  "latency_ms":478}` -- so the mechanism works and only the configuration was missing.
+  **This is the strongest possible argument for R4.** A subsystem that is silently off is
+  indistinguishable from one that is broken, and this one was off for the entire life of the
+  deployment without a single signal. The criteria for R4 should therefore assert the *warning*
+  appears when the directory is unset, not merely that a healthy server prints `enabled: true`.
 
 ---
 
