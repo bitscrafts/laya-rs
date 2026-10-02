@@ -166,36 +166,45 @@ laya ledger compact                                          # merge segments in
 
 ## 6. The gate and the session lifecycle — read this before concluding "it is not firing"
 
-**Hooks are loaded when the Hermes process starts, not when a session starts.** Two consequences,
-both measured 2026-10-02:
+**The rule is about PROCESS start, not session start.** A hook is loaded when the process that
+serves your turns starts. Two measured cases from 2026-10-02, and the second corrects the first:
 
-- After you add, change or re-approve a hook, the process that already loaded the old set will **not**
-  pick up the new one. Restart the gateway (`hermes gateway run --accept-hooks`) and confirm with
-  `hermes hooks doctor` that the hook is listed, executable, allowlisted and reports
-  `ran clean with empty stdout`.
-- **A session already in flight when the hook was registered will not be gated.** Measured: the
-  seeing log's last entry was 04:04:14, the hook was re-registered at 14:33:47, and a tool call made
-  afterwards in the same long-lived session still produced no entry — while a direct drive of the same
-  hook with a real payload wrote two lines immediately. So the hook and the binary are both fine; what
-  was missing was a session that started after registration.
+- **Before a restart, and NOT after one:** a hook was registered at 14:33 in a process that had
+  started at 03:29. Tool calls made in that session at 14:33–14:52 produced **no** seeing-log entry,
+  while driving the same hook directly with a real payload wrote lines immediately. Hook and binary
+  both fine — the process serving that session had loaded its hook set before the hook existed.
+- **After the restart, with a RESUMED session:** the gateway restarted at 14:50:26, the hook
+  re-registered at 14:50:26, the tool-hook workers started at 14:50:27, and tool calls in the
+  **resumed** session at 14:52:17 and 14:52:20 were gated and logged normally.
 
-An agent **cannot verify its own gating**. If you are running inside the long-lived process, the hook
-that should gate your calls either predates your session or does not, and you have no way to observe
-which from the inside. Check from a **new** session, and check these four things in order:
+**So a restart fixes it, and resuming an existing session afterwards is fine.** Resuming is the right
+default: the new process loads the current hook set, then re-attaches to your session. Earlier wording
+in this guide said a session "already in flight" would not be gated, which is true only of the process
+that predates registration, and misleading afterwards — corrected here with both measurements.
+
+An agent **cannot verify its own gating** at the moment it matters: from inside the process there is no
+way to tell whether the hook pre-dates your session. Check these four things in order:
 
 ```sh
-hermes hooks doctor | grep -A4 laya-gate      # registered, executable, allowlisted, ran clean
+hermes hooks doctor | grep -A5 laya-gate      # registered, executable, allowlisted, ran clean
 ls -l /run/laya/sidecar.sock                  # the head is up, or every judgement fails closed
 tail -3 /root/.hermes/logs/laya.log           # did the seeing log grow when you made a call?
 /root/.local/bin/laya-gate "git status"       # does the binary itself answer? (exit 0 = allow)
 ```
 
-If the first two are good and the binary answers but the log does not grow, the hook is not reaching
-your session — restart the gateway and use a NEW session.
+If the first two are good and the binary answers but the log does not grow, the process predates the
+hook: **restart the gateway, then resume your session as usual.**
 
-**A second trap, hit twice today:** `hermes hooks doctor` reports *"script modified since approval"*
-when a hook is edited after consent. That is a **warning, not a disablement** — `_is_allowlisted`
-matches on event and command only. The hook still fires. Do not chase it; fix it with
+**What enforcement actually covers.** Measured on 73 gated calls: `allow 27 / ask 45`. `ask` does not
+block by design — a caller that treated a judgement as a failure would stop calling the gate. So the
+gate **records every state-changing call** and **blocks only** when the layer is unreachable, the head
+is down, or the verdict is `deny`. Everyday agent work that is not on the allowlist (`bash …`,
+`cargo build`, anything scripted) returns `ask` and proceeds. The allowlist is deliberately 13
+read-only entries; widening it is a policy decision, not a bug.
+
+**A second trap, hit twice in one day:** `hermes hooks doctor` reports *"script modified since
+approval"* when a hook is edited after consent. That is a **warning, not a disablement** — the
+allowlist check matches on event and command only. The hook still fires. Do not chase it; fix it with
 `hermes hooks revoke` + re-approve if you want the warning gone.
 
 ---
