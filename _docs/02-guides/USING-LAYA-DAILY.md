@@ -164,7 +164,43 @@ laya ledger compact                                          # merge segments in
 
 ---
 
-## 6. What it CANNOT answer yet (measured, not guessed)
+## 6. The gate and the session lifecycle — read this before concluding "it is not firing"
+
+**Hooks are loaded when the Hermes process starts, not when a session starts.** Two consequences,
+both measured 2026-10-02:
+
+- After you add, change or re-approve a hook, the process that already loaded the old set will **not**
+  pick up the new one. Restart the gateway (`hermes gateway run --accept-hooks`) and confirm with
+  `hermes hooks doctor` that the hook is listed, executable, allowlisted and reports
+  `ran clean with empty stdout`.
+- **A session already in flight when the hook was registered will not be gated.** Measured: the
+  seeing log's last entry was 04:04:14, the hook was re-registered at 14:33:47, and a tool call made
+  afterwards in the same long-lived session still produced no entry — while a direct drive of the same
+  hook with a real payload wrote two lines immediately. So the hook and the binary are both fine; what
+  was missing was a session that started after registration.
+
+An agent **cannot verify its own gating**. If you are running inside the long-lived process, the hook
+that should gate your calls either predates your session or does not, and you have no way to observe
+which from the inside. Check from a **new** session, and check these four things in order:
+
+```sh
+hermes hooks doctor | grep -A4 laya-gate      # registered, executable, allowlisted, ran clean
+ls -l /run/laya/sidecar.sock                  # the head is up, or every judgement fails closed
+tail -3 /root/.hermes/logs/laya.log           # did the seeing log grow when you made a call?
+/root/.local/bin/laya-gate "git status"       # does the binary itself answer? (exit 0 = allow)
+```
+
+If the first two are good and the binary answers but the log does not grow, the hook is not reaching
+your session — restart the gateway and use a NEW session.
+
+**A second trap, hit twice today:** `hermes hooks doctor` reports *"script modified since approval"*
+when a hook is edited after consent. That is a **warning, not a disablement** — `_is_allowlisted`
+matches on event and command only. The hook still fires. Do not chase it; fix it with
+`hermes hooks revoke` + re-approve if you want the warning gone.
+
+---
+
+## 7. What it CANNOT answer yet (measured, not guessed)
 
 Recorded so nobody plans around them:
 
