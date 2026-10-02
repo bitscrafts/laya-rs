@@ -26,7 +26,7 @@ All measured 2026-10-02, through the deployed `laya-mcp` over stdio, on the ship
   requires `instructions`.**
 - Neither schema marked `criteria` as required for `choice`/`score`. A `score` without it
   produced `TypeError: 'NoneType' object is not iterable`. The model's own docstring
-  (`.venv-laya/lib/python3.12/site-packages/laya/agent.py:272-274`) states the shape and the
+  (`laya/agent.py:272-274`) states the shape and the
   requirement:
   `choice: {"type","instructions","criteria":{opt:desc}}`, `score: {..., "criteria":[…]}`,
   `noul: {"type","instructions"}`.
@@ -195,5 +195,4 @@ from a layer it cannot see and cannot fix.
 - `scripts/check-ten-levels.py` — the harness that found this, and the record of the eight
   self-inflicted failures that came first.
 - `_docs/04-development/TEN-LEVELS-MAPPING.md` — the findings, with the verbatim model errors.
-- The model's authority for the shape: `.venv-laya/lib/python3.12/site-packages/laya/agent.py`,
-  `system_one`'s docstring.
+- The model's authority for the shape: the pinned model venv, `laya/agent.py`, `system_one`'s docstring (`pip show laya` → 0.3.5).
