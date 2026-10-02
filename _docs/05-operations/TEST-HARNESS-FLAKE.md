@@ -207,3 +207,46 @@ The corrected criterion names the decide and prints the failing node ids. **The 
 learned four separate ways today: a criterion must be satisfiable ONLY by the thing it names.** A
 `grep` for a token that several records share is not a check — it is a coin flip weighted in favour of
 passing.
+
+---
+
+## REPRODUCED — the `sched.rs` timing flake, with numbers (2026-10-02, late)
+
+Earlier in the session this family was recorded as *"observed once, never reproduced"*. **It has now
+been reproduced, and the key question is answered.**
+
+| run | load | PRE-17 commit (`10fc381`) | POST-17 (working tree) |
+|---|---|---|---|
+| first check | **4 busy-loop generators** | **3 failures / 20** | not run (killed mid-flight) |
+| second check | 1 generator | 0 / 20 | 0 / 20 |
+
+**The conclusion that matters: the flake fails at the commit BEFORE the scheduler change**, so it
+**pre-dates spec 17** and is not a regression from it. That was previously only an inference from
+measuring `0/20` in both trees — which is weak evidence, because 0/20 does not distinguish "the flake
+does not exist here" from "the flake did not fire here". **3/20 at the older commit is direct evidence.**
+
+**It is load-dependent.** The two runs used different load levels (4 generators vs 1), so their rates
+are not directly comparable — the honest reading is *"it fires under heavy load and did not fire under
+light load"*, not *"4× load gives 3× the failure rate"*.
+
+**The two affected tests** are both assertions about ordering under a wall-clock race:
+
+| test | how it races |
+|---|---|
+| `a_failure_stops_queued_siblings_from_starting` | `a` is `sleep 0.2; exit 1`; whether siblings are already dispatched depends on the scheduler's first loop iteration interleaving with that 200 ms |
+| `a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not` | the same shape against a 0.5 s deadline on a 30 s sleeper |
+
+### Why this is worth writing down rather than shrugging at
+
+A test that fails 1-in-7 **under load** is a test that will fail in CI, on someone else's machine, at the
+worst moment — and this project's own standard is that *a test whose control is a stopwatch is a test
+that will fail on someone else's machine*. It is **not** a product defect (no node ran late; the
+assertion is about dispatch ordering), but it **is** a defect in the harness.
+
+**The fix is not a longer sleep.** It is to make the ordering deterministic — drive the scheduler with a
+scripted caller that blocks until released, so the interleaving under test is *controlled* rather than
+*raced*. Spec 21 hit exactly this and solved it that way: an **instant** scripted caller finished before
+a zero deadline could fire, making its timeout test vacuous until a 200 ms `SlowCaller` was introduced.
+
+**Status: open, documented, not attributed to any change.** Candidate for a small spec; it is behind
+spec 23 in priority because it costs a flaky CI run rather than a wrong answer.
