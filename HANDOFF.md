@@ -1,37 +1,67 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (13) · **Status**: YELLOW — **specs 20, 17, 19, 18 landed; 16 in flight; 21
-filed.** The graph engine's three worst problems are fixed and its central limitation is closed:
+**Date**: 2026-10-02 (14) · **Status**: GREEN — **specs 16, 17, 18, 19 and 20 are all complete and
+deployed.** The graph engine's three worst defects are fixed and its central limitation is closed:
 which nodes run no longer depends on the order of the JSON file, a typo can no longer be silently
-inert, and a shell's output can now inform a decision.
+inert, a shell's output can now inform a decision, and a flow can ask the question shape this head
+answers best.
 
 ```
-cargo test --workspace                    589 passed · 0 failed
+cargo test --workspace                    595 passed · 0 failed
 cargo clippy --workspace --all-targets    0
 cargo fmt --all --check                   clean
 python3 scripts/check-doc-citations.py    65 docs, every citation resolves
-                                         102 links, 3 anchored, 0 broken
+                                         104 links, 4 anchored, 0 broken
+
+deployed == tree:  laya 60ba1cd01619cd52 · laya-mcp 7178bbb4755bc504 · laya-gate 9d2f45af7c023c3b
+previous binaries kept as /root/.local/bin/*.old-20261002T200605Z
+smoke test of the DEPLOYED path: bash scripts/smoke-deployed.sh
 ```
 
-## ⚠ THE DEPLOYED BINARIES ARE STALE — the one open operational item
-
-`/root/.local/bin/{laya,laya-mcp,laya-gate}` are the **14:27** build. Every commit since 15:00 is
-source-only. Measured: the deployed `laya` calls a typo'd-key flow `is valid` while the fresh build
-refuses it by name. **Anyone using `laya` from `PATH` gets the old behaviour and none of these fixes.**
-
-Deploy once, after spec 16 lands. The gate must not be replaced while `pgrep -x laya-gate` is
-non-empty — that blocks a live agent mid-turn (learned at 03:41 today).
-
-## What landed, and the one measurement that carried each
+## What landed, and the measurement that carried each
 
 | spec | commit | the thing that proves it |
 |---|---|---|
-| 20 — the format is a contract | `10fc381` | a typo'd key is refused with a nearest-key hint; removing the guard makes `an_unknown_key_is_refused` fail |
-| 17 — routing is a function of the graph | `ac9e94f` | **both array orders now execute the same set**, and the unselected branch is gone; `B_yes` no longer runs |
-| 19 — docs + fixtures | `98d99d3` | the four corrections are dated; the order fixtures are checked in |
-| 18 — a shell's output can inform a decision | `10b26ef` | **a `wc` whose value drives the branch**: 13 words → short, 412 → long |
-| 16 — `question_type` | *in flight* | the head answers `noul` at 0.875–1.0 against a choice's 0.35–0.54 |
-| 21 — the refusals catch up | *filed* | spec 17 made the `decide` `timeout` live, so spec 20's refusal of it is **stale** |
+| 20 — the format is a contract | `10fc381` | a typo'd key is refused with a nearest-key hint; removing the guard makes the refusal test fail |
+| 17 — routing is a function of the graph | `ac9e94f` | **both array orders execute the same set**; `B_yes` no longer runs on a port that was not selected |
+| 19 — docs + fixtures | `98d99d3` | four dated corrections; the order fixtures checked in |
+| 18 — a shell's output can inform a decision | `10b26ef` | **a `wc` that drives the branch**: 13 words → short, 412 → long |
+| 16 — `question_type` | `355b636` | same question, same state: **`noul` 0.9677 at band HIGH vs `choice` 0.2389 at band low** |
+| deploy + smoke test | `224411b` | verified through the **installed** command |
+
+## What is open
+
+**Spec 21, filed and not dispatched** — `specs/21-the-refusals-catch-up-with-the-scheduler.md`.
+Spec 17 made the per-node `timeout` on a decide **live** (measured: `timeout: 0` fails with *"timed out
+after 0ms"*), so spec 20's interim refusal of that field is **stale and blocks a working feature**. The
+twin field `allow_failure` on a decide is **worse than refused**: accepted, its own failure tolerated,
+and then the synthetic route node stops the run anyway. Detail:
+`_docs/04-development/STALE-REFUSALS-2026-10-02.md`. **This is the next thing to run.**
+
+**Spec 17's mutation criterion is open on purpose.** The gate needs `exit 0` and exits **3** — 215
+mutants, 193 caught, 20 unviable, **2 timeouts, 0 MISSED**. `cargo-mutants` uses 3 for a timeout and 2
+for a missed mutant; both timeouts are replacements of `dependency_tables` (`sched.rs:87`) returning a
+phantom-only map, leaving a node's indegree above zero so the scheduler **waits rather than failing**.
+No mutant survived; the invariant is undefended and the hang is the symptom.
+
+**The `subflow` CLI gap is unchanged**: `Subflow` is not a variant of `Kind`, so a subflow node falls
+through to `Other`, and the CLI has no library flag. Its error message now names the real problem.
+
+## The graph's measured surface, after this batch
+
+| feature | status |
+|---|---|
+| branches (`label` / `band`, mandatory `_` catch-all) | **works** |
+| `depends_on` ordering, including a shell before a decide | **works** |
+| `{{node_id}}` — a node's stdout informs a decision | **works** |
+| `question_type: choice \| noul` | **works** |
+| `timeout` (shell, mcp, **and decide**) | **works** |
+| `allow_failure` | works on shells and tail mcp; **partial on a decide** (spec 21) |
+| unknown keys, bad `on`, bad port keys, missing port targets | **refused by name** |
+| `retry` | **refused** until implemented (a later spec) |
+| `escalate_on_near_tie` | **refused** (its target ran unconditionally) |
+| loops | **refused by design**; cycles named |
+| `subflow` | library-only, unreachable from the CLI |
 
 ## The graph is the active work
 
