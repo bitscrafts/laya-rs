@@ -6,17 +6,23 @@
     {
       "id": "count_words",
       "kind": "shell",
-      "run": "wc -w _docs/02-guides/wc-example/short-note.txt",
+      "run": "wc -w < _docs/02-guides/wc-example/short-note.txt",
       "timeout": 30
     },
     {
       "id": "classify",
       "kind": "decide",
-      "depends_on": ["count_words"],
+      "depends_on": [
+        "count_words"
+      ],
       "on": "band",
-      "prompt": "A shell command counted the words in a document. It printed: `13 file.txt`. The document therefore has 13 words. Classify by this rule: SHORT is under 100 words, MEDIUM is 100 to 300 words, LONG is over 300 words.",
+      "prompt": "A shell command counted the words in a document. It printed: {{count_words}}",
       "question": "By the rule stated, is this document SHORT, MEDIUM or LONG?",
-      "options": ["SHORT", "MEDIUM", "LONG"],
+      "options": [
+        "SHORT",
+        "MEDIUM",
+        "LONG"
+      ],
       "ports": {
         "high": "report_confident",
         "mid": "report_confident",
@@ -24,8 +30,20 @@
         "_": "escalate_unparsed"
       }
     },
-    { "id": "report_confident", "kind": "shell", "run": "echo 'CONFIDENT: the head is sure enough to act on this label'" },
-    { "id": "escalate_low_confidence", "kind": "shell", "run": "echo 'ESCALATED: band=low -- the head does NOT know; a human or a bigger model decides'" },
-    { "id": "escalate_unparsed", "kind": "shell", "run": "echo 'UNPARSED: no port for that band'" }
+    {
+      "id": "report_confident",
+      "kind": "shell",
+      "run": "echo 'CONFIDENT: the head is sure enough to act on this label'"
+    },
+    {
+      "id": "escalate_low_confidence",
+      "kind": "shell",
+      "run": "echo 'ESCALATED: band=low -- the head does NOT know; a human or a bigger model decides'"
+    },
+    {
+      "id": "escalate_unparsed",
+      "kind": "shell",
+      "run": "echo 'UNPARSED: no port for that band'"
+    }
   ]
 }

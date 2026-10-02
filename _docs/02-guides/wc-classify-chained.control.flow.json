@@ -6,17 +6,22 @@
     {
       "id": "count_words",
       "kind": "shell",
-      "run": "wc -w _docs/02-guides/wc-example/long-note.txt",
+      "run": "wc -w < _docs/02-guides/wc-example/long-note.txt",
       "timeout": 30
     },
     {
       "id": "gt300_gate",
       "kind": "decide",
-      "depends_on": ["count_words"],
+      "depends_on": [
+        "count_words"
+      ],
       "on": "band",
-      "prompt": "The word count in the file is 412 words.",
+      "prompt": "The word count in the file is {{count_words}} words.",
       "question": "Is the word count greater than 300 words?",
-      "options": ["yes", "no"],
+      "options": [
+        "yes",
+        "no"
+      ],
       "ports": {
         "mid": "gt300_ask",
         "high": "gt300_ask",
@@ -27,11 +32,17 @@
     {
       "id": "gt300_ask",
       "kind": "decide",
-      "depends_on": ["gt300_gate"],
+      "depends_on": [
+        "gt300_gate",
+        "count_words"
+      ],
       "on": "label",
-      "prompt": "The word count in the file is 412 words.",
+      "prompt": "The word count in the file is {{count_words}} words.",
       "question": "Is the word count greater than 300 words?",
-      "options": ["yes", "no"],
+      "options": [
+        "yes",
+        "no"
+      ],
       "ports": {
         "yes": "class_long",
         "no": "gt100_gate",
@@ -41,11 +52,17 @@
     {
       "id": "gt100_gate",
       "kind": "decide",
-      "depends_on": ["gt300_ask"],
+      "depends_on": [
+        "gt300_ask",
+        "count_words"
+      ],
       "on": "band",
-      "prompt": "The word count in the file is 412 words.",
+      "prompt": "The word count in the file is {{count_words}} words.",
       "question": "Is the word count greater than 100 words?",
-      "options": ["yes", "no"],
+      "options": [
+        "yes",
+        "no"
+      ],
       "ports": {
         "mid": "gt100_ask",
         "high": "gt100_ask",
@@ -56,21 +73,47 @@
     {
       "id": "gt100_ask",
       "kind": "decide",
-      "depends_on": ["gt100_gate"],
+      "depends_on": [
+        "gt100_gate",
+        "count_words"
+      ],
       "on": "label",
-      "prompt": "The word count in the file is 412 words.",
+      "prompt": "The word count in the file is {{count_words}} words.",
       "question": "Is the word count greater than 100 words?",
-      "options": ["yes", "no"],
+      "options": [
+        "yes",
+        "no"
+      ],
       "ports": {
         "yes": "class_medium",
         "no": "class_short",
         "_": "escalate_gt100"
       }
     },
-    { "id": "class_short", "kind": "shell", "run": "echo 'CLASSIFIED: SHORT (not more than 100 words)'" },
-    { "id": "class_medium", "kind": "shell", "run": "echo 'CLASSIFIED: MEDIUM (more than 100, not more than 300 words)'" },
-    { "id": "class_long", "kind": "shell", "run": "echo 'CLASSIFIED: LONG (more than 300 words)'" },
-    { "id": "escalate_gt300", "kind": "shell", "run": "echo 'ESCALATED at the >300 gates: the head reported band=low -- a human decides'" },
-    { "id": "escalate_gt100", "kind": "shell", "run": "echo 'ESCALATED at the >100 gates: the head reported band=low -- a human decides'" }
+    {
+      "id": "class_short",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: SHORT (not more than 100 words)'"
+    },
+    {
+      "id": "class_medium",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: MEDIUM (more than 100, not more than 300 words)'"
+    },
+    {
+      "id": "class_long",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: LONG (more than 300 words)'"
+    },
+    {
+      "id": "escalate_gt300",
+      "kind": "shell",
+      "run": "echo 'ESCALATED at the >300 gates: the head reported band=low -- a human decides'"
+    },
+    {
+      "id": "escalate_gt100",
+      "kind": "shell",
+      "run": "echo 'ESCALATED at the >100 gates: the head reported band=low -- a human decides'"
+    }
   ]
 }

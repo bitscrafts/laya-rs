@@ -6,16 +6,22 @@
     {
       "id": "count_words",
       "kind": "shell",
-      "run": "wc -w _docs/02-guides/wc-example/long-note.txt",
+      "run": "wc -w < _docs/02-guides/wc-example/long-note.txt",
       "timeout": 30
     },
     {
       "id": "classify",
       "kind": "decide",
-      "depends_on": ["count_words"],
-      "prompt": "A shell command counted the words in a document. It printed: `412 _docs/02-guides/wc-example/long-note.txt`. The document therefore has 412 words. Classification rule: SHORT = fewer than 100 words; MEDIUM = 100 to 300 words; LONG = more than 300 words. The document has 412 words.",
+      "depends_on": [
+        "count_words"
+      ],
+      "prompt": "A shell command counted the words in a document. It printed: {{count_words}}",
       "question": "By the rule stated, is this document SHORT, MEDIUM or LONG?",
-      "options": ["SHORT", "MEDIUM", "LONG"],
+      "options": [
+        "SHORT",
+        "MEDIUM",
+        "LONG"
+      ],
       "ports": {
         "SHORT": "report_short",
         "MEDIUM": "report_medium",
@@ -23,9 +29,25 @@
         "_": "escalate_fallback"
       }
     },
-    { "id": "report_short", "kind": "shell", "run": "echo 'CLASSIFIED: SHORT'" },
-    { "id": "report_medium", "kind": "shell", "run": "echo 'CLASSIFIED: MEDIUM'" },
-    { "id": "report_long", "kind": "shell", "run": "echo 'CLASSIFIED: LONG'" },
-    { "id": "escalate_fallback", "kind": "shell", "run": "echo 'CLASSIFIED: no match -> human looks'" }
+    {
+      "id": "report_short",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: SHORT'"
+    },
+    {
+      "id": "report_medium",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: MEDIUM'"
+    },
+    {
+      "id": "report_long",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: LONG'"
+    },
+    {
+      "id": "escalate_fallback",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: no match -> human looks'"
+    }
   ]
 }
