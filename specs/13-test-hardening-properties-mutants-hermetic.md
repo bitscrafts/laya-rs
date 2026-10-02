@@ -84,6 +84,26 @@ asserts presence rather than value. Four changes, ordered by value per effort:
   `laya_mcp::handle` (`lib.rs:445`) over mutated JSON argument objects.
 - **R5: a wrongly-typed argument is named.** `dispatch_shim` reports
   *"argument `action` must be a string, got number"*. It does not default.
+  **Measured 2026-10-02, after spec 08 landed — the current behaviour is worse than this
+  requirement states, and in the exact way the surrounding code says it wants to avoid.**
+  `ask_file` declares `question` as a string in its advertised schema, and the server type-checks it
+  as a string. Sending an **object** (the natural guess for a typed question, and what a caller who
+  has only read `decide`'s shape would send) produces:
+
+  ```
+  ask_file {"path": "<valid path>", "question": {…object…}}
+    -> error -32602: "`ask_file` requires `path`"
+  ```
+
+  `path` **was** supplied. The refusal names the wrong argument, so a caller fixing what they are
+  told to fix gets the same error again. The comment above that check already states the hazard —
+  *"the error a caller sees would be about their PATH, sending them to fix the wrong argument"* —
+  and the current code does precisely that, because `missing_required` asks
+  `args.question.as_deref().is_none_or(str::is_empty)` and reports `path` first when the type is
+  wrong. A wrong type must be reported as a wrong type, naming the field and the type found; that is
+  what this requirement is for, and one criterion should be added:
+  `ask_file`/`ask_files` with a non-string `question` must name `question` and the type received.
+
 
 ### Non-Functional
 
