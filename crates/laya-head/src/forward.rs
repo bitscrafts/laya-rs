@@ -23,7 +23,9 @@
 //! * `src_key_padding_mask` is all-false when there is no padding, and the block adds the
 //!   `type_emb` broadcast **before** the blocks run, not after.
 
-use crate::math::{gelu, layer_norm, linear, linear_relu, softmax};
+use crate::math::{
+    gelu, layer_norm, linear, linear_relu, matmul_with_threads, softmax, thread_count,
+};
 use crate::safetensors::SafetensorsFile;
 use std::collections::BTreeMap;
 
@@ -220,6 +222,23 @@ impl Head {
         marker_pos: &[usize],
         marker_mask: &[bool],
     ) -> Result<(Vec<f32>, Vec<f32>), HeadError> {
+        self.forward_with_threads(hidden, qtype, marker_pos, marker_mask, thread_count())
+    }
+
+    /// [`Self::forward`] with an explicit matmul thread count. The result is bit-identical for
+    /// any `threads`; this exists so that property can be tested without mutating the process
+    /// environment (`set_var` is `unsafe`, which this crate forbids).
+    ///
+    /// # Errors
+    /// As [`Self::forward`].
+    pub fn forward_with_threads(
+        &self,
+        hidden: &[f32],
+        qtype: usize,
+        marker_pos: &[usize],
+        marker_mask: &[bool],
+        threads: usize,
+    ) -> Result<(Vec<f32>, Vec<f32>), HeadError> {
         let dim = self.d;
         if dim == 0 || !hidden.len().is_multiple_of(dim) {
             return Err(HeadError::BadHidden {
@@ -259,7 +278,7 @@ impl Head {
             .collect();
 
         for block in &self.layers {
-            x = self.block(block, &x, seq);
+            x = self.block(block, &x, seq, threads);
         }
 
         // Gather the marker rows: `marker_pos.clamp(min=0)` then index the sequence.
@@ -366,7 +385,7 @@ impl Head {
     }
 
     /// One pre-LN encoder block: `x + attn(ln1(x))` then `x + relu_mlp(ln2(x))`.
-    fn block(&self, weights: &Block, x: &[f32], seq: usize) -> Vec<f32> {
+    fn block(&self, weights: &Block, x: &[f32], seq: usize, threads: usize) -> Vec<f32> {
         let dim = self.d;
         // norm_first=true: normalise, compute the sublayer, add the residual.
         let mut normed = Vec::with_capacity(seq * dim);
@@ -378,7 +397,7 @@ impl Head {
                 LAYER_NORM_EPS,
             ));
         }
-        let attn = self.self_attention(weights, &normed, seq);
+        let attn = self.self_attention(weights, &normed, seq, threads);
         let mut out: Vec<f32> = x.iter().zip(&attn).map(|(&a, &c)| a + c).collect();
 
         let mut normed2 = Vec::with_capacity(seq * dim);
@@ -390,28 +409,18 @@ impl Head {
                 LAYER_NORM_EPS,
             ));
         }
-        for (row_index, row) in normed2.chunks_exact(dim).enumerate() {
-            let mid = linear(
-                &weights.linear1_weight,
-                &weights.linear1_bias,
-                row,
-                4 * dim,
-                dim,
-            );
-            // ReLU here: the reference leaves `activation` at torch's default.
-            let activated: Vec<f32> = mid.iter().map(|&v| v.max(0.0)).collect();
-            let back = linear(
-                &weights.linear2_weight,
-                &weights.linear2_bias,
-                &activated,
-                dim,
-                4 * dim,
-            );
-            // The residual add, by chunks rather than index arithmetic.
-            if let Some(dst) = out.chunks_exact_mut(dim).nth(row_index) {
-                for (slot, &v) in dst.iter_mut().zip(&back) {
-                    *slot += v;
-                }
+        let mut mid = matmul_with_threads(&weights.linear1_weight, &normed2, 4 * dim, dim, threads);
+        for row in mid.chunks_exact_mut(4 * dim) {
+            for (v, &bias) in row.iter_mut().zip(&weights.linear1_bias) {
+                // ReLU here: the reference leaves `activation` at torch's default.
+                *v = (*v + bias).max(0.0);
+            }
+        }
+        let back = matmul_with_threads(&weights.linear2_weight, &mid, dim, 4 * dim, threads);
+        // The residual add, with linear2's bias.
+        for (dst, src) in out.chunks_exact_mut(dim).zip(back.chunks_exact(dim)) {
+            for ((slot, &v), &bias) in dst.iter_mut().zip(src).zip(&weights.linear2_bias) {
+                *slot += v + bias;
             }
         }
         out
@@ -428,25 +437,69 @@ impl Head {
             .unwrap_or(&[])
     }
 
+    /// Attention output for one contiguous block of query rows (`block` is `[queries, d]`, the first
+    /// being query `first_query`), over every head.
+    fn attend_block(
+        rows: &[&[f32]],
+        block: &mut [f32],
+        first_query: usize,
+        n_heads: usize,
+        head_dim: usize,
+        scale: f32,
+    ) {
+        let dim = n_heads * head_dim;
+        let seq = rows.len();
+        for head in 0..n_heads {
+            let (q_at, k_at, v_at) = (head, n_heads + head, 2 * n_heads + head);
+            for (local, out_row) in block.chunks_exact_mut(dim).enumerate() {
+                let q_head = rows
+                    .get(first_query + local)
+                    .map_or(&[][..], |r| Self::head_slice(r, q_at, head_dim));
+                let mut scores = vec![0.0_f32; seq];
+                for (key, score) in scores.iter_mut().enumerate() {
+                    let mut acc = 0.0_f32;
+                    let k_head = rows
+                        .get(key)
+                        .map_or(&[][..], |r| Self::head_slice(r, k_at, head_dim));
+                    for (lhs, rhs) in q_head.iter().zip(k_head) {
+                        acc += lhs * rhs;
+                    }
+                    *score = acc * scale;
+                }
+                let probs = softmax(&scores);
+                // `head_dim` per head within a `dim`-wide row, so this range always exists;
+                // `get_mut` keeps the access TOTAL and skipping is the unreachable fallback.
+                let Some(dst) = out_row.get_mut(head * head_dim..(head + 1) * head_dim) else {
+                    continue;
+                };
+                for (key, &prob) in probs.iter().enumerate() {
+                    if prob == 0.0 {
+                        continue;
+                    }
+                    let v_head = rows
+                        .get(key)
+                        .map_or(&[][..], |r| Self::head_slice(r, v_at, head_dim));
+                    for (slot, &v) in dst.iter_mut().zip(v_head) {
+                        *slot += prob * v;
+                    }
+                }
+            }
+        }
+    }
+
     /// Bidirectional multi-head self-attention with the fused `in_proj`.
-    fn self_attention(&self, weights: &Block, x: &[f32], seq: usize) -> Vec<f32> {
+    fn self_attention(&self, weights: &Block, x: &[f32], seq: usize, threads: usize) -> Vec<f32> {
         let dim = self.d;
         let n_heads = self.nhead;
         let head_dim = dim / n_heads;
 
         // q, k, v fused: in_proj_weight is [3d, d], rows 0..d = q, d..2d = k, 2d..3d = v.
-        let qkv: Vec<f32> = x
-            .chunks_exact(dim)
-            .flat_map(|row| {
-                linear(
-                    &weights.in_proj_weight,
-                    &weights.in_proj_bias,
-                    row,
-                    3 * dim,
-                    dim,
-                )
-            })
-            .collect();
+        let mut qkv = matmul_with_threads(&weights.in_proj_weight, x, 3 * dim, dim, threads);
+        for row in qkv.chunks_exact_mut(3 * dim) {
+            for (v, &bias) in row.iter_mut().zip(&weights.in_proj_bias) {
+                *v += bias;
+            }
+        }
 
         // No causal mask: an encoder attends bidirectionally over the whole sequence.
         // A head size, bounded by the model dimension; the conversion is exact.
@@ -472,56 +525,23 @@ impl Head {
         // offsets are computed once per head instead of sliced per element. (The offsets were
         // also the site of an off-by-`n_heads` that the differential test caught on its first case.)
         let rows: Vec<&[f32]> = qkv.chunks_exact(3 * dim).collect();
-        for head in 0..n_heads {
-            let (q_at, k_at, v_at) = (head, n_heads + head, 2 * n_heads + head);
-            for (query, row) in rows.iter().enumerate() {
-                let q_head = Self::head_slice(row, q_at, head_dim);
-                let mut scores = vec![0.0_f32; seq];
-                for (key, score) in scores.iter_mut().enumerate() {
-                    let mut acc = 0.0_f32;
-                    let k_head = rows
-                        .get(key)
-                        .map_or(&[][..], |r| Self::head_slice(r, k_at, head_dim));
-                    for (lhs, rhs) in q_head.iter().zip(k_head) {
-                        acc += lhs * rhs;
-                    }
-                    *score = acc * scale;
-                }
-                let probs = softmax(&scores);
-                // `attended` is `seq * dim` with `head_dim` per head, so this range always exists;
-                // `get_mut` keeps the access TOTAL rather than relying on that arithmetic holding.
-                // The early return is unreachable by construction (the buffer is sized `seq * dim`
-                // and both indices are bounded by `seq`), and returning what has been computed beats
-                // panicking in a function whose whole job is to be checkable against a reference.
-                let Some(dst) = attended
-                    .get_mut(query * dim + head * head_dim..)
-                    .and_then(|rest| rest.get_mut(..head_dim))
-                else {
-                    return attended;
-                };
-                for (key, &prob) in probs.iter().enumerate() {
-                    if prob == 0.0 {
-                        continue;
-                    }
-                    let v_head = rows
-                        .get(key)
-                        .map_or(&[][..], |r| Self::head_slice(r, v_at, head_dim));
-                    for (slot, &v) in dst.iter_mut().zip(v_head) {
-                        *slot += prob * v;
-                    }
-                }
+        // Parallel over contiguous blocks of query rows: each query's output is computed by one
+        // thread in a fixed order, so the result does not depend on the thread count.
+        let queries_per = seq.div_ceil(threads.clamp(1, seq));
+        std::thread::scope(|scope| {
+            for (n, block) in attended.chunks_mut(queries_per * dim).enumerate() {
+                let rows = &rows;
+                scope.spawn(move || {
+                    Self::attend_block(rows, block, n * queries_per, n_heads, head_dim, scale);
+                });
             }
-        }
-        // out_proj over each row
-        let mut out = Vec::with_capacity(seq * dim);
-        for row in attended.chunks_exact(dim) {
-            out.extend(linear(
-                &weights.out_proj_weight,
-                &weights.out_proj_bias,
-                row,
-                dim,
-                dim,
-            ));
+        });
+        // out_proj over every row at once
+        let mut out = matmul_with_threads(&weights.out_proj_weight, &attended, dim, dim, threads);
+        for row in out.chunks_exact_mut(dim) {
+            for (v, &bias) in row.iter_mut().zip(&weights.out_proj_bias) {
+                *v += bias;
+            }
         }
         out
     }
@@ -564,4 +584,88 @@ pub fn expected_tensor_names(d: usize, ff: usize) -> BTreeMap<String, usize> {
     m.insert("scorer.3.weight".into(), d);
     m.insert("type_emb.weight".into(), 3 * d);
     m
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+mod tests {
+    use super::*;
+
+    fn lcg(n: usize, seed: u32, scale: f32) -> Vec<f32> {
+        let mut s = seed;
+        (0..n)
+            .map(|_| {
+                s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (f32::from((s >> 16) as u16) / 32768.0 - 1.0) * scale
+            })
+            .collect()
+    }
+
+    /// A small synthetic head (d = 128, so two attention heads), so the test needs no checkpoint.
+    fn synthetic_head() -> Head {
+        let d = 128;
+        let ff = 4 * d;
+        let block = |seed: u32| Block {
+            in_proj_weight: lcg(3 * d * d, seed, 0.1),
+            in_proj_bias: lcg(3 * d, seed + 1, 0.1),
+            out_proj_weight: lcg(d * d, seed + 2, 0.1),
+            out_proj_bias: lcg(d, seed + 3, 0.1),
+            norm1_weight: vec![1.0; d],
+            norm1_bias: vec![0.0; d],
+            norm2_weight: vec![1.0; d],
+            norm2_bias: vec![0.0; d],
+            linear1_weight: lcg(ff * d, seed + 4, 0.1),
+            linear1_bias: lcg(ff, seed + 5, 0.1),
+            linear2_weight: lcg(d * ff, seed + 6, 0.1),
+            linear2_bias: lcg(d, seed + 7, 0.1),
+        };
+        Head {
+            d,
+            nhead: crate::safetensors::HeadConfig::nhead(d),
+            layers: vec![block(10), block(20)],
+            type_emb: lcg(3 * d, 30, 0.1),
+            scorer: Scorer {
+                norm_weight: vec![1.0; d],
+                norm_bias: vec![0.0; d],
+                lin_weight: lcg(d * d, 31, 0.1),
+                lin_bias: lcg(d, 32, 0.1),
+                out_weight: lcg(d, 33, 0.1),
+                out_bias: lcg(1, 34, 0.1),
+            },
+            action: ActHead {
+                lin_weight: lcg(256 * (d + 4), 35, 0.1),
+                lin_bias: lcg(256, 36, 0.1),
+                out_weight: lcg(2 * 256, 37, 0.1),
+                out_bias: lcg(2, 38, 0.1),
+            },
+        }
+    }
+
+    /// N2, through the entry production uses (`forward` delegates to `forward_with_threads`).
+    /// seq = 21 is not a multiple of the tile, and 8 threads do not divide the output rows evenly.
+    #[test]
+    fn forward_is_bitwise_identical_across_thread_counts() {
+        let head = synthetic_head();
+        let seq = 21;
+        let hidden = lcg(seq * head.d, 99, 1.0);
+        let (pos, mask) = ([3_usize, 20], [true, true]);
+        let (l1, a1) = head
+            .forward_with_threads(&hidden, 1, &pos, &mask, 1)
+            .unwrap();
+        let (l8, a8) = head
+            .forward_with_threads(&hidden, 1, &pos, &mask, 8)
+            .unwrap();
+        let (ld, ad) = head.forward(&hidden, 1, &pos, &mask).unwrap();
+        assert!(l1.iter().all(|v| v.is_finite()) && l1.iter().any(|&v| v != 0.0));
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&l1), bits(&l8));
+        assert_eq!(bits(&a1), bits(&a8));
+        assert_eq!(bits(&l1), bits(&ld));
+        assert_eq!(bits(&a1), bits(&ad));
+    }
 }

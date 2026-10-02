@@ -217,6 +217,128 @@ pub fn matvec(w: &[f32], x: &[f32], out_dim: usize, in_dim: usize) -> Vec<f32> {
     out
 }
 
+/// Tokens per tile in [`matmul`]: each weight row is streamed once per tile, not once per token.
+const TILE: usize = 8;
+
+/// Worker threads for [`matmul`]: `available_parallelism`, capped by `LAYA_HEAD_THREADS`.
+///
+/// An unset, unparsable or zero cap is ignored (it never means "zero threads").
+#[must_use]
+pub fn thread_count() -> usize {
+    let avail = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    match std::env::var("LAYA_HEAD_THREADS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        Some(cap) if cap >= 1 => avail.min(cap),
+        _ => avail,
+    }
+}
+
+/// Batched matrix product over `seq` token rows: `out[t*out_dim + i] = Σ_j w[i*in_dim + j] * xs[t*in_dim + j]`.
+///
+/// `w` is `[out_dim, in_dim]` and `xs` is `[seq, in_dim]`, both row-major; the result is
+/// `[seq, out_dim]` (no bias). Uses [`thread_count`] threads.
+#[must_use]
+pub fn matmul(w: &[f32], xs: &[f32], out_dim: usize, in_dim: usize) -> Vec<f32> {
+    matmul_with_threads(w, xs, out_dim, in_dim, thread_count())
+}
+
+/// [`matmul`] with an explicit thread count (clamped to `1..=out_dim`).
+///
+/// Parallel over contiguous chunks of **output rows**: every output element is one complete dot
+/// product, computed by exactly one thread with a fixed index-order accumulation, so the result
+/// is bit-identical for any `threads`. Tokens are tiled by [`TILE`] so each weight row is reused
+/// across the tile, and the tile's accumulators are independent (one per token), which gives the
+/// core instruction-level parallelism the single serial accumulator of [`matvec`] cannot.
+#[must_use]
+pub fn matmul_with_threads(
+    w: &[f32],
+    xs: &[f32],
+    out_dim: usize,
+    in_dim: usize,
+    threads: usize,
+) -> Vec<f32> {
+    if out_dim == 0 || in_dim == 0 {
+        return Vec::new();
+    }
+    debug_assert_eq!(w.len(), out_dim * in_dim);
+    debug_assert_eq!(xs.len() % in_dim, 0);
+    let seq = xs.len() / in_dim;
+    let mut out = vec![0.0_f32; seq * out_dim];
+    if seq == 0 {
+        return out;
+    }
+    let threads = threads.clamp(1, out_dim);
+    let rows_per = out_dim.div_ceil(threads);
+    // Each worker returns its block as `[rows_in_chunk, seq]` (weight-row major) and the blocks are
+    // scattered into `[seq, out_dim]` afterwards: disjoint writes, no shared mutable state.
+    let blocks: Vec<(usize, Vec<f32>)> = std::thread::scope(|scope| {
+        // Every worker is spawned before any is joined, so the collect is what makes them
+        // concurrent; a lazy iterator here would run them one after another.
+        #[allow(clippy::needless_collect)]
+        let handles: Vec<_> = w
+            .chunks(rows_per * in_dim)
+            .enumerate()
+            .map(|(n, w_chunk)| {
+                let first_row = n * rows_per;
+                let worker = scope.spawn(move || matmul_rows(w_chunk, xs, in_dim, seq));
+                (first_row, w_chunk, worker)
+            })
+            .collect();
+        handles
+            .into_iter()
+            // A worker that panicked is recomputed here rather than leaving zeros in the result.
+            .map(|(first_row, w_chunk, worker)| {
+                let block = worker
+                    .join()
+                    .unwrap_or_else(|_| matmul_rows(w_chunk, xs, in_dim, seq));
+                (first_row, block)
+            })
+            .collect()
+    });
+    for (first_row, block) in &blocks {
+        for (r, per_token) in block.chunks_exact(seq).enumerate() {
+            for (t, &v) in per_token.iter().enumerate() {
+                if let Some(slot) = out.get_mut(t * out_dim + first_row + r) {
+                    *slot = v;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The serial kernel for one contiguous block of weight rows: `[rows, seq]` weight-row major.
+fn matmul_rows(w_chunk: &[f32], xs: &[f32], in_dim: usize, seq: usize) -> Vec<f32> {
+    let rows = w_chunk.len() / in_dim;
+    let mut block = vec![0.0_f32; rows * seq];
+    // A tail tile shorter than TILE is padded with a zero row so one code path handles every
+    // `seq`; the padded lanes are computed and discarded.
+    let zeros = vec![0.0_f32; in_dim];
+    for (w_row, dst) in w_chunk
+        .chunks_exact(in_dim)
+        .zip(block.chunks_exact_mut(seq))
+    {
+        for (tile, dst_tile) in xs.chunks(TILE * in_dim).zip(dst.chunks_mut(TILE)) {
+            let mut lanes: [&[f32]; TILE] = [&zeros; TILE];
+            for (lane, x) in lanes.iter_mut().zip(tile.chunks_exact(in_dim)) {
+                *lane = x;
+            }
+            let mut acc = [0.0_f32; TILE];
+            for (j, &wv) in w_row.iter().enumerate() {
+                for (a, lane) in acc.iter_mut().zip(&lanes) {
+                    *a += wv * lane.get(j).copied().unwrap_or(0.0);
+                }
+            }
+            for (d, a) in dst_tile.iter_mut().zip(acc) {
+                *d = a;
+            }
+        }
+    }
+    block
+}
+
 /// `y = W·x + b` — the `nn.Linear` form.
 #[must_use]
 pub fn linear(w: &[f32], b: &[f32], x: &[f32], out_dim: usize, in_dim: usize) -> Vec<f32> {
@@ -391,6 +513,67 @@ mod tests {
         // and the identity case
         let id = [1.0_f32, 0.0, 0.0, 1.0];
         assert_eq!(matvec(&id, &[7.0, 9.0], 2, 2), vec![7.0, 9.0]);
+    }
+
+    /// Deterministic pseudo-random values in [-1, 1).
+    fn lcg(n: usize, seed: u32) -> Vec<f32> {
+        let mut s = seed;
+        (0..n)
+            .map(|_| {
+                s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                f32::from((s >> 16) as u16) / 32768.0 - 1.0
+            })
+            .collect()
+    }
+
+    fn max_diff_vs_matvec(seq: usize, out_dim: usize, in_dim: usize, threads: usize) -> f32 {
+        let w = lcg(out_dim * in_dim, 1);
+        let xs = lcg(seq * in_dim, 2);
+        let got = matmul_with_threads(&w, &xs, out_dim, in_dim, threads);
+        assert_eq!(got.len(), seq * out_dim);
+        let mut worst = 0.0_f32;
+        for (t, x) in xs.chunks_exact(in_dim).enumerate() {
+            let want = matvec(&w, x, out_dim, in_dim);
+            for (i, wv) in want.iter().enumerate() {
+                worst = worst.max((got[t * out_dim + i] - wv).abs());
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn matmul_equals_matvec_per_row_within_1e_5() {
+        assert!(max_diff_vs_matvec(13, 64, 48, 1) <= 1e-5);
+        assert!(max_diff_vs_matvec(13, 64, 48, 4) <= 1e-5);
+    }
+
+    /// Control for the tile: a tail shorter than TILE, and exactly-TILE, must still compute.
+    #[test]
+    fn matmul_handles_a_tail_shorter_than_the_tile() {
+        for seq in [1, 7, 8, 9, 16, 17] {
+            assert!(max_diff_vs_matvec(seq, 64, 48, 1) <= 1e-5, "seq {seq}");
+        }
+    }
+
+    /// Control for the thread split: more threads than rows, one row, and an uneven split must not
+    /// drop or duplicate rows, and every thread count must give identical bits.
+    #[test]
+    fn matmul_thread_split_is_total_and_bitwise_stable() {
+        for out_dim in [1, 3, 7, 64] {
+            let w = lcg(out_dim * 5, 3);
+            let xs = lcg(9 * 5, 4);
+            let one = matmul_with_threads(&w, &xs, out_dim, 5, 1);
+            assert_eq!(one.len(), 9 * out_dim);
+            for threads in [2, 3, 8, 100] {
+                let many = matmul_with_threads(&w, &xs, out_dim, 5, threads);
+                let same = one
+                    .iter()
+                    .zip(&many)
+                    .all(|(a, b)| a.to_bits() == b.to_bits());
+                assert!(same, "out_dim {out_dim} threads {threads}");
+            }
+        }
+        assert!(max_diff_vs_matvec(5, 1, 48, 8) <= 1e-5);
     }
 
     #[test]
