@@ -445,3 +445,48 @@ sees calls the *model* makes through the tool surface. The hook calls the gate a
 which never appears there — measured: **3 MCP calls against 30 gate rows**. A review reporting
 only the MCP number would say "laya is unused" while the hook was gating every state-changing call
 on the box. Both counters are therefore reported.
+
+## The gate blocked a live agent, and the cause was the deploy (2026-10-02)
+
+An agent was asked to run three commands. Its FIRST call at **03:41:24** was refused:
+
+```
+{"error": "laya could not be reached, so this state-changing tool call is refused. ..."}
+```
+
+The retry at **03:44:43** succeeded. Nothing was wrong with laya: the refusal fell inside the
+two-minute window in which the `laya-gate` binary was being replaced on disk (`cp` to a temp name,
+`mv` into place) while a live agent was calling it. Measured afterwards: the built and deployed
+binaries hash identically (`cd8c2665…`), and no block has been logged since.
+
+**The gate behaved exactly as designed.** It refused rather than letting an unjudged action
+through, which is the whole point of `fail_closed` — and the agent was told how to check
+(`laya doctor` said READY, the retry worked). A transient deploy window is indistinguishable from a
+real outage *from inside the hook*, and refusing is the correct choice for both.
+
+**What this cost, and the lesson.** A deploy takes seconds; an agent blocked by one loses its turn.
+Worth knowing before replacing a binary that sits on the path of every state-changing tool call:
+
+```
+# before replacing, check for live callers
+pgrep -x laya-gate    # or: lsof ~/.local/bin/laya-gate
+```
+
+`mv` into place is still the right mechanic — it leaves running processes on the old inode rather
+than failing them mid-call, which is why the block was a clean refusal and not a crash. But the
+*new* invocations between `cp` and `mv` see a missing file, and that window is what blocked the
+agent.
+
+### The log is append-only evidence, and this session truncated it
+
+Mid-run I cleared `laya.log` by hand to get a clean reading of the next exercise. That destroyed
+the record of the block above — the one block the log had ever held, and exactly the entry an
+incident review would ask for. The hook now **rolls the file aside** at a size cap
+(`LAYA_GATE_LOG_MAX`, default 10 MB) into `laya.log.old-<timestamp>` instead of ever truncating it,
+so every past verdict stays readable. Verified with a roll at a 1-byte cap: the old content
+survived in the rolled file and the new line went to a fresh log.
+
+**A note on concurrency, measured:** the sidecar is strictly serial, so eight concurrent gate calls
+queue linearly — 0.17 s, 0.31, 0.48, 0.64, 0.81, 0.98, 1.15, 1.32 s — and all eight were answered
+`allow`. Load does not make the gate fail closed; the queue simply lengthens, and the hook's 10 s
+timeout is far above what this work generates.
