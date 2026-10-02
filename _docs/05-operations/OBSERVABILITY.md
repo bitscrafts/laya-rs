@@ -192,3 +192,90 @@ step, so nothing an operator asks is answered until someone compacts by hand.* T
 spec 11 adds — per-tool blocks, run/node ids, wall-comparable ordering — is what makes the read path
 worth running; the missing compaction step is the operational half, and it is a one-line unit or a
 documented ritual, not a code change.
+
+## Working, measured on the live deployment (2026-10-02, commit b59b88d)
+
+The two states that used to be indistinguishable — ledger OFF vs ledger nobody has INGESTED — are
+now separable, because a read ingests first and a live check exercises the deployed binary.
+
+```
+uv run scripts/check-observability.py     -> exit 0, ten passes against the running install
+```
+
+```
+=== deployed laya observability ===
+  PASS  tools_exposed                7 tools
+  PASS  gate_answers                 decision='allow'
+  PASS  gate_records_a_row           segments 0->1, rows 0->1
+  PASS  row_carries_run_id           run_id='obs-check'
+  PASS  row_carries_wall_clock       wall_nanos=1790910327198556023
+  PASS  row_carries_tool             tool='gate'
+  PASS  command_text_absent          only a hash of the action, never the action
+  PASS  stats_reads_what_is_on_disk  9 decision(s)
+  PASS  stats_has_per_tool_block     the per-tool breakdown is printed
+  PASS  stats_shows_gate_verdicts    the gate's verdict counts appear
+VERDICT: the ledger is recording AND readable
+```
+
+### What an operator now sees, and what it cost
+
+```
+$ laya ledger stats --dir /var/lib/laya-ledger
+decisions:      9
+outcomes:       0
+saturated:      0
+near ties:      1
+band low        1
+band mid        8
+latency p50:    226 ms
+latency p95:    353 ms
+latency max:    353 ms
+
+per tool:
+  decide           7     p50 226 ms  p95 353 ms  max 353 ms
+  gate             2     p50 225 ms  p95 229 ms  max 229 ms
+    allow        1
+    yes          1
+    executed     0
+
+laya: ingested 1 row(s) from 1 segment(s) before reading
+```
+
+`gate p50 225 ms` is the real cost of a gate call, measured; `decide p50 226 ms` likewise. Zero
+model tokens are spent producing those numbers.
+
+**The `yes: 1` is deliberate and is not a bug.** It is a row written *before* the fix, when the
+gate recorded the model's own yes/no label instead of the gate's decision. Historical rows are not
+rewritten — the ledger is append-only evidence, and a metric that silently rewrote its own past
+would be worth less than one that shows the change. The new row reads `allow`.
+
+### The four defects this closed, all found by looking rather than trusting
+
+1. **Only `decide` wrote a row.** `gate`, `ask`, `ask_file`, `ask_files` and `should_compact`
+   recorded nothing, so nothing about the tools an agent actually calls was answerable.
+2. **A refusal was invisible.** The refusal paths return early, so what the gate *denied* — the
+   row an incident review wants first — left no trace at all.
+3. **Ordering was not comparable across processes.** See the `wall_nanos` note in
+   `DECISION-LEDGER.md`; rows now sort by epoch time, not by a per-process counter.
+4. **A missing confidence read as `0.0`** — indistinguishable from maximally unsure, and fatal to
+   any calibration built on the column.
+
+### Two checks that passed while the thing they named was absent
+
+Both were caught by running the live check and **reading its output** rather than its exit code,
+and both are worth stating because they are the failure mode this project keeps paying for:
+
+- A check named `stats_has_per_tool_rows` asserted `"p50" in stats` — a substring the *blended*
+  latency lines already contain. It passed while the CLI printed no per-tool block at all. It now
+  asserts `"per tool:"`, the block itself.
+- The gate's row recorded an **empty label** on the fail-closed path, because the verdict there
+  arrives as `decision` and the recorder read only `label`. A row existed and said nothing.
+
+### What is still not implemented
+
+The seven questions at the top of this document are now answerable *except* two: **"what did the
+gate allow in the last hour"** has no time-windowed query (`tail` is newest-first, `stats` is
+all-time), and **"which head produced this decision"** is unanswerable because `head_sha256` and
+`backbone_sha256` are always `None` and no requirement fills them. Both are recorded in
+`specs/11` as open, with criteria. `run_id` threading from the graph runner is also still open —
+the field exists and the tools accept it, but nothing in `laya-graph` supplies it yet.
