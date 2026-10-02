@@ -170,3 +170,57 @@ cannot be offline.
 | `crates/laya-cli/src/main.rs` | `stats` per tool; `doctor` ledger line | R4, R7 |
 | `crates/laya-graph/tests/acceptance.rs` | the join test | R1 |
 | `_docs/05-operations/DECISION-LEDGER.md` | schema additions | R2 |
+
+---
+
+## Independent review of THIS spec (GLM-5.3, 2026-10-02) — verified additions
+
+A second reviewer was given this spec and asked whether it is complete, requirement by requirement.
+It found four things the first review did not. Each claim below was **checked by the orchestrator
+against the tree** before being written here, and is marked with what checking found.
+
+**1. `laya ledger stats` takes the exclusive write lock to print.** `[measured — confirmed]`
+`crates/laya-cli/src/main.rs:273` and `:308` both call `laya_store::Ledger::open_writer(store)` to
+read. Under the single-writer model (B4) that means an operator running `stats` while a `compact`
+runs gets a lock error rather than numbers. A read path should open read-only. **One line each, and
+it is not in R7.** Worth folding into R7.
+
+**2. The ledger doc promises two fields the struct does not have.** `[measured — confirmed]`
+`_docs/05-operations/DECISION-LEDGER.md:93` lists `` `p` / `score` `` — "for a `noul` / `score`" —
+and `DecisionRow` (`crates/laya-store/src/lib.rs:93-144`) has **neither**; `question_type` and
+`label` are what actually carry that information. So the doc describes a schema that was never
+built, and a reader auditing the ledger will look for columns that do not exist. Either R2 adds
+them or the doc is annotated — but the drift must not survive this spec, since a ledger with no
+`p` makes a `noul`'s raw probability unrecoverable from the row.
+
+**3. R4's `doctor` line is weaker than it reads.** `[measured — confirmed]`
+`laya doctor` runs as its own process, so it can read *its own* environment, not the running
+server's. It therefore cannot answer "is the server's ledger on?" — the question R4 exists to make
+visible. What it *can* check is the shared, known directory: whether `LAYA_LEDGER_DIR` resolves to
+a path that exists and holds segments. **R4's criterion should assert the weaker, true claim**
+(directory state) rather than implying doctor can see the server. The startup event (also R4) is
+what actually reports the server's own view, so the two are complementary and the spec should say so.
+
+**4. "What did the gate allow in the last hour?" needs a window, and R7 has none.** `[measured —
+confirmed by inspection]` `tail` returns newest-first over the whole store and `stats` is
+all-time and per-tool only. There is no `--since`. So after this spec lands, the seven questions
+include one that is still not answerable. Either R7 gains a window or the claim is narrowed in R2's
+wording. (The gate rows themselves become possible once R2 records them; that part is right.)
+
+**One more, from the same reviewer, which the first review raised and spec 11 does not close:**
+`head_sha256`/`backbone_sha256` are always `None`, and **no requirement in R1–R7 fills them.** So
+"which head produced this decision" is unanswerable after this spec too. Either add a requirement
+or state explicitly that it is out of scope and why — leaving it silently absent is how it stays
+absent.
+
+**What the reviewer confirmed as right:** the `Judge` seam is the correct place to make these
+judgements testable offline; `DecisionSink` is worth introducing precisely because it turns "the
+ledger is off" from a silent `?` into an explicit state that can be announced — which is the
+deployment failure this whole spec responds to; and R1/R2 are the two highest-value requirements,
+in that order.
+
+**Evidence and provenance.** The reviewer was killed by a stream timeout while writing its report,
+so no report file exists; its reasoning was recovered from the run log to
+`/projects/_tmp/glm-observability/REPORT.RECOVERED.md` and is **raw material, not a verified
+review**. The four claims above were independently confirmed against the tree, which is why they
+are recorded here; anything else in that log is unreviewed and should be treated as a lead.
