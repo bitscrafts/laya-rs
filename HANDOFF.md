@@ -1,19 +1,54 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (19) · **Status**: GREEN — **intervention closed.** Specs 16–24 complete and
-deployed; the graph surface is repaired, two worked examples ship with it, and the remaining limits are
-measured and written down rather than left to be discovered.
+**Date**: 2026-10-02 (20) · **Status**: GREEN — **the graph can now follow and decide on specs.**
+Spec 25 landed the deterministic branch; the intervention's blocker is closed.
 
 ```
-HEAD 1cb07ad · tree clean · 0 deleted            deployed == tree (laya, laya-mcp, laya-gate)
-cargo test --workspace      612 passed · 0 failed
+HEAD ea01681 · tree clean · 0 deleted          deployed == tree (laya 63c69af7, laya-mcp, laya-gate)
+cargo test --workspace      625 passed · 0 failed
 cargo clippy --all-targets  0        cargo fmt --all --check  clean
-check-doc-citations.py      71 docs, every citation resolves
+check-doc-citations.py      73 docs, every citation resolves
 regen-index.py              124 links, 4 anchored, 0 broken
-laya-gate                   firing live, 649 verdicts logged
+verify the DEPLOYED path:   bash scripts/smoke-deployed.sh   (specs 16, 18, 20, 21, 22, 25)
 ```
 
-Verify the deployed path: `bash scripts/smoke-deployed.sh` (specs 16, 18, 20, 21, 22).
+## The primitive that was missing, now present — `kind: "check"`
+
+A graph could previously branch **only** through a `decide`, which is a **model call**, so every branch
+cost an inference and its answer was a label the model chose rather than a comparison it computed. The
+format had **no comparator of any kind** — and the model was measurably wrong at exactly the boundaries a
+spec decision needs.
+
+**`check` runs a command and the exit status selects the port. No model in the loop.**
+
+```json
+{"id": "closed", "kind": "check",
+ "run": "[ \"$(…count unfinished…)\" = \"0\" ]",
+ "ports": {"pass": "release", "fail": "work_left", "_": "escalate"}}
+```
+
+exit 0 → `pass` · non-zero → `fail` · absent key → `_`
+
+- **A non-zero exit is data, not an error** — it neither fails the node nor stops the run (own control).
+- **A command that cannot be executed FAILS the node**, it does not answer `fail`: *"did not run"* and
+  *"said no"* are different answers.
+- `run` required · `_` fallback required · `allow_failure` **refused** (a check's failure is its answer).
+- **No model call is PROVEN by suspending the sidecar** and running a flow to completion.
+
+### The four fixtures that failed before it, now exact
+
+| fixture | before | now |
+|---|---|---|
+| one unfinished criterion in the spec set | `yes` @ band low 0.1115 → **released with work open** | **fail port** |
+| 300 vs 301 words | fuzzy at both boundaries | **exact** |
+| `guess == secret` | answered "higher" → **game unwinnable** | **pass — a win is expressible** |
+| a command exiting 7 | model said the build succeeded | **fail port, run continued** |
+
+## Use it this way
+
+**Comparison → `check`. Judgement → `decide`.** A `decide` must never be used where a `check` can answer:
+the model tracks a two-option numeric comparison badly at the boundary and a three-way numeric judgement
+worse. Reference: `_docs/03-reference/GRAPH-DETERMINISM.md`.
 
 ## The capability boundary, measured — read this before designing a graph
 

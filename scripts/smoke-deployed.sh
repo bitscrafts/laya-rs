@@ -109,6 +109,24 @@ echo "  and which server it resolved:"
 /root/.local/bin/laya doctor 2>&1 | grep -i 'laya-mcp' | sed 's/^/    /'
 
 echo
+echo "################ 3d. spec 25 through the INSTALLED binary: decide from an exit status ################"
+cat > /tmp/smoke-check.flow.json <<'J'
+{"flow":"smoke-check","version":1,"nodes":[
+ {"id":"count","kind":"check","run":"[ \"$(grep -h -c '^- \\[ \\]' specs/*.md | awk '{s+=$1} END{print s+0}')\" = \"0\" ]","ports":{"pass":"release","fail":"work_left","_":"esc"}},
+ {"id":"release","kind":"shell","run":"echo 'RELEASED: nothing unfinished'"},
+ {"id":"work_left","kind":"shell","run":"echo 'BLOCKED: criteria still open'"},
+ {"id":"esc","kind":"shell","run":"echo 'ESCALATED'"}]}
+J
+/root/.local/bin/laya graph run /tmp/smoke-check.flow.json 2>/dev/null | python3 -c "
+import sys, json
+d = json.loads(next(l for l in sys.stdin if l.startswith('{')))
+c = [r for r in d['records'] if r['node_id'] == 'count'][0]
+print('    check exit_code=%s (non-zero is an ANSWER, not a failure: success=%s)' % (c.get('exit_code'), c['success']))
+print('    took:', [r['node_id'] for r in d['records'] if r['node_id'] != 'count'])
+print('    stopped_early:', d.get('stopped_early'))
+"
+
+echo
 echo "################ 4. the gate still answers ################"
 laya-gate "git status" >/dev/null 2>&1; echo "  git status        -> exit $?"
 laya-gate "rm -rf /"   >/dev/null 2>&1; echo "  rm -rf /          -> exit $?  (1 = ask, correct)"
