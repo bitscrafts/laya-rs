@@ -32,12 +32,14 @@ in exactly one place; this index points at it, never restates it.
 
 ### 03-reference
 - [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md) — A SUGGESTED (not decided) format for flows — nodes, kinds, composition — and the four-stage translation to a graph, with the invariants, the renderer's round-trip test, and a list of the weakest points to attack first.
+- [Graph features — composability, branches, loops: what is implemented](03-reference/GRAPH-FEATURES.md) — Measured by running, not reading. Branches: yes, working. Composability: implemented in the library with tests, UNREACHABLE from the CLI (no library flag, and the error message blames the wrong field). Loops: no, refused by design with the cycle path named.
 - [Reference](03-reference/README.md) — Technical reference: the contract and the wire shapes.
 
 ### 04-development
 - [Design amendments — what the adversarial review changed](04-development/DESIGN-AMENDMENTS-2026-09-29.md) — MANDATORY corrections to the design, with the five blockers and their resolutions.
 - [P1 status — and the measurements that shaped it](04-development/P1-STATUS.md) — What was measured before designing (Laya concurrency, the redb collision), and what P1 delivered.
 - [The ten levels, mapped to our tools](04-development/TEN-LEVELS-MAPPING.md) — IndyDevDan's ten levels, and the documented failures we inherit as requirements.
+- [Opus review — running generic graphs through laya](04-development/OPUS-REVIEW-GENERIC-GRAPHS.md) — An independent review that re-ran every claim with laya graph run. Found that routing is not a function of the graph (node ARRAY ORDER decides execution), that the near-tie target runs unconditionally, and that 'no data flow at all' was wrong: data CAN reach the head, it cannot reach an edge. Five contradictions, three re-verified here.
 - [Analysis — why a generic graph cannot run today](04-development/GENERIC-GRAPHS-ANALYSIS.md) — The engine has no data flow at all: every decide input is a literal compiled into the flow file, and all four mechanisms that could carry run-time data are absent. The two-phase execution model, what a flow can actually express, and a ranked set of fixes.
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md) — depends_on does not order a decide before its shell (measured: the shell ran LAST); escalate_on_near_tie is validated but inert; and a decide's question type is hardcoded to choice, so a flow can never ask the noul the head answers best.
 - [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md) — A 3-option choice does not track a number while a noul threshold does (15/15, incl. the boundary); and a bare noul on a subjective question returns a confident CONSTANT (no at 1.0 for both positive and negative text). Why the correct handling is bounding one signal.

@@ -10,6 +10,17 @@ All figures come from live `decide` calls against the shipped binary. Re-run wit
 
 ---
 
+> **SUPERSEDED IN PART — 2026-10-02.** An independent review re-ran this grid **through
+> `laya graph run`** and found the opposite: a 2-option `choice` scores **15/15 under the v1
+> phrasing** ("The word count is N."), and the boundary failures at 301/101 came from **the v14c
+> phrasing** chosen later in the worked example, not from the shape. So the sentence *"the engine's
+> only reachable question form is the weaker one"* in `OPUS`-reviewed material is **withdrawn**.
+> What survives: `noul`'s advantage is **confidence** (0.875–1.0 vs 0.35–0.54 at boundaries), which is
+> what makes band-gating usable — it does not win on label correctness. And `noul` only holds that
+> advantage through `decide`'s state envelope: the same `noul` through `ask` with file state was
+> 13/15 and got `5 > 300` wrong at confidence 0.84. Any claim that "noul tracks the count" must name
+> the path that builds the state. See `OPUS-REVIEW-GENERIC-GRAPHS.md` §5.
+
 ## 1. A 3-option `choice` does not track a number. A `noul` threshold does.
 
 The failing shape, and the fix, measured on the same head:

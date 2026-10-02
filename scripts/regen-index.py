@@ -30,6 +30,12 @@ DOCS = {
         "four-stage translation to a graph, with the invariants, the renderer's round-trip "
         "test, and a list of the weakest points to attack first."
     ),
+    "03-reference/GRAPH-FEATURES.md": (
+        "Graph features — composability, branches, loops: what is implemented",
+        "Measured by running, not reading. Branches: yes, working. Composability: implemented in the "
+        "library with tests, UNREACHABLE from the CLI (no library flag, and the error message blames "
+        "the wrong field). Loops: no, refused by design with the cycle path named."
+    ),
     "03-reference/README.md": ("Reference", "Technical reference: the contract and the wire shapes."),
     "04-development/DESIGN-AMENDMENTS-2026-09-29.md": (
         "Design amendments — what the adversarial review changed",
@@ -56,6 +62,13 @@ DOCS = {
         "Observability — what can be seen, and what could not",
         "Measured state of observability in the deployment: the ledger that was silently off, the "
         "operating configuration, the measured cost per call, and the questions still unanswerable.",
+    ),
+    "04-development/OPUS-REVIEW-GENERIC-GRAPHS.md": (
+        "Opus review — running generic graphs through laya",
+        "An independent review that re-ran every claim with laya graph run. Found that routing is not "
+        "a function of the graph (node ARRAY ORDER decides execution), that the near-tie target runs "
+        "unconditionally, and that 'no data flow at all' was wrong: data CAN reach the head, it "
+        "cannot reach an edge. Five contradictions, three re-verified here."
     ),
     "04-development/GENERIC-GRAPHS-ANALYSIS.md": (
         "Analysis — why a generic graph cannot run today",

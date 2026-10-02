@@ -1,9 +1,34 @@
-# ENGINE DEFECTS — three confirmed findings in the graph executor
+# ENGINE DEFECTS — findings in the graph executor
 
-**Measured 2026-10-02** while building the `wc` example. Each was reported by a delegated worker's
-source analysis and **independently confirmed here** against the tree and a live run. Two are
-defects; the first one also **invalidated an example this project had already committed as
-complete**.
+> **SUPERSEDED IN PART — 2026-10-02, after an independent review.**
+> A claude+opus review (`04-development/OPUS-REVIEW-GENERIC-GRAPHS.md`, 25+ probe flows, every claim
+> run) found that two of the three items below are **worse than recorded here**, and it found a
+> more severe defect this document misses entirely. The original wording is kept below, unedited,
+> because the disagreement is the finding.
+>
+> - **D1 is correct but UNDERSTATED.** It is one case of a bigger defect: routing is not a function
+>   of the graph at all. Which nodes run depends on **node order in the JSON array**. Re-verified
+>   here on `p6-file-order`: with `inner_B` listed first, `outer_A` routes to `A_no` **and `B_yes`
+>   still runs** — reached only through a port `outer_A` did not select — while `RunReport` reports
+>   `not_started: []`, so the wrong execution is invisible. Three mechanisms: `prune_unreachable`
+>   deletes unselected port targets without checking other inbound edges; `remove_node` makes a
+>   pruned dependency count as satisfied; `find_route_pair` takes the first `Route` in `Vec` order.
+> - **D2 is WRONG in the safe-sounding direction, which is the worst way to be wrong.** The field is
+>   not "inert". `near_tie_port` is never lowered into an edge, so its target has **no inbound edge**
+>   and becomes a root of phase 2: **it runs unconditionally on every run.** Re-verified on
+>   `p12-near-tie` — `human` is unconnected in the render and ran anyway.
+> - **D3 stands**, with its corollary (an `mcp` node calling `decide` gets overwritten) confirmed by
+>   a live refusal: ``decide` requires `state``.
+>
+> The review also **withdrew a claim this project made in `HEAD-QUESTION-SHAPE-LIMITS.md`**: the
+> 2-option `choice` is not "the weaker shape". Measured through `laya graph run`, a choice is
+> **15/15 under the v1 phrasing**; the boundary failures came from the v14c phrasing chosen later.
+> `noul`'s real advantage is **confidence** (0.875–1.0 against 0.35–0.54), not label correctness.
+
+---
+
+**Originally recorded 2026-10-02**, while building the `wc` example. Each was reported by a delegated
+worker's source analysis and **independently confirmed here** against the tree and a live run.
 
 ---
 

@@ -13,6 +13,7 @@ reading order.
 
 ## 03-reference
 - [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md)
+- [Graph features — composability, branches, loops: what is implemented](03-reference/GRAPH-FEATURES.md)
 - [Reference](03-reference/README.md)
 
 ## 04-development
@@ -20,6 +21,7 @@ reading order.
 - [P1 status — and the measurements that shaped it](04-development/P1-STATUS.md)
 - [The ten levels, mapped to our tools](04-development/TEN-LEVELS-MAPPING.md)
 - [Development](04-development/README.md)
+- [Opus review — running generic graphs through laya](04-development/OPUS-REVIEW-GENERIC-GRAPHS.md)
 - [Analysis — why a generic graph cannot run today](04-development/GENERIC-GRAPHS-ANALYSIS.md)
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md)
 - [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md)

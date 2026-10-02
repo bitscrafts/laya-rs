@@ -24,8 +24,10 @@ set -uo pipefail
 export PATH="/root/.local/bin:/usr/local/cargo/bin:$PATH"
 
 REPO=/projects/laya-rs
-BRIEF=/projects/_tmp/brief-opus-graph-analysis.md
-OUTDIR=/projects/_tmp/opus-graph-analysis
+# Overridable so a follow-up round is a first-class reviewable action, not an inline command.
+#   ROUND=2 scripts/run-opus-graph-analysis.sh --resume
+BRIEF=${BRIEF:-/projects/_tmp/brief-opus-graph-analysis.md}
+OUTDIR=${OUTDIR:-/projects/_tmp/opus-graph-analysis}
 STATE=$OUTDIR/session.id
 mkdir -p "$OUTDIR"
 

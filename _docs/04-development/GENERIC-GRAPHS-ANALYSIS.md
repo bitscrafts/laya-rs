@@ -1,5 +1,24 @@
 # ANALYSIS — why a generic graph cannot run today
 
+> **CORRECTED 2026-10-02 by an independent claude+opus review.** The verdict is **right**; two
+> supporting claims were **wrong**, and one of them matters:
+>
+> - **"No data flow at all" is FALSE.** Run-time data *can* reach the head today: a shell writes a
+>   state file, an `mcp ask` noul reads it, and the head answers **4/4 correctly at 0.92–0.999** in
+>   the right order (phase 2 honours `depends_on`). Re-verified here. **The missing piece is data →
+>   ROUTE**, not data flow: `ask`'s answers carry no `label`/`band`, and a route's upstream must be a
+>   lowered `decide`. The conclusion survives; the mechanism I named was wrong.
+> - **The primary blocker is not data flow either.** It is that **routing is not a function of the
+>   graph** — which nodes run depends on node order in the JSON array, and the report says nothing.
+>   See `OPUS-REVIEW-GENERIC-GRAPHS.md` C1, re-verified here.
+> - **My ranking was wrong.** I put `question_type` first; the review ranks it **third**, because a
+>   2-option `choice` measures 15/15 under the v1 phrasing — the field buys *confidence*, not
+>   correctness, and correctness is what the scheduler fix delivers. It is right.
+> - The review recommends **removing** the two-phase drain rather than repairing it, since
+>   `sched::run_from` is already a correct DAG scheduler with an unused `Route` arm (`sched.rs:372`).
+>
+> Everything below is kept as written, because the disagreement is the finding.
+
 **Written 2026-10-02 by the orchestrator**, from reading the engine source. This is my own
 reasoning, offered for adversarial review — not a summary of measurements (those are in
 `ENGINE-DEFECTS-2026-10-02.md`). Where I infer rather than measure, I say so.
