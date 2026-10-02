@@ -96,6 +96,19 @@ for l in sys.stdin:
 "
 
 echo
+echo "################ 3c. spec 22 via the DEPLOYED binary: finds its own sibling ################"
+echo "  the installed binary, invoked by ABSOLUTE path, with a STRIPPED PATH for its children"
+echo "  (this is the only way the defect appears -- the shell resolves the parent, not the child):"
+env PATH=/usr/bin:/bin /root/.local/bin/laya graph run _docs/02-guides/wc-classify-measured.flow.json 2>/dev/null | python3 -c "
+import sys, json
+d = json.loads(next(l for l in sys.stdin if l.startswith('{')))
+bad = [r['node_id'] for r in d['records'] if not r['success']]
+print('    stripped PATH ->', ('FAILED: ' + str(bad)) if bad else 'ALL NODES SUCCEEDED')
+"
+echo "  and which server it resolved:"
+/root/.local/bin/laya doctor 2>&1 | grep -i 'laya-mcp' | sed 's/^/    /'
+
+echo
 echo "################ 4. the gate still answers ################"
 laya-gate "git status" >/dev/null 2>&1; echo "  git status        -> exit $?"
 laya-gate "rm -rf /"   >/dev/null 2>&1; echo "  rm -rf /          -> exit $?  (1 = ask, correct)"
