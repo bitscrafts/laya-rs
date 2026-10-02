@@ -103,6 +103,7 @@ fn doctor(endpoint: &str) -> ExitCode {
                  head      : ok (sidecar at {})",
                 socket.display()
             );
+            doctor_mcp();
             doctor_ledger();
             ExitCode::SUCCESS
         }
@@ -114,6 +115,20 @@ fn doctor(endpoint: &str) -> ExitCode {
             eprintln!("\nlaya: NOT READY (exit 1)");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The `laya-mcp` line of `doctor`: which server `graph run` would spawn, and how it was found
+/// (spec 22). Not finding one is a warning, not a failure: `doctor` checks the backbone, and only
+/// `graph run` needs the server.
+fn doctor_mcp() {
+    match laya_cli::resolve_mcp_binary() {
+        Ok(r) => println!(
+            "  laya-mcp  : {} (resolved via {})",
+            r.bin.display(),
+            r.source.label()
+        ),
+        Err(e) => eprintln!("laya: warning: laya-mcp: {e}"),
     }
 }
 

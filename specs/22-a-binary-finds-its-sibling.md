@@ -66,20 +66,20 @@ picks one candidate passes row 1**, so the near-misses are what make it a test.
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_sibling_is_preferred_over_path 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_control_path_is_used_when_there_is_no_sibling 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_set_but_unresolvable_laya_mcp_bin_fails_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_error_lists_every_path_tried 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] **the examples run with no laya directory on PATH** — every node, including the decide, must succeed. Run it and check the DECIDE by name, not just that *something* succeeded:
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_sibling_is_preferred_over_path 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_control_path_is_used_when_there_is_no_sibling 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_set_but_unresolvable_laya_mcp_bin_fails_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_error_lists_every_path_tried 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] **the examples run with no laya directory on PATH** — every node, including the decide, must succeed. Run it and check the DECIDE by name, not just that *something* succeeded:
 
       cd /projects/laya-rs && env PATH=/usr/bin:/bin ./target/debug/laya graph run _docs/02-guides/wc-classify-measured.flow.json 2>/dev/null | python3 -c "import sys,json; d=json.loads(next(l for l in sys.stdin if l.startswith('{'))); bad=[r['node_id'] for r in d['records'] if not r['success']]; print('FAILED:', bad) if bad else print('all nodes succeeded')"
 
   **This is the criterion the whole spec exists for**, and it must be run with the environment stripped, because the failure only appears that way. Do NOT substitute a `grep` for `"success":true`: **that grep is satisfied by the shell node alone** (measured: with a stripped PATH the decide failed while one `"success":true` was still printed), so it would pass while the defect is present. A criterion must be satisfied only by the thing it names.
-- [ ] **the control**: the same command WITH `/root/.local/bin` on `PATH` also succeeds (the fix must not break the documented setup)
-- [ ] `cd /projects/laya-rs && env -u LAYA_MCP_BIN ./target/debug/laya doctor 2>&1 | grep -iE 'laya-mcp|server'` : names which server was resolved (R3)
-- [ ] `cd /projects/laya-rs && cargo test --workspace`
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] **the control**: the same command WITH `/root/.local/bin` on `PATH` also succeeds (the fix must not break the documented setup)
+- [x] `cd /projects/laya-rs && env -u LAYA_MCP_BIN ./target/debug/laya doctor 2>&1 | grep -iE 'laya-mcp|server'` : names which server was resolved (R3)
+- [x] `cd /projects/laya-rs && cargo test --workspace`
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
 
 **Every criterion uses `-p <the owning crate>` and `ok\. 1 passed`** — a criterion that accepts
 `ok. 0 passed` is satisfied by a test name matching nothing, which is how an earlier spec's criteria
@@ -98,3 +98,50 @@ passed with nothing implemented. **Verify each is non-vacuous before starting.**
   laya!"*). Two criteria require real runs with a stripped environment, which is the only way this
   defect is visible.
 - Do not delete anything; `mv` aside and say so.
+
+---
+
+## Verification of this spec (run here, 2026-10-02, after the worker finished)
+
+### The criterion the spec exists for, and its control
+
+```
+$ env PATH=/usr/bin:/bin ./target/debug/laya graph run _docs/02-guides/wc-classify-measured.flow.json
+  stripped PATH  -> ALL NODES SUCCEEDED        (before this spec: FAILED gt300)
+
+$ env PATH=/root/.local/bin:/usr/bin:/bin ./target/debug/laya graph run …same flow…
+  full PATH      -> ALL NODES SUCCEEDED        (the documented setup still works)
+```
+
+**All four other committed examples also succeed with a stripped `PATH`** (`wc-classify`,
+`wc-classify-chained`, its control, `wc-classify-band`) — each runs a decide, so each was broken before.
+
+### The resolution is observable, and a bad setting is refused by name
+
+```
+$ laya doctor
+  laya-mcp  : /projects/laya-rs/target/debug/laya-mcp (resolved via sibling)
+
+$ LAYA_MCP_BIN=/nope/nothing laya graph run …
+  laya: LAYA_MCP_BIN is set to `/nope/nothing` but that does not resolve to a `laya-mcp`;
+        it is not silently ignored — fix or unset it
+```
+
+That second line is the requirement that matters most: **a set-but-unresolvable variable must fail by
+name, never fall through.** A set variable that is silently ignored reads as a working configuration.
+
+### Everything else
+
+| check | result |
+|---|---|
+| 4 named tests | **4/4 PASS**, each `ok. 1 passed` |
+| `cargo test --workspace` | **605 passed, 0 failed** |
+| clippy `-D warnings` / fmt / doc citations | 0 / clean / 69 docs resolve |
+
+### Note on how this was found, and why it took three attempts
+
+The defect was **deterministic all along** — it depended on whether the caller's `PATH` held the install
+directory. It was first seen as an intermittent failure and chased as a race, because my own scripts
+disagreed about `PATH` and **a nondeterministic cause and a differing environment look identical from a
+single result.** `cargo run` masks it entirely (it puts `target/debug` on `PATH`), which is why several
+verification passes missed it.

@@ -143,8 +143,15 @@ fn graph_render(path: &str) -> ExitCode {
 }
 
 fn graph_run(path: &str) -> ExitCode {
+    let resolved = match resolve_mcp_binary() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("laya: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let mcp: Arc<dyn McpCaller> = Arc::new(LiveMcpCaller {
-        bin: resolve_mcp_binary(),
+        bin: resolved.bin,
         call_timeout: DEFAULT_CALL_TIMEOUT,
     });
     graph_run_with(path, mcp)

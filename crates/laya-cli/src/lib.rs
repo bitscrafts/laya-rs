@@ -25,4 +25,7 @@ pub use embedder::{HttpEmbedder, parse_embedding};
 pub use graph::graph;
 pub use laya_backbone::{DEFAULT_ENDPOINT, PROBE_TIMEOUT_MS};
 pub use laya_core::readiness::{Readiness, ReadinessFailure};
-pub use mcp_client::{DEFAULT_CALL_TIMEOUT, LiveMcpCaller, resolve_mcp_binary};
+pub use mcp_client::{
+    DEFAULT_CALL_TIMEOUT, LiveMcpCaller, McpSource, ResolvedMcp, resolve_mcp_binary,
+    resolve_mcp_binary_from,
+};

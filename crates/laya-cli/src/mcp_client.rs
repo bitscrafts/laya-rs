@@ -37,11 +37,129 @@ pub const LAYA_MCP_BIN_ENV: &str = "LAYA_MCP_BIN";
 /// forward pass through the sidecar, not a mock.
 pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_mins(2);
 
-/// Where to find the real `laya-mcp` binary: `LAYA_MCP_BIN` if set, else the
-/// bare name, resolved from `PATH` by the OS when spawned.
-#[must_use]
-pub fn resolve_mcp_binary() -> PathBuf {
-    std::env::var(LAYA_MCP_BIN_ENV).map_or_else(|_| PathBuf::from("laya-mcp"), PathBuf::from)
+/// How a `laya-mcp` was found — reported by `laya doctor` so the choice is observable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpSource {
+    /// `LAYA_MCP_BIN` was set and resolved.
+    Env,
+    /// The sibling of the running `laya`.
+    Sibling,
+    /// A directory on `PATH`.
+    Path,
+}
+
+impl McpSource {
+    /// The word `doctor` prints.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Env => "env",
+            Self::Sibling => "sibling",
+            Self::Path => "path",
+        }
+    }
+}
+
+/// A resolved `laya-mcp`: where it is and how it was found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMcp {
+    /// The binary to spawn.
+    pub bin: PathBuf,
+    /// Which resolution step found it.
+    pub source: McpSource,
+}
+
+/// Where to find the real `laya-mcp`, from the live environment — see [`resolve_mcp_binary_from`].
+///
+/// # Errors
+/// When nothing resolves; the message lists every path tried, in order.
+pub fn resolve_mcp_binary() -> Result<ResolvedMcp, String> {
+    let env = std::env::var_os(LAYA_MCP_BIN_ENV);
+    let exe = std::env::current_exe().ok();
+    let path = std::env::var_os("PATH");
+    resolve_mcp_binary_from(env.as_deref(), exe.as_deref(), path.as_deref())
+}
+
+/// Resolve `laya-mcp` in a fixed order (spec 22): `LAYA_MCP_BIN`, the sibling of `laya`, then `PATH`.
+///
+/// The inputs are parameters so each step is testable without touching the
+/// process environment.
+///
+/// A `LAYA_MCP_BIN` that is set but does not resolve is an error naming it: it never falls
+/// through, because a set variable that is silently ignored is indistinguishable from a wrong one.
+///
+/// # Errors
+/// A set-but-unresolvable `LAYA_MCP_BIN`, or nothing found; the latter lists every path tried.
+pub fn resolve_mcp_binary_from(
+    env: Option<&std::ffi::OsStr>,
+    exe: Option<&Path>,
+    path: Option<&std::ffi::OsStr>,
+) -> Result<ResolvedMcp, String> {
+    let mut tried: Vec<String> = Vec::new();
+
+    if let Some(set) = env {
+        let bin = PathBuf::from(set);
+        if is_executable_file(&bin) || (!has_dir(&bin) && find_on(&bin, path).is_some()) {
+            return Ok(ResolvedMcp {
+                bin,
+                source: McpSource::Env,
+            });
+        }
+        return Err(format!(
+            "{LAYA_MCP_BIN_ENV} is set to `{}` but that does not resolve to a `laya-mcp`; \
+             it is not silently ignored — fix or unset it",
+            bin.display()
+        ));
+    }
+    tried.push(format!("{LAYA_MCP_BIN_ENV} (unset)"));
+
+    match exe.and_then(Path::parent) {
+        Some(dir) => {
+            let sibling = dir.join(MCP_BIN_NAME);
+            if is_executable_file(&sibling) {
+                return Ok(ResolvedMcp {
+                    bin: sibling,
+                    source: McpSource::Sibling,
+                });
+            }
+            tried.push(format!("sibling {}", sibling.display()));
+        }
+        None => tried.push("sibling (the running laya's location is unknown)".to_string()),
+    }
+
+    if let Some(found) = find_on(Path::new(MCP_BIN_NAME), path) {
+        return Ok(ResolvedMcp {
+            bin: found,
+            source: McpSource::Path,
+        });
+    }
+    tried.push(format!(
+        "PATH ({})",
+        path.map_or_else(|| "unset".to_string(), |p| p.to_string_lossy().into_owned())
+    ));
+
+    Err(format!(
+        "could not find `{MCP_BIN_NAME}`; tried, in order: {}. Set {LAYA_MCP_BIN_ENV} to point at it.",
+        tried.join("; ")
+    ))
+}
+
+const MCP_BIN_NAME: &str = "laya-mcp";
+
+fn has_dir(p: &Path) -> bool {
+    p.components().count() > 1
+}
+
+fn is_executable_file(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// The first executable `name` in a directory of `path`, if any.
+fn find_on(name: &Path, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    std::env::split_paths(path?)
+        .map(|d| d.join(name))
+        .find(|c| is_executable_file(c))
 }
 
 /// The `McpCaller` `laya graph run` injects.
@@ -372,6 +490,98 @@ mod tests {
                 .next()
                 .is_some_and(|rest| rest.starts_with('Z'))
         })
+    }
+
+    /// A `laya-mcp` stand-in that answers every call with `text`.
+    fn answering(tag: &str, text: &str) -> PathBuf {
+        let script = format!(
+            "#!/bin/sh\n\
+             read init; echo '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{}}}}'\n\
+             read note; read call\n\
+             echo '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"content\":[{{\"type\":\"text\",\"text\":\"{text}\"}}]}}}}'\n"
+        );
+        fake_server(tag, &script).0
+    }
+
+    /// Rename a fake into `dir` under the real name `laya-mcp`.
+    fn as_laya_mcp(fake: &Path) -> PathBuf {
+        let dir = fake.parent().expect("parent").to_path_buf();
+        let real = dir.join("laya-mcp");
+        std::fs::rename(fake, &real).expect("rename");
+        real
+    }
+
+    /// Spawn what `resolved` names and return what answered.
+    fn who_answers(resolved: &ResolvedMcp) -> String {
+        let caller = LiveMcpCaller {
+            bin: resolved.bin.clone(),
+            call_timeout: Duration::from_secs(5),
+        };
+        within_5s(move || caller.call("anything", &json!({}), &ctx())).expect("server answers")
+    }
+
+    #[test]
+    fn the_sibling_is_preferred_over_path() {
+        let sibling = as_laya_mcp(&answering("sib", "from-sibling"));
+        let on_path = as_laya_mcp(&answering("pathdir", "from-path"));
+        let exe = sibling.parent().expect("dir").join("laya");
+        let path = on_path.parent().expect("dir").as_os_str().to_owned();
+        let got = resolve_mcp_binary_from(None, Some(&exe), Some(&path)).expect("resolves");
+        assert_eq!(got.source, McpSource::Sibling);
+        assert_eq!(who_answers(&got), "from-sibling");
+    }
+
+    #[test]
+    fn the_control_path_is_used_when_there_is_no_sibling() {
+        let on_path = as_laya_mcp(&answering("pathonly", "from-path"));
+        let lonely = std::env::temp_dir().join(format!("laya-no-sibling-{}", std::process::id()));
+        std::fs::create_dir_all(&lonely).expect("dir");
+        let exe = lonely.join("laya");
+        let path = on_path.parent().expect("dir").as_os_str().to_owned();
+        let got = resolve_mcp_binary_from(None, Some(&exe), Some(&path)).expect("resolves");
+        assert_eq!(got.source, McpSource::Path);
+        assert_eq!(who_answers(&got), "from-path");
+    }
+
+    #[test]
+    fn a_set_but_unresolvable_laya_mcp_bin_fails_by_name() {
+        // A sibling AND a PATH entry exist: a silent fall-through would succeed.
+        let sibling = as_laya_mcp(&answering("sib2", "from-sibling"));
+        let exe = sibling.parent().expect("dir").join("laya");
+        let err = resolve_mcp_binary_from(
+            Some("/nope/laya-mcp".as_ref()),
+            Some(&exe),
+            Some(sibling.parent().expect("dir").as_os_str()),
+        )
+        .expect_err("must not fall through");
+        assert!(err.contains("/nope/laya-mcp"), "{err}");
+        assert!(err.contains(LAYA_MCP_BIN_ENV), "{err}");
+    }
+
+    #[test]
+    fn the_control_a_resolvable_laya_mcp_bin_is_used() {
+        let env_bin = answering("envbin", "from-env");
+        let sibling = as_laya_mcp(&answering("sib3", "from-sibling"));
+        let exe = sibling.parent().expect("dir").join("laya");
+        let got =
+            resolve_mcp_binary_from(Some(env_bin.as_os_str()), Some(&exe), None).expect("resolves");
+        assert_eq!(got.source, McpSource::Env);
+        assert_eq!(who_answers(&got), "from-env");
+    }
+
+    #[test]
+    fn the_error_lists_every_path_tried() {
+        let empty = std::env::temp_dir().join(format!("laya-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).expect("dir");
+        let exe = empty.join("laya");
+        let err = resolve_mcp_binary_from(None, Some(&exe), Some(empty.as_os_str()))
+            .expect_err("nothing resolves");
+        assert!(err.contains(LAYA_MCP_BIN_ENV), "{err}");
+        assert!(
+            err.contains(&empty.join("laya-mcp").display().to_string()),
+            "{err}"
+        );
+        assert!(err.contains("PATH"), "{err}");
     }
 
     #[test]
