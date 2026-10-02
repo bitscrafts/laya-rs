@@ -72,3 +72,39 @@ moment. Two consequences:
 2. **When a check fails once and passes on retry, that is a finding, not noise.** Here the retry
    passed 8/8 — the instinct to call it "flaky, moving on" would have buried a real race in the test
    harness, which is the same class of defect this project keeps finding in the engine.
+
+---
+
+## SECOND INSTANCE (2026-10-02, during spec 21) — the same family, in `sched.rs`
+
+```
+cargo test --workspace: FAILED
+  sched::tests::a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not
+```
+
+Timing-sensitive (a 30 s sleeper with a 0.5 s deadline, asserting that queued siblings were not
+dispatched). It then passed 3/3 alone with the change in question, 3/3 with it stashed, and **0 failures
+in 10 runs** when measured directly here.
+
+**Two instances is a family, not two anecdotes.** Both observed failures share the same shape:
+
+| test | what it asserts | why it can race |
+|---|---|---|
+| `a_failure_stops_queued_siblings_from_starting` | siblings `b`/`c`/`d` never ran after `a` failed | `a` is `sleep 0.2; exit 1`; whether the siblings are already dispatched depends on how the scheduler's first loop iteration interleaves with that 200 ms |
+| `a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not` | same, against a 0.5 s deadline on a 30 s sleeper | same window, different trigger |
+
+**Both assert a property that is about ORDERING under a wall-clock race, and both can only fail when
+the machine is loaded enough that the sibling wins the race.** Neither has ever failed in a quiet run,
+in either tree, which is why neither is reproducible on demand.
+
+**The honest conclusion: the suite is not deterministic, this is a known family, and neither instance
+is attributed to any change.** It has been measured at 0/20 before and after a change, 0/10 and 0/10
+here — so a single observed failure is a real signal that the timing window exists, not evidence about
+the change that happened to be in flight.
+
+**If someone wants this fixed, the fix is not a longer sleep** — it is to assert the PROPERTY
+deterministically (a scripted caller that blocks until released, so the ordering under test is
+controlled rather than raced), the same technique spec 21 used to make its decide-timeout tests
+meaningful: an *instant* scripted caller finished before a zero deadline could fire, so the test was
+vacuous until a 200 ms `SlowCaller` was introduced. **A test whose control is a stopwatch is a test
+that will fail on someone else's machine.**

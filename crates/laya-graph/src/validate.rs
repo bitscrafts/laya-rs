@@ -217,21 +217,6 @@ fn validate_decide(node: &Node, ids: &HashSet<&str>) -> Result<(), FlowError> {
                 .to_string(),
         });
     }
-    for (field, set) in [
-        ("timeout", node.timeout.is_some()),
-        ("allow_failure", node.allow_failure),
-    ] {
-        if set {
-            return Err(FlowError::NotImplemented {
-                id: node.id.clone(),
-                field: field.to_string(),
-                until: "dead on a `decide` until spec 17".to_string(),
-                instead: "Remove it from the decide node; a flow-level `timeout` still applies"
-                    .to_string(),
-            });
-        }
-    }
-
     Ok(())
 }
 
@@ -247,7 +232,7 @@ fn validate_retry(node: &Node) -> Result<(), FlowError> {
         return Err(FlowError::NotImplemented {
             id: node.id.clone(),
             field: "retry".to_string(),
-            until: "it was declared but inert — the run fails on the first error; a later spec will implement it for non-`decide`, non-`writes` nodes".to_string(),
+            until: "until the scheduler retries a failed node — today the run fails on the first error, and no spec has landed it yet".to_string(),
             instead: "Wrap the command in a shell loop, or remove `retry`".to_string(),
         });
     }
@@ -760,16 +745,17 @@ mod tests {
         );
     }
 
+    /// Spec 21 re-pins spec 20's `..._are_refused_until_spec_17`: spec 17 landed, so both fields
+    /// now VALIDATE on a decide (their behaviour is pinned in `field_contract`).
     #[test]
-    fn timeout_and_allow_failure_on_a_decide_are_refused_until_spec_17() {
+    fn timeout_and_allow_failure_on_a_decide_are_accepted_since_spec_17() {
         for field in ["\"timeout\":5", "\"allow_failure\":true"] {
             let json = format!(
                 r#"{{"flow":"t","version":1,"nodes":[
                   {{"id":"d","kind":"decide","question":"q","prompt":"p","options":["a"],"ports":{{"a":"x"}},{field}}},
                   {{"id":"x","kind":"shell","run":"true"}}]}}"#
             );
-            let err = refusal(&json).expect_err("dead on a decide");
-            assert!(err.contains("spec 17"), "{field}: {err}");
+            assert_eq!(refusal(&json), Ok(()), "{field}");
         }
     }
 

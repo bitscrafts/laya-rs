@@ -75,7 +75,7 @@ pub enum FlowError {
     /// them: measured 2026-10-02, `$.inputs.doc` reached the head as literal
     /// text.
     #[error(
-        "{location} uses `inputs`, which is not implemented — `$.inputs.*` is NOT substituted; the prompt is literal text sent to the head. Remove `inputs` and write the text into `prompt` directly"
+        "{location} uses `inputs`, which is not implemented (until a spec binds `inputs` and substitutes `$.inputs.*`; none has landed) — `$.inputs.*` is NOT substituted; the prompt is literal text sent to the head. Remove `inputs` and write the text into `prompt` directly"
     )]
     InputsUnsupported {
         /// Where it was found (the flow, or a node id).

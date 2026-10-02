@@ -75,15 +75,15 @@ distinguishes "the timeout works" from "every decide now fails".
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_decide_timeout_bounds_the_decide 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_decide_without_a_timeout_still_completes 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_decide_with_allow_failure_does_not_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_decide_without_allow_failure_does_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_row_holds 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] **run it through the CLI** (a graph claim must be run, not read): the decide-timeout flow exits non-zero with a timed-out error, and the same flow without `timeout` exits 0. Use `./target/debug/laya` — **the `laya` on `PATH` is a stale build and would pass vacuously.**
-- [ ] `cd /projects/laya-rs && cargo test --workspace`
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_decide_timeout_bounds_the_decide 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_decide_without_a_timeout_still_completes 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_decide_with_allow_failure_does_not_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_decide_without_allow_failure_does_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_row_holds 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] **run it through the CLI** (a graph claim must be run, not read): the decide-timeout flow exits non-zero with a timed-out error, and the same flow without `timeout` exits 0. Use `./target/debug/laya` — **the `laya` on `PATH` is a stale build and would pass vacuously.**
+- [x] `cd /projects/laya-rs && cargo test --workspace`
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
 
 Every criterion uses `-p <the owning crate>` and `ok\. 1 passed`. A criterion that accepts
 `ok. 0 passed` is satisfied by a test name that matches nothing.
@@ -101,3 +101,65 @@ Every criterion uses `-p <the owning crate>` and `ok\. 1 passed`. A criterion th
 - **Run graphs, do not only read code** (operator instruction, verbatim: *"graph must be ran from
   laya!"*).
 - Do not delete anything; `mv` aside and say so.
+
+---
+
+## Verification of this spec (run here, 2026-10-02, after the worker finished)
+
+### R1 — the `timeout` refusal is lifted AND the field bites, through the CLI
+
+```
+$ ./target/debug/laya graph validate dt.flow.json          (a decide with "timeout": 0)
+laya graph validate: /tmp/dt21.flow.json is valid           <- no longer refused
+
+$ ./target/debug/laya graph run dt.flow.json
+  d              success=False dur=1ms err="timed out after 0ms"
+  stopped_early = True   failed_node = d
+
+$ ./target/debug/laya graph run dt-none.flow.json          (the same flow, no timeout)
+  ran: ['d', 'd/route', 'y']   stopped_early = False        <- the CONTROL: it routes normally
+```
+
+Before spec 17 this field was dead; before this spec it was refused as dead. **Now it is live and the
+refusal is gone.** The control is what distinguishes "the timeout works" from "every decide fails".
+
+### R2 — `allow_failure` on a decide: resolution (a), and the run now continues
+
+```
+$ ./target/debug/laya graph run af.flow.json   (a decide the server refuses, allow_failure: true)
+  ran: ['d', 'd/route', 'sibling']
+  stopped_early = False   failed_node = None
+```
+
+**Before: `stopped_early = True, failed_node = d/route`** — accepted, apparently honoured, then the
+synthetic route node stopped the run anyway. The worker chose **(a)**: the route inherits its decide's
+policy (`lower.rs`), so a route gains no failure semantics of its own, and a failed allow-failure route
+selects no port so its targets are **skipped rather than run**.
+
+### R3 — the audit, measured rather than assumed
+
+| field | honoured? | action |
+|---|---|---|
+| `retry` | **NO** — `lower.rs` drops it, `sched.rs` has no retry logic | refusal **kept**; message now says *"until the scheduler retries a failed node … no spec has landed it"* |
+| `escalate_on_near_tie` / `near_tie_port` | **NO** — neither lowering nor routing reads them | refusal **kept**; message already named what it waits for |
+
+### R4 — the table, and a new structural guard
+
+The `timeout`/`allow_failure` rows were already `Observable` (shell fixtures), and the decide-specific
+refusal was never a row, so **no row changed** — the worker said so rather than inventing a change.
+New: **`every_field_refusal_still_has_a_reason` requires every `Refused` row's message to contain
+"until"** — i.e. a refusal must say what it waits for. That is a durable guard against exactly the
+defect this spec exists to fix, and it caught a real gap: the `inputs` refusal lacked one.
+
+### The worker found a subtlety worth keeping
+
+With an **instant** scripted caller, `timeout: 0` never fires — the call finishes first, so the test
+would have been **vacuous**. The decide tests use a 200 ms `SlowCaller`, like a real call. **A timeout
+test against a caller that cannot be slow tests nothing.** A mutation of the new tolerate-branch made
+`a_decide_with_allow_failure_does_not_stop_the_run` FAIL, then was restored.
+
+### Gate
+
+5/5 targeted tests · **600 passed, 0 failed** · clippy 0 · fmt clean · 65 docs resolve.
+One workspace run showed a **known flake of the `sched.rs` timing family** (recorded in
+`05-operations/TEST-HARNESS-FLAKE.md`); measured again here at **0 failures in 10 runs**.

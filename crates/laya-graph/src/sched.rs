@@ -422,6 +422,12 @@ fn dispatch(
             let route_ok = route_record.success;
             records.push(route_record);
             let Some(selected) = selected.filter(|_| route_ok) else {
+                // Spec 21: a route tolerated like its decide selects no port — every target is
+                // skipped — and the run continues; otherwise the unreadable route stops it.
+                if node.allow_failure {
+                    tracker.resolve(&id, |_| false);
+                    continue;
+                }
                 return Ok(Some(id));
             };
             tracker.resolve(&id, |edge| edge.to == selected);

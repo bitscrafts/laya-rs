@@ -193,7 +193,7 @@ pub struct Node {
     /// Node ids that must finish before this one starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
-    /// Timeout, in seconds. Refused on a `decide` until spec 17.
+    /// Timeout, in seconds. On a `decide` it bounds the call (spec 17, lifted in spec 21).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
     /// The retry policy, if any. **Refused by `validate` (spec 20):** it was

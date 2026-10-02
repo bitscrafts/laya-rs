@@ -153,7 +153,8 @@ fn lower_decide(
             rules: rules.clone(),
         },
         writes: false,
-        allow_failure: false,
+        // Spec 21: a route is bookkeeping for its decide, so it fails no harder than the decide.
+        allow_failure: node.allow_failure,
         timeout: None,
     });
 

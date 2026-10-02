@@ -537,3 +537,128 @@ fn the_control_an_inert_field_fails_its_row() {
         "a Refused row that validates must fail"
     );
 }
+
+// ---- spec 21: a decide's own `timeout` and `allow_failure` -----------------------------------
+
+/// Refuses every `decide` call (a server error), answers anything else like [`ScriptedCaller`].
+struct RefusingCaller;
+
+impl McpCaller for RefusingCaller {
+    fn call(&self, tool: &str, arguments: &Value, ctx: &CallContext) -> Result<String, String> {
+        if tool == "decide" {
+            Err("the server refused".to_string())
+        } else {
+            ScriptedCaller.call(tool, arguments, ctx)
+        }
+    }
+}
+
+/// Answers `decide` like [`ScriptedCaller`] after 200 ms, as a real call over a socket would; an
+/// instant caller beats even a zero deadline, which would make a timeout row prove nothing.
+struct SlowCaller;
+
+impl McpCaller for SlowCaller {
+    fn call(&self, tool: &str, arguments: &Value, ctx: &CallContext) -> Result<String, String> {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        ScriptedCaller.call(tool, arguments, ctx)
+    }
+}
+
+fn run_with(text: &str, caller: Arc<dyn McpCaller>) -> RunReport {
+    let flow = load(text).expect("the fixture must validate");
+    let graph = lower(&flow).expect("the fixture must lower");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(run_flow(
+        &graph,
+        RunOptions {
+            run_id: "spec21".to_string(),
+            limit: 4,
+            mcp: caller,
+        },
+    ))
+    .expect("the run itself must not error")
+}
+
+/// A decide `d` (label answered `high`) routing to `x`, plus an independent `sibling`.
+macro_rules! decide_with_sibling {
+    ($extra:literal) => {
+        concat!(
+            r#"{"flow":"t","version":1,"nodes":[{"id":"d","kind":"decide","question":"q?","prompt":"p","options":["low","high"],"ports":{"low":"x","high":"x"}"#,
+            $extra,
+            r#"},{"id":"x","kind":"shell","run":"echo x"},{"id":"sibling","kind":"shell","run":"echo s"}]}"#
+        )
+    };
+}
+
+/// Spec 21 R1: spec 20 refused this "until spec 17"; spec 17 made it work.
+#[test]
+fn a_decide_timeout_bounds_the_decide() {
+    let report = run_with(
+        decide_with_sibling!(r#","timeout":0"#),
+        Arc::new(SlowCaller),
+    );
+    let d = rec(&report, "d").expect("the decide ran");
+    assert!(!d.success && d.timed_out, "must time out: {d:#?}");
+    assert!(
+        d.error.as_deref().is_some_and(|e| e.contains("timed out")),
+        "{d:#?}"
+    );
+    assert!(report.stopped_early);
+    assert_eq!(report.failed_node.as_deref(), Some("d"));
+}
+
+#[test]
+fn the_control_a_decide_without_a_timeout_still_completes() {
+    let report = run_with(decide_with_sibling!(""), Arc::new(SlowCaller));
+    assert!(!report.stopped_early, "{report:#?}");
+    assert!(rec(&report, "d").is_some_and(|r| r.success && !r.timed_out));
+    assert!(
+        output(&report, "d/route").contains(r#""selected_port":"x""#),
+        "it must route"
+    );
+    assert!(rec(&report, "x").is_some_and(|r| r.success));
+}
+
+/// Spec 21 R2(a): the synthetic route inherits its decide's `allow_failure`.
+#[test]
+fn a_decide_with_allow_failure_does_not_stop_the_run() {
+    let report = run_with(
+        decide_with_sibling!(r#","allow_failure":true"#),
+        Arc::new(RefusingCaller),
+    );
+    assert!(!rec(&report, "d").expect("d ran").success);
+    assert!(!report.stopped_early, "{report:#?}");
+    assert_eq!(report.failed_node, None);
+    assert!(rec(&report, "sibling").is_some_and(|r| r.success));
+    assert!(
+        !ran(&report).contains("x"),
+        "a failed decide selects no port, so its target must not run"
+    );
+}
+
+#[test]
+fn the_control_a_decide_without_allow_failure_does_stop_the_run() {
+    let report = run_with(decide_with_sibling!(""), Arc::new(RefusingCaller));
+    assert!(report.stopped_early, "{report:#?}");
+    assert_eq!(report.failed_node.as_deref(), Some("d"));
+}
+
+/// Spec 21 R3: the interim refusals that remain say what they wait for.
+#[test]
+fn every_field_refusal_still_has_a_reason() {
+    for (name, effect) in NODE_FIELDS.iter().chain(FLOW_FIELDS) {
+        if let Effect::Refused { fixture, .. } = effect {
+            let err = load(fixture).expect_err("a Refused row's fixture must be refused");
+            if err.contains("not implemented") {
+                assert!(
+                    err.contains("until"),
+                    "`{name}`: a refusal must say what it waits for: {err}"
+                );
+            }
+        }
+    }
+}
