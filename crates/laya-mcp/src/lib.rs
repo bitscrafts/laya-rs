@@ -283,6 +283,159 @@ impl LayaMcpServer {
     }
 }
 
+/// The ONE question schema, used by every tool that takes questions.
+///
+/// **This is the shape the model reads**, not a preference. Three defects in this file were
+/// the advertised schema disagreeing with it (measured 2026-10-02, all three found by an
+/// agent-shaped caller failing):
+///
+/// 1. It was declared `{"type": "array"}` with no item shape. Sending an array raises
+///    `AttributeError: 'list' object has no attribute 'keys'` -- the model takes a MAP.
+/// 2. The text field was not described at all, so the only name available was `text`, from
+///    `laya_abi::Question`. The model requires **`instructions`**; sending `text` raises
+///    `KeyError: 'instructions'` on every question in the call.
+/// 3. Neither was `criteria` marked required. A `choice` or `score` without it raises
+///    (`TypeError: 'NoneType' object is not iterable` for score), and for a score the entries
+///    ARE the scale being measured against, so the number is uninterpretable even where it
+///    does not raise.
+///
+/// The shape below is taken from the model's own `system_one` docstring, which is the
+/// authority:
+///
+/// ```text
+///   choice: {"type": "choice", "instructions": "...", "criteria": {"optA": "...", ...}}
+///   score:  {"type": "score",  "instructions": "...", "criteria": ["lvl0", "lvl1", ...]}
+///   noul:   {"type": "noul",   "instructions": "..."}
+/// ```
+/// Refuse a question map the model cannot read, naming the argument at fault.
+///
+/// The model's requirements, each learned by sending it the wrong thing and reading the
+/// Python error it produced:
+///
+/// * the questions must be an OBJECT keyed by id -- a list raises
+///   `AttributeError: 'list' object has no attribute 'keys'`
+/// * each question needs `instructions` (not `text`) -- `KeyError: 'instructions'`
+/// * `choice` and `score` need `criteria` -- a `score` without it raises
+///   `TypeError: 'NoneType' object is not iterable`
+///
+/// # Errors
+/// A message naming the offending question id and the field that is wrong, meant to be read
+/// by the caller that sent it.
+pub fn validate_question_shape(questions: &serde_json::Value) -> Result<(), String> {
+    let Some(obj) = questions.as_object() else {
+        return Err(format!(
+            "laya-mcp: `questions` must be an OBJECT keyed by question id, not {}. \
+             Each value looks like {{\"type\":\"noul\",\"instructions\":\"…\"}}; a \
+             `choice` also needs \"criteria\" as an object of options to their \
+             descriptions, and a `score` needs \"criteria\" as an ARRAY of levels.",
+            match questions {
+                serde_json::Value::Array(_) => "an array",
+                serde_json::Value::String(_) => "a string",
+                serde_json::Value::Number(_) => "a number",
+                serde_json::Value::Bool(_) => "a boolean",
+                _ => "that",
+            }
+        ));
+    };
+    if obj.is_empty() {
+        return Err("laya-mcp: `questions` is empty, so there is nothing to ask".to_string());
+    }
+    for (id, q) in obj {
+        let Some(q) = q.as_object() else {
+            return Err(format!("laya-mcp: question `{id}` must be an object"));
+        };
+        let kind = q.get("type").and_then(serde_json::Value::as_str);
+        let Some(kind) = kind else {
+            return Err(format!(
+                "laya-mcp: question `{id}` has no `type` (must be noul, choice or score)"
+            ));
+        };
+        if !["noul", "choice", "score"].contains(&kind) {
+            return Err(format!(
+                "laya-mcp: question `{id}` has type {kind:?}, which is not one of \
+                 noul, choice, score"
+            ));
+        }
+        if q.get("instructions").is_none() {
+            // The single most likely mistake, because `laya_abi::Question` names this field
+            // `text` and the advertised schema used to name it not at all.
+            let hint = if q.get("text").is_some() {
+                " -- the text field is named `instructions`, not `text`"
+            } else {
+                ""
+            };
+            return Err(format!(
+                "laya-mcp: question `{id}` has no `instructions`{hint}"
+            ));
+        }
+        if kind != "noul" && q.get("criteria").is_none() {
+            let expected = if kind == "score" {
+                "an ARRAY of level descriptions in ascending order"
+            } else {
+                "an OBJECT mapping each option to its description"
+            };
+            return Err(format!(
+                "laya-mcp: question `{id}` is a `{kind}` and needs `criteria`, {expected} \
+                 -- the entries are what the \"{kind}\" is measured against"
+            ));
+        }
+        // A choice's criteria keys ARE the options, so an empty map offers nothing to pick.
+        if kind == "choice" {
+            let n = q
+                .get("criteria")
+                .and_then(serde_json::Value::as_object)
+                .map_or(0, serde_json::Map::len);
+            if n == 0 {
+                return Err(format!(
+                    "laya-mcp: question `{id}` is a `choice` whose `criteria` is empty, so \
+                     there is no option to choose"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The ONE question schema, advertised by every tool that takes questions.
+///
+/// Spelled out once so `decide` and `ask` cannot drift, and so the advertised shape is the
+/// one the model actually reads. See [`validate_question_shape`] for the errors a caller gets
+/// when it is not.
+#[must_use]
+pub fn questions_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "description": "Questions keyed by id. Each value is a typed question. The key is the \
+                        `question_id` echoed back on the answer, so it is the join key a \
+                        caller uses to pick which answers to act on.",
+        "additionalProperties": {
+            "type": "object",
+            "required": ["type", "instructions"],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["noul", "choice", "score"],
+                    "description": "noul: one probability that the instruction is true. \
+                                    choice: pick one of the declared criteria keys. \
+                                    score: place the state on the criteria scale."
+                },
+                "instructions": {
+                    "type": "string",
+                    "description": "The question text. Required, and named `instructions` -- \
+                                    NOT `text`."
+                },
+                "criteria": {
+                    "description": "Required for `choice` and `score`; omit for `noul`. \
+                                    For `choice`: an object mapping each option to its \
+                                    description. For `score`: an ARRAY of level \
+                                    descriptions in ascending order -- these are the scale \
+                                    the score is measured against."
+                }
+            }
+        }
+    })
+}
+
 /// The description and JSON schema for a tool.
 fn tool_meta(name: &str) -> (String, serde_json::Map<String, serde_json::Value>) {
     let (desc, props, required) = match name {
@@ -292,7 +445,7 @@ fn tool_meta(name: &str) -> (String, serde_json::Map<String, serde_json::Value>)
              caller; the model never sees them.",
             json!({
                 "state": {"type": "string", "description": "the state to judge"},
-                "questions": {"type": "array", "description": "typed questions (noul/choice/score)"}
+                "questions": questions_schema(),
             }),
             json!(["state", "questions"]),
         ),
@@ -338,7 +491,7 @@ fn tool_meta(name: &str) -> (String, serde_json::Map<String, serde_json::Value>)
              paths plus a command. The command is gated first.",
             json!({
                 "command": {"type": "string"},
-                "questions": {"type": "array"}
+                "questions": questions_schema(),
             }),
             json!(["questions"]),
         ),
@@ -1589,6 +1742,13 @@ fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolRes
         .as_ref()
         .map_or_else(|| json!({}), |s| json!({"input": s}));
     let questions = args.questions.clone().unwrap_or_else(|| json!({}));
+    // Refuse a malformed question HERE, with a message that names the field, instead of
+    // forwarding it to the model and surfacing `AttributeError: 'list' object has no
+    // attribute 'keys'` or `KeyError: 'instructions'`. Both are what the OLD advertised
+    // schema produced: it said `array` and never mentioned `instructions`, so a caller
+    // following it failed with an error from inside the model's own Python, which says
+    // nothing about which argument was wrong or how.
+    validate_question_shape(&questions).map_err(|e| McpError::invalid_params(e, None))?;
 
     let answers = match state.sidecar.predict(&state_value, &questions) {
         Ok(a) => a,
@@ -2218,6 +2378,232 @@ mod tests {
         assert!(laya_store::segments(&dir).expect("segments").is_empty());
     }
 
+    // ---- the question contract, which three defects disagreed with --------------
+
+    /// Every question the model can read, in the shape the model documents.
+    fn a_readable_question_map() -> serde_json::Value {
+        json!({
+            "kind": {"type": "noul", "instructions": "Is this a bug?"},
+            "where": {
+                "type": "choice",
+                "instructions": "Where is the fault?",
+                "criteria": {"parser": "the parser", "lexer": "the lexer"}
+            },
+            "size": {
+                "type": "score",
+                "instructions": "How big?",
+                "criteria": ["one file", "one module", "the workspace"]
+            }
+        })
+    }
+
+    #[test]
+    fn decide_refuses_a_malformed_question_through_the_handler() {
+        // This is the test the control proved was missing. Disabling the call site in
+        // `decide_via_sidecar` left every validation test above PASSING, because they call
+        // `validate_question_shape` directly -- they test the validator, not the wiring. A
+        // check that stays green while the live path is unguarded certifies the bug.
+        //
+        // So this one goes through `handle`, the same entry point production uses, and must
+        // fail if the validator is ever unwired from `decide`.
+        let mut a = args_with(Some("some state"), None);
+        a.questions = Some(json!([
+            {"id": "k", "type": "noul", "text": "Is this a bug?"}
+        ]));
+        let out = handle("decide", &ready(), &a, &test_state());
+        let err = out.expect_err("an array of questions must be refused by `decide`");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("must be an OBJECT"),
+            "the refusal must come from the shape validator, not the model: {msg}"
+        );
+        assert!(
+            !msg.contains("AttributeError") && !msg.contains("KeyError"),
+            "the caller must not be shown the model's own Python error: {msg}"
+        );
+    }
+
+    #[test]
+    fn decide_refuses_a_text_field_through_the_handler_and_names_the_rename() {
+        let mut a = args_with(Some("some state"), None);
+        a.questions = Some(json!({"k": {"type": "noul", "text": "Is this a bug?"}}));
+        let err = handle("decide", &ready(), &a, &test_state())
+            .expect_err("`text` must be refused by `decide`");
+        let msg = format!("{err:?}");
+        assert!(msg.contains("not `text`"), "must name the rename: {msg}");
+    }
+
+    #[test]
+    fn decide_refuses_a_score_without_criteria_through_the_handler() {
+        let mut a = args_with(Some("some state"), None);
+        a.questions = Some(json!({"s": {"type": "score", "instructions": "How big?"}}));
+        let err = handle("decide", &ready(), &a, &test_state())
+            .expect_err("a score without criteria must be refused by `decide`");
+        assert!(format!("{err:?}").contains("needs `criteria`"), "{err:?}");
+    }
+
+    #[test]
+    fn a_well_formed_question_map_is_accepted() {
+        // The control: the validator must not refuse the shape the schema advertises, or it
+        // would reject every valid call and the three refusal tests below would prove nothing
+        // about anything else.
+        assert!(validate_question_shape(&a_readable_question_map()).is_ok());
+    }
+
+    #[test]
+    fn an_array_of_questions_is_refused_by_name() {
+        // Defect 1, measured: the schema used to say `array`, and sending one produced
+        // `AttributeError: 'list' object has no attribute 'keys'` from inside the model's
+        // Python -- an error that names neither the argument nor the fix.
+        let err = validate_question_shape(&json!([
+            {"id": "k", "type": "noul", "instructions": "Is this a bug?"}
+        ]))
+        .expect_err("an array must be refused");
+        assert!(err.contains("must be an OBJECT"), "{err}");
+        assert!(
+            err.contains("instructions"),
+            "the message must say how: {err}"
+        );
+    }
+
+    #[test]
+    fn text_instead_of_instructions_is_refused_and_names_the_rename() {
+        // Defect 2: `laya_abi::Question` names the field `text`, the model requires
+        // `instructions`, and the schema named neither. The refusal has to point at the
+        // rename, or the caller is left comparing two words it cannot see.
+        let err = validate_question_shape(&json!({
+            "k": {"type": "noul", "text": "Is this a bug?"}
+        }))
+        .expect_err("`text` must be refused");
+        assert!(err.contains("no `instructions`"), "{err}");
+        assert!(
+            err.contains("not `text`"),
+            "the message must name the rename: {err}"
+        );
+    }
+
+    #[test]
+    fn a_score_without_criteria_is_refused_by_name() {
+        // Defect 3: a score without criteria raises `TypeError: 'NoneType' object is not
+        // iterable`, and for a score the criteria ARE the scale -- so the number is
+        // uninterpretable even where it does not raise.
+        let err = validate_question_shape(&json!({
+            "s": {"type": "score", "instructions": "How big?"}
+        }))
+        .expect_err("a score without criteria must be refused");
+        assert!(err.contains("needs `criteria`"), "{err}");
+        assert!(err.contains("ARRAY") && err.contains("ascending"), "{err}");
+    }
+
+    #[test]
+    fn a_choice_without_criteria_is_refused_and_says_which_shape() {
+        let err = validate_question_shape(&json!({
+            "c": {"type": "choice", "instructions": "Which?"}
+        }))
+        .expect_err("a choice without criteria must be refused");
+        assert!(err.contains("OBJECT mapping each option"), "{err}");
+    }
+
+    #[test]
+    fn a_choice_with_an_empty_criteria_offers_nothing_to_choose() {
+        // The near-miss: `criteria` present but empty. It passes a presence check and still
+        // cannot be answered, which is exactly the "validator accepts a request that can
+        // never work" defect this project keeps removing.
+        let err = validate_question_shape(&json!({
+            "c": {"type": "choice", "instructions": "Which?", "criteria": {}}
+        }))
+        .expect_err("an empty choice must be refused");
+        assert!(err.contains("no option to choose"), "{err}");
+    }
+
+    #[test]
+    fn a_noul_needs_no_criteria() {
+        // And the other near-miss: `criteria` is required for two of the three types, NOT
+        // for all three. A rule that demanded it everywhere would refuse valid calls.
+        assert!(
+            validate_question_shape(&json!({
+                "k": {"type": "noul", "instructions": "Is this a bug?"}
+            }))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_unknown_question_type_is_refused_by_name() {
+        let err = validate_question_shape(&json!({
+            "k": {"type": "maybe", "instructions": "?"}
+        }))
+        .expect_err("an unknown type must be refused");
+        assert!(err.contains("maybe"), "{err}");
+    }
+
+    #[test]
+    fn the_advertised_schema_states_the_three_things_the_defects_got_wrong() {
+        // The schema IS the contract, so it gets asserted like one. Each assertion here is a
+        // defect that shipped: `array` instead of object, `text` instead of `instructions`,
+        // and `criteria` unmarked as required.
+        let s = questions_schema();
+        assert_eq!(s["type"], "object", "the questions are a MAP, not an array");
+        let item = &s["additionalProperties"];
+        let required: Vec<&str> = item["required"]
+            .as_array()
+            .expect("required")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert!(
+            required.contains(&"instructions"),
+            "instructions is required"
+        );
+        assert!(
+            !required.contains(&"text"),
+            "`text` is not the field name and must not be advertised"
+        );
+        assert!(
+            item["properties"]["instructions"]["description"]
+                .as_str()
+                .is_some_and(|d| d.contains("NOT `text`")),
+            "the schema must say the rename out loud"
+        );
+        assert!(
+            item["properties"]["criteria"]["description"]
+                .as_str()
+                .is_some_and(|d| d.contains("Required for `choice` and `score`")),
+            "criteria's requirement must be stated"
+        );
+    }
+
+    #[test]
+    fn every_tool_that_takes_questions_advertises_the_same_schema() {
+        // Two tools, one contract. If `decide` and `ask` disagreed, a caller that worked with
+        // one would fail with the other -- and only one of the two would ever get fixed.
+        //
+        // The arguments live under `properties`; the schema's own root is the object wrapper.
+        // My first version read the root and failed a correct schema -- the check was wrong,
+        // which is why the assertions name the path they read.
+        for tool in ["decide", "ask"] {
+            let (_, schema) = tool_meta(tool);
+            let q = schema["properties"].get("questions").unwrap_or_else(|| {
+                panic!(
+                    "{tool} must advertise `questions`; it advertises {:?}",
+                    schema["properties"]
+                        .as_object()
+                        .map(|m| m.keys().collect::<Vec<_>>())
+                )
+            });
+            assert_eq!(
+                q["type"], "object",
+                "{tool} advertises a non-object questions argument: {q}"
+            );
+            assert!(
+                q["additionalProperties"]["required"]
+                    .as_array()
+                    .is_some_and(|r| r.iter().any(|v| v == "instructions")),
+                "{tool}'s question items must require `instructions`: {q}"
+            );
+        }
+    }
+
     #[test]
     fn route_is_not_a_tool() {
         // The load-bearing absence: exposing `route` would let an agent select edges
@@ -2419,7 +2805,14 @@ mod tests {
         // The property that matters most for `decide`: with no head there is no
         // answer, and inventing one would be far worse than failing. The test state
         // points at a socket that cannot exist.
-        let a = args_with(Some("some state"), None);
+        // A WELL-FORMED question, or my shape validator refuses first and the assertion
+        // below would be checking the wrong cause. This test is about a dead sidecar, so the
+        // arguments must be valid enough to reach it -- which is itself the point of
+        // validating in front of the model.
+        let mut a = args_with(Some("some state"), None);
+        a.questions = Some(json!({
+            "k": {"type": "noul", "instructions": "Is this a bug?"}
+        }));
         let out = handle("decide", &ready(), &a, &test_state());
         assert!(out.is_err(), "decide must error with no head");
         let msg = out
