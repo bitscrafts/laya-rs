@@ -23,6 +23,7 @@ reading order.
 ## 05-operations
 - [Readiness and the priority queue](05-operations/READINESS-AND-QUEUE.md)
 - [The decision ledger](05-operations/DECISION-LEDGER.md)
+- [Observability — what can be seen, and what could not](05-operations/OBSERVABILITY.md)
 - [Operations](05-operations/README.md)
 
 ## 06-research

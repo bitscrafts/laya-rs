@@ -46,6 +46,11 @@ DOCS = {
         "The decision ledger",
         "The redb ledger: schema, single-writer model, budgets, querying.",
     ),
+    "05-operations/OBSERVABILITY.md": (
+        "Observability — what can be seen, and what could not",
+        "Measured state of observability in the deployment: the ledger that was silently off, the "
+        "operating configuration, the measured cost per call, and the questions still unanswerable.",
+    ),
     "05-operations/README.md": ("Operations", "Running the server, the ledger, budgets."),
     "06-research/01-design.md": (
         "Design (v1) — superseded in part",

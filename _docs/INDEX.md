@@ -42,6 +42,7 @@ in exactly one place; this index points at it, never restates it.
 ### 05-operations
 - [Readiness and the priority queue](05-operations/READINESS-AND-QUEUE.md) — How 'is Laya running?' is answered, and where a priority queue earns its place.
 - [The decision ledger](05-operations/DECISION-LEDGER.md) — The redb ledger: schema, single-writer model, budgets, querying.
+- [Observability — what can be seen, and what could not](05-operations/OBSERVABILITY.md) — Measured state of observability in the deployment: the ledger that was silently off, the operating configuration, the measured cost per call, and the questions still unanswerable.
 - [Operations](05-operations/README.md) — Running the server, the ledger, budgets.
 
 ### 06-research
