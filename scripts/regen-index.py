@@ -52,6 +52,17 @@ DOCS = {
         "operating configuration, the measured cost per call, and the questions still unanswerable.",
     ),
     "05-operations/README.md": ("Operations", "Running the server, the ledger, budgets."),
+    "05-operations/RESUME-PROMPT-2026-10-02.md": (
+        "Resume prompt — 2026-10-02 (read this first after the restart)",
+        "The conversation's state in one page: the one open item (whether the gate fires for a live "
+        "session), the exact before/after check that answers it, what was finished, the token "
+        "measurement, and the traps that cost time."
+    ),
+    "05-operations/RESTART-2026-10-02.md": (
+        "Restart state — 2026-10-02",
+        "What is deployed with hashes verified against the tree, the verification order, and the four "
+        "things deliberately left unfinished."
+    ),
     "06-research/01-design.md": (
         "Design (v1) — superseded in part",
         "The original design. Read DESIGN-AMENDMENTS first: the review corrected five blockers in it.",

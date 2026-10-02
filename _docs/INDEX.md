@@ -43,6 +43,8 @@ in exactly one place; this index points at it, never restates it.
 - [Readiness and the priority queue](05-operations/READINESS-AND-QUEUE.md) — How 'is Laya running?' is answered, and where a priority queue earns its place.
 - [The decision ledger](05-operations/DECISION-LEDGER.md) — The redb ledger: schema, single-writer model, budgets, querying.
 - [Observability — what can be seen, and what could not](05-operations/OBSERVABILITY.md) — Measured state of observability in the deployment: the ledger that was silently off, the operating configuration, the measured cost per call, and the questions still unanswerable.
+- [Resume prompt — 2026-10-02 (read this first after the restart)](05-operations/RESUME-PROMPT-2026-10-02.md) — The conversation's state in one page: the one open item (whether the gate fires for a live session), the exact before/after check that answers it, what was finished, the token measurement, and the traps that cost time.
+- [Restart state — 2026-10-02](05-operations/RESTART-2026-10-02.md) — What is deployed with hashes verified against the tree, the verification order, and the four things deliberately left unfinished.
 - [Operations](05-operations/README.md) — Running the server, the ledger, budgets.
 
 ### 06-research

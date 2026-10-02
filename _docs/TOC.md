@@ -25,6 +25,8 @@ reading order.
 - [The decision ledger](05-operations/DECISION-LEDGER.md)
 - [Observability — what can be seen, and what could not](05-operations/OBSERVABILITY.md)
 - [Operations](05-operations/README.md)
+- [Resume prompt — 2026-10-02 (read this first after the restart)](05-operations/RESUME-PROMPT-2026-10-02.md)
+- [Restart state — 2026-10-02](05-operations/RESTART-2026-10-02.md)
 
 ## 06-research
 - [Design (v1) — superseded in part](06-research/01-design.md)
