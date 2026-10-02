@@ -20,6 +20,7 @@ reading order.
 - [P1 status — and the measurements that shaped it](04-development/P1-STATUS.md)
 - [The ten levels, mapped to our tools](04-development/TEN-LEVELS-MAPPING.md)
 - [Development](04-development/README.md)
+- [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md)
 - [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md)
 
 ## 05-operations

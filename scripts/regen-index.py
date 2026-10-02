@@ -57,6 +57,12 @@ DOCS = {
         "Measured state of observability in the deployment: the ledger that was silently off, the "
         "operating configuration, the measured cost per call, and the questions still unanswerable.",
     ),
+    "04-development/ENGINE-DEFECTS-2026-10-02.md": (
+        "Engine defects — three confirmed findings in the graph executor",
+        "depends_on does not order a decide before its shell (measured: the shell ran LAST); "
+        "escalate_on_near_tie is validated but inert; and a decide's question type is hardcoded to "
+        "choice, so a flow can never ask the noul the head answers best."
+    ),
     "04-development/HEAD-QUESTION-SHAPE-LIMITS.md": (
         "The head's question-shape limits — measured",
         "A 3-option choice does not track a number while a noul threshold does (15/15, incl. the "
