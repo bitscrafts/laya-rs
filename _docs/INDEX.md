@@ -29,6 +29,9 @@ in exactly one place; this index points at it, never restates it.
 ### 02-guides
 - [Graph example — the `wc` word count, and what it exposed](02-guides/GRAPH-EXAMPLE-WORDCOUNT.md) — A worked graph using `wc`, its control, and the fix: the head answered MEDIUM across a 77x range with confidence 0.09-0.26 (band=low) every time, and only the flow that routed on `band` escalated instead of acting on a label the head had disowned.
 - [wc-classify-measured.flow.json — a word count that drives the branch](02-guides/wc-classify-measured.flow.json) — The end-to-end example for the placeholder: the shell emits only the number and the decision reads it, so the branch flips with the document.
+- [Graph example — the guessing game, and the boundary it is built to state](02-guides/GRAPH-EXAMPLE-GUESSING.md) — The second worked example: a shell produces a round's secret and guess, the decide's prompt carries the {{setup}} placeholder so the head judges the actual round, and the graph routes to the advice. One round per run -- the no-loop boundary documented and measured (the cycle refusal is run in the document), with a control pair and a break-the-port drill.
+- [guess-the-number.flow.json — one round of the guessing game as a graph](02-guides/guess-the-number.flow.json) — setup (shell) prints the round's facts, judge (decide) reads them through {{setup}} and routes on label to advise_lower / advise_higher / escalate, with emit_move joining on the judgement (an AND edge from a pruned branch would prune the join -- measured).
+- [guess-the-number.control.flow.json — the pair's control](02-guides/guess-the-number.control.flow.json) — The same graph with the guess on the other side of the secret; it must reach the OTHER advice node, and the pair collapses to identical branches when routing is broken.
 - [Guides](02-guides/README.md) — How to build, gate and call laya-rs.
 
 ### 03-reference

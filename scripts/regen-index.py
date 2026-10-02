@@ -115,6 +115,24 @@ DOCS = {
         "The end-to-end example for the placeholder: the shell emits only the number and the decision "
         "reads it, so the branch flips with the document."
     ),
+    "02-guides/GRAPH-EXAMPLE-GUESSING.md": (
+        "Graph example — the guessing game, and the boundary it is built to state",
+        "The second worked example: a shell produces a round's secret and guess, the decide's prompt "
+        "carries the {{setup}} placeholder so the head judges the actual round, and the graph routes "
+        "to the advice. One round per run -- the no-loop boundary documented and measured (the cycle "
+        "refusal is run in the document), with a control pair and a break-the-port drill."
+    ),
+    "02-guides/guess-the-number.flow.json": (
+        "guess-the-number.flow.json — one round of the guessing game as a graph",
+        "setup (shell) prints the round's facts, judge (decide) reads them through {{setup}} and "
+        "routes on label to advise_lower / advise_higher / escalate, with emit_move joining on the "
+        "judgement (an AND edge from a pruned branch would prune the join -- measured)."
+    ),
+    "02-guides/guess-the-number.control.flow.json": (
+        "guess-the-number.control.flow.json — the pair's control",
+        "The same graph with the guess on the other side of the secret; it must reach the OTHER "
+        "advice node, and the pair collapses to identical branches when routing is broken."
+    ),
     "04-development/HEAD-QUESTION-SHAPE-LIMITS.md": (
         "The head's question-shape limits — measured",
         "A 3-option choice does not track a number while a noul threshold does (15/15, incl. the "

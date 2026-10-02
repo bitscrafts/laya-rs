@@ -1,0 +1,51 @@
+{
+  "flow": "guess-the-number-control",
+  "version": 1,
+  "description": "CONTROL for guess-the-number.flow.json (spec 24, R3): the SAME graph with the guess on the OTHER side of the secret -- everything is byte-identical except setup's guess (57 -> 3) and this description. The main flow's guess (57) is HIGHER than the secret (41); this one's (3) is LOWER. If the branch selection is real, the two runs reach DIFFERENT advice nodes (advise_lower against advise_higher), and each run's skipped list names the branch the other flow took. A control whose runs cannot be told apart certifies nothing: the criterion's checker (it compares which advice node each flow reached) exits non-zero when both runs land on the same advice node, and the example's document records the day the port was deliberately broken and the checker went red. The decide still judges a round the GRAPH produced: its prompt is \"{{setup}}\" and the numbers live only in setup's shell command (spec 18 placeholders; no literal in any prompt). ONE ROUND PER RUN: no loops, no retry -- a cycle is refused and retry is refused -- so this file is one round and nothing more. See GRAPH-EXAMPLE-GUESSING.md in this directory.",
+  "nodes": [
+    {
+      "id": "setup",
+      "kind": "shell",
+      "run": "echo \"The secret is 41. The guess is 3.\"",
+      "timeout": 30
+    },
+    {
+      "id": "judge",
+      "kind": "decide",
+      "depends_on": ["setup"],
+      "prompt": "{{setup}}",
+      "question": "Is the guess higher than the secret?",
+      "options": ["yes", "no"],
+      "ports": {
+        "yes": "advise_lower",
+        "no": "advise_higher",
+        "_": "escalate"
+      }
+    },
+    {
+      "id": "advise_lower",
+      "kind": "shell",
+      "run": "echo \"ADVICE: the guess is too high -- go lower\"",
+      "timeout": 30
+    },
+    {
+      "id": "advise_higher",
+      "kind": "shell",
+      "run": "echo \"ADVICE: the guess is not higher -- go higher\"",
+      "timeout": 30
+    },
+    {
+      "id": "escalate",
+      "kind": "shell",
+      "run": "echo \"ESCALATED: the head's answer matched no declared port -- a human decides this round\"",
+      "timeout": 30
+    },
+    {
+      "id": "emit_move",
+      "kind": "shell",
+      "depends_on": ["judge"],
+      "run": "echo \"MOVE: the round is judged -- the branch the graph selected is the player's move for this round\"",
+      "timeout": 30
+    }
+  ]
+}

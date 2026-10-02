@@ -75,17 +75,17 @@ limitation quietly stops being true.
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && ./target/debug/laya graph validate _docs/02-guides/guess-the-number.flow.json` : exit 0
-- [ ] `cd /projects/laya-rs && ./target/debug/laya graph validate _docs/02-guides/guess-the-number.control.flow.json` : exit 0
-- [ ] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` : exit 0, and the report's `records` show `setup` ok and every node ok
-- [ ] `cd /projects/laya-rs && grep -c '{{setup}}' _docs/02-guides/guess-the-number.flow.json` : at least 1 (R2)
-- [ ] `cd /projects/laya-rs && python3 /projects/_tmp/check-guess-branches.py` : prints `BRANCHES DIFFER` (R3)
-- [ ] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` twice : the advice node named in both reports is identical (NF1)
-- [ ] `cd /projects/laya-rs && ls _docs/02-guides/guess-the-number*/` and `git ls-files _docs/02-guides/ | grep guess` : every path the flows read and write is tracked (NF4)
-- [ ] `cd /projects/laya-rs && grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : **no matches** (NF4)
-- [ ] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [ ] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
-- [ ] `cd /projects/laya-rs && python3 scripts/regen-index.py` : 0 broken links
+- [x] `cd /projects/laya-rs && ./target/debug/laya graph validate _docs/02-guides/guess-the-number.flow.json` : exit 0
+- [x] `cd /projects/laya-rs && ./target/debug/laya graph validate _docs/02-guides/guess-the-number.control.flow.json` : exit 0
+- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` : exit 0, and the report's `records` show `setup` ok and every node ok
+- [x] `cd /projects/laya-rs && grep -c '{{setup}}' _docs/02-guides/guess-the-number.flow.json` : at least 1 (R2)
+- [x] `cd /projects/laya-rs && python3 /projects/_tmp/check-guess-branches.py` : prints `BRANCHES DIFFER` (R3)
+- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` twice : the advice node named in both reports is identical (NF1)
+- [x] `cd /projects/laya-rs && ls _docs/02-guides/guess-the-number*/` and `git ls-files _docs/02-guides/ | grep guess` : every path the flows read and write is tracked (NF4)
+- [x] `cd /projects/laya-rs && grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : **no matches** (NF4)
+- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
+- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cd /projects/laya-rs && python3 scripts/regen-index.py` : 0 broken links
 
 ## Guardrails
 
@@ -99,3 +99,85 @@ limitation quietly stops being true.
   report rather than widening the change silently.
 - Do NOT commit. Leave the work in the tree.
 - Do NOT delete anything pre-existing; `mv` aside and say so.
+
+---
+
+## Verification of this spec (run here, 2026-10-02, after the worker finished)
+
+### 0. The worker did not commit
+HEAD `237cf08`, deleted tracked files **0**.
+
+### 1. Both flows validate and run, every node ok
+
+```
+guess-the-number.flow.json          setup  secret 41 / guess 57
+  setup         ok   The secret is 41. The guess is 57.
+  judge         ok   label=yes band=low conf=0.2484
+  judge/route   ok   value=yes -> selected_port=advise_lower
+  advise_lower  ok   ADVICE: the guess is too high -- go lower
+  emit_move     ok   MOVE: the round is judged ...
+  failed: NONE   stopped_early: False   not_started: []
+
+guess-the-number.control.flow.json  setup  secret 41 / guess 3
+  judge         ok   label=no  band=low conf=0.2680
+  judge/route   ok   value=no  -> selected_port=advise_higher
+  advise_higher ok   ADVICE: the guess is not higher -- go higher
+  failed: NONE   stopped_early: False   not_started: []
+```
+
+### 2. R2 — the prompt references the node, it does not state a literal
+
+```
+decide prompt : '{{setup}}'
+decide question: 'Is the guess higher than the secret?'
+setup run     : echo "The secret is 41. The guess is 57."
+```
+
+Both fields reach the head and do different jobs: `question` lowers to
+`questions/answer/instructions` and `prompt` to `state` (confirmed in `mcp_client.rs` and pinned by the
+wire test `every_decide_field_reaches_the_wire`). **The example does not repeat the defect the earlier
+committed examples still carry** — their prompts state the value as a literal while the node that
+computes it runs and is discarded.
+
+### 3. R3 — the control genuinely controls
+
+```
+flow    reached: ['advise_lower']    skipped: ['advise_higher', 'escalate']
+control reached: ['advise_higher']   skipped: ['advise_lower', 'escalate']
+BRANCHES DIFFER        (exit 0)
+```
+
+The two runs differ only in the guess, and they take **opposite branches**, each naming the other as
+skipped. Without this control, "the branch works" would be unfalsifiable.
+
+### 4. NF1 / NF4 / R4
+
+| requirement | measurement |
+|---|---|
+| NF1 deterministic | two runs → `advice=['advise_lower'] skipped=['advise_higher','escalate']` both times |
+| NF4 in-repo paths | `_tmp` occurrences in the flows: **0**; the flows read nothing outside the repo |
+| R4 no-loop claim still true | the 3-node cycle is still refused: `laya: dependency cycle: a -> c -> b -> a`, exit 1 |
+
+R4 is the control on the document's own claim: the example says the engine has no loops, so a test must
+show the refusal still fires. **A limitation nobody re-checks is how a limitation quietly stops being
+true.**
+
+### 5. The gate
+
+`cargo test --workspace` **612 passed · 0 failed** · clippy **0** · fmt **clean** ·
+`check-doc-citations.py` **71 docs, every citation resolves** · `regen-index.py` **124 links, 0 broken**.
+
+### 6. What this example does NOT claim, and one honest observation
+
+**It does not claim the graph loops.** It plays one round per run, and the document says so with the
+measured refusal above.
+
+**Observed, not a defect:** the head answers this question at **band `low`** (conf 0.2484 / 0.2680) in
+both flows. The labels are still correct and the branches differ, so the example works — but the
+confidence is low on a question this specific, and the earlier word-count measurements showed the head
+stronger on a coarser comparison. Recorded because a future reader would reasonably want to know that
+this example's routing rests on a low-confidence answer.
+
+**Also observed:** on the `no` branch the advice node's text reads *"the guess is not higher -- go
+higher"*, which is the **negation of the question** rather than a natural game hint. It is correct as a
+consequence of the answer and the graph routing is right; the wording is what a reader may find awkward.

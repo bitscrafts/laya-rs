@@ -11,6 +11,9 @@ reading order.
 - [Guides](02-guides/README.md)
 - [Graph example — the `wc` word count, and what it exposed](02-guides/GRAPH-EXAMPLE-WORDCOUNT.md)
 - [wc-classify-measured.flow.json — a word count that drives the branch](02-guides/wc-classify-measured.flow.json)
+- [Graph example — the guessing game, and the boundary it is built to state](02-guides/GRAPH-EXAMPLE-GUESSING.md)
+- [guess-the-number.flow.json — one round of the guessing game as a graph](02-guides/guess-the-number.flow.json)
+- [guess-the-number.control.flow.json — the pair's control](02-guides/guess-the-number.control.flow.json)
 
 ## 03-reference
 - [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md)

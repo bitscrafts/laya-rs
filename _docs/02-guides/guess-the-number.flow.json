@@ -1,0 +1,51 @@
+{
+  "flow": "guess-the-number",
+  "version": 1,
+  "description": "WORKED EXAMPLE (spec 24), second one beside wc-classify-measured: ONE round of a guessing game as a graph. `setup` (shell) produces the round: it prints the secret and the guess as one line, deterministically (no clock, no $RANDOM -- NF1). `judge` (decide) asks the head with prompt \"{{setup}}\": the placeholder is replaced, at dispatch, by setup's trimmed stdout (spec 18), so the head judges the ACTUAL round the command produced -- the round's numbers appear NOWHERE in this file except inside setup's run command. That is the property spec 19 measured as missing in the earlier wc examples, where the count was a literal in the prompt while the wc node's output went nowhere. The question is a two-option choice (\"Is the guess higher than the secret?\") because a flow decide is always a choice on the wire (a noul from a flow lowers to empty criteria, which laya-mcp refuses -- measured, see GRAPH-EXAMPLE-WORDCOUNT.md section 6.2) and this head's measured strength IS the two-option numeric comparison (15/15 on the boundary sweep, same doc, section 6.3). Routing is on `label` (the spec's R1 fixes it): yes -> advise_lower, no -> advise_higher, and `_` -> escalate -- an answer the ports do not declare is NAMED by the escalate branch, never silently routed elsewhere. A guess exactly EQUAL to the secret answers `no` here (the question is 2-option and `no` covers not-higher); these two flows never hit that case, and the one-round boundary below makes it moot for the game. THE JOIN, HONESTLY: the engine has exactly two edge classes -- a route port edge is an OR (the target runs when its route selected it); a depends_on edge is an AND (if any predecessor is skipped, the node is skipped, and the skip propagates). So emit_move cannot depend_on both advice nodes: the branch the graph did not select is pruned, an AND edge from a pruned node resolves dead, and emit_move would be skipped on EVERY run -- this is pinned by the committed test a_node_whose_dependency_was_pruned_is_skipped_and_named (crates/laya-graph/src/routing_order.rs:123) over crates/laya-graph/tests/fixtures/p7-join.flow.json. Instead emit_move depends_on [judge], the node that always runs and always precedes the route selection: it fires exactly once per round, as soon as the round is judged. On the selected yes/no path the adjacent advise_* record is the move; on the `_` path the adjacent record is the escalation. ONE ROUND PER RUN: this engine has no loops -- a cycle is refused (dependency cycle from validate; RunError::Cycle from the scheduler's own guard) and `retry` is refused -- so this file plays exactly one round and stops. N rounds: instantiate this flow N times with N guesses, or drive the loop outside the graph. See GRAPH-EXAMPLE-GUESSING.md in this directory for the measured evidence.",
+  "nodes": [
+    {
+      "id": "setup",
+      "kind": "shell",
+      "run": "echo \"The secret is 41. The guess is 57.\"",
+      "timeout": 30
+    },
+    {
+      "id": "judge",
+      "kind": "decide",
+      "depends_on": ["setup"],
+      "prompt": "{{setup}}",
+      "question": "Is the guess higher than the secret?",
+      "options": ["yes", "no"],
+      "ports": {
+        "yes": "advise_lower",
+        "no": "advise_higher",
+        "_": "escalate"
+      }
+    },
+    {
+      "id": "advise_lower",
+      "kind": "shell",
+      "run": "echo \"ADVICE: the guess is too high -- go lower\"",
+      "timeout": 30
+    },
+    {
+      "id": "advise_higher",
+      "kind": "shell",
+      "run": "echo \"ADVICE: the guess is not higher -- go higher\"",
+      "timeout": 30
+    },
+    {
+      "id": "escalate",
+      "kind": "shell",
+      "run": "echo \"ESCALATED: the head's answer matched no declared port -- a human decides this round\"",
+      "timeout": 30
+    },
+    {
+      "id": "emit_move",
+      "kind": "shell",
+      "depends_on": ["judge"],
+      "run": "echo \"MOVE: the round is judged -- the branch the graph selected is the player's move for this round\"",
+      "timeout": 30
+    }
+  ]
+}
