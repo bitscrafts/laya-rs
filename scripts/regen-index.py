@@ -52,6 +52,12 @@ DOCS = {
         "operating configuration, the measured cost per call, and the questions still unanswerable.",
     ),
     "05-operations/README.md": ("Operations", "Running the server, the ledger, budgets."),
+    "05-operations/TOOL-COVERAGE.md": (
+        "Tool coverage — what has actually been exercised",
+        "The 7 advertised tools against what the ledger shows has RUN: three have effectively never "
+        "been called. Includes the SDD+TDD gate graph, the paired control, and the break-the-control "
+        "check that proves the pair means something."
+    ),
     "05-operations/TOKEN-ECONOMY.md": (
         "Token economy — what it saves, what it costs, how it was measured",
         "The measured answer: 101,840 tokens saved per triage round (43x), 0 tokens of context cost "

@@ -1,0 +1,46 @@
+{
+  "flow": "sdd-tdd-gate",
+  "version": 1,
+  "description": "The verified winning SDD+TDD shape, encoded as a graph: a spec's exit criteria are RUN, Laya decides whether they passed as a `noul`, and the GRAPH owns the branch. Ports: `passed` -> merge, `failed` -> the failing-evidence branch, `_` (catch-all) -> escalate. The `_` port is mandatory: Laya returns a value, never an edge, and an unmatched label must not fall through silently.",
+  "nodes": [
+    {
+      "id": "run_criteria",
+      "kind": "shell",
+      "run": "cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_queued_siblings_from_starting 2>&1 | grep -E '^test result:' | head -1",
+      "timeout": 300
+    },
+    {
+      "id": "judge",
+      "kind": "decide",
+      "depends_on": [
+        "run_criteria"
+      ],
+      "prompt": "The spec's exit criteria were run and printed this result line: `test result: ok. 1 passed; 0 failed; 0 ignored`. Question: did the exit criteria PASS?",
+      "question": "Did the exit criteria pass?",
+      "options": [
+        "passed",
+        "failed"
+      ],
+      "ports": {
+        "passed": "merge_green",
+        "failed": "report_red",
+        "_": "escalate_unparsed"
+      }
+    },
+    {
+      "id": "merge_green",
+      "kind": "shell",
+      "run": "echo 'GREEN: criteria passed -> orchestrator reviews the diff and commits'"
+    },
+    {
+      "id": "report_red",
+      "kind": "shell",
+      "run": "echo 'RED: criteria failed -> fix before commit; the graph did not let this merge'"
+    },
+    {
+      "id": "escalate_unparsed",
+      "kind": "shell",
+      "run": "echo 'UNPARSED: not passed/failed -> a human looks; nothing merges'"
+    }
+  ]
+}

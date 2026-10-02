@@ -390,6 +390,96 @@ async fn run_fixture_with_ledger(
 }
 
 // ---------------------------------------------------------------------------
+// R-SDD: the winning SDD+TDD shape, encoded as a graph
+//
+// The claim this pair establishes is narrow and worth stating: a spec's exit criteria can be
+// RUN by a graph node, the judgement of "did they pass" can be made by Laya, and the GRAPH can
+// own the branch -- so nothing merges on a red criteria run. The two fixtures are each other's
+// control: identical graph, different state, and they must reach DIFFERENT branches. One fixture
+// alone proves nothing, because a graph stuck on one branch would pass it too.
+// ---------------------------------------------------------------------------
+
+#[ignore = "live: needs the backbone and the sidecar; run with --include-ignored"]
+#[tokio::test]
+async fn an_sdd_gate_merges_only_when_the_criteria_pass() {
+    require_backbone_or_fail();
+    let bin = resolve_mcp_binary();
+
+    let report = run_fixture("tests/fixtures/sdd-tdd-gate.json", &bin, "sdd-green").await;
+    assert!(!report.stopped_early, "the run must complete: {report:?}");
+
+    let route = report
+        .records
+        .iter()
+        .find(|r| r.node_id == "judge/route")
+        .unwrap_or_else(|| panic!("the route node must have a record: {report:?}"));
+    println!("SDD GATE (passing criteria) ROUTE: {}", route.output);
+
+    // The criteria node must have actually RUN the command, not been skipped: its record
+    // carries the test result line. A graph that skipped the criteria and went straight to the
+    // judge would otherwise look identical here.
+    let criteria = report
+        .records
+        .iter()
+        .find(|r| r.node_id == "run_criteria")
+        .unwrap_or_else(|| panic!("the criteria node must have run: {report:?}"));
+    assert!(
+        criteria.output.contains("test result:"),
+        "the criteria node must carry the real result line: {}",
+        criteria.output
+    );
+
+    let ran: Vec<&str> = report.records.iter().map(|r| r.node_id.as_str()).collect();
+    println!("SDD GATE (passing criteria) NODES RAN: {ran:?}");
+    assert!(
+        ran.contains(&"merge_green"),
+        "passing criteria did not reach the green branch: {ran:?}, route: {}",
+        route.output
+    );
+    assert!(
+        !ran.contains(&"report_red"),
+        "a passing run must NOT reach the red branch: {ran:?}"
+    );
+}
+
+/// The control, and the reason the test above means anything: the SAME graph with FAILING
+/// criteria must reach `report_red`. If both fixtures took the same branch, the first test
+/// would pass on a graph that had the branch hard-wired.
+#[ignore = "live: needs the backbone and the sidecar; run with --include-ignored"]
+#[tokio::test]
+async fn the_control_failing_criteria_are_refused_the_green_branch() {
+    require_backbone_or_fail();
+    let bin = resolve_mcp_binary();
+
+    let report = run_fixture(
+        "tests/fixtures/sdd-tdd-gate-control-fail.json",
+        &bin,
+        "sdd-red",
+    )
+    .await;
+    assert!(!report.stopped_early, "the run must complete: {report:?}");
+
+    let route = report
+        .records
+        .iter()
+        .find(|r| r.node_id == "judge/route")
+        .unwrap_or_else(|| panic!("the route node must have a record: {report:?}"));
+    println!("SDD GATE (failing criteria) ROUTE: {}", route.output);
+
+    let ran: Vec<&str> = report.records.iter().map(|r| r.node_id.as_str()).collect();
+    println!("SDD GATE (failing criteria) NODES RAN: {ran:?}");
+    assert!(
+        ran.contains(&"report_red"),
+        "failing criteria did not reach the red branch: {ran:?}, route: {}",
+        route.output
+    );
+    assert!(
+        !ran.contains(&"merge_green"),
+        "FAILING criteria reached the green branch -- nothing must merge on red: {ran:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // R-ACC
 // ---------------------------------------------------------------------------
 
