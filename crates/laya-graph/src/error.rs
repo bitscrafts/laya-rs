@@ -91,6 +91,37 @@ pub enum FlowError {
         on: String,
     },
 
+    /// A `{{target}}` in a decide's `prompt` names no node in the flow.
+    #[error(
+        "decide node `{id}` prompt references `{{{{{target}}}}}`, which is not a node in this flow. Name an existing node in `depends_on`; a literal `{{{{` is not allowed in a prompt"
+    )]
+    MissingPlaceholderTarget {
+        /// The decide node.
+        id: String,
+        /// The id the placeholder named.
+        target: String,
+    },
+
+    /// A `{{target}}` names a real node that is not in this decide's `depends_on`.
+    #[error(
+        "decide node `{id}` prompt references `{{{{{target}}}}}`, but `{target}` is not in its `depends_on` — it would not have run yet. Add `{target}` to `depends_on`"
+    )]
+    PlaceholderNotDependency {
+        /// The decide node.
+        id: String,
+        /// The id the placeholder named.
+        target: String,
+    },
+
+    /// A decide's prompt references the decide itself.
+    #[error(
+        "decide node `{id}` prompt references itself (`{{{{{id}}}}}`), whose output cannot exist before it runs"
+    )]
+    PlaceholderSelf {
+        /// The decide node.
+        id: String,
+    },
+
     /// A `decide` port key is not a value the route can produce.
     #[error(
         "decide node `{id}` has port key `{key}`, which is not one of the {on} values {expected:?} or `_` — a mistyped key is hidden by the `_` catch-all. Rename it to one of those{hint}"

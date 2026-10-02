@@ -31,7 +31,7 @@
 //! predecessor completed** — the gate -> ask pattern of `wc-classify-chained` is exactly this.
 //! A node is settled (live or skipped) only when every inbound edge is resolved.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -42,8 +42,10 @@ use tokio::task::{JoinHandle, JoinSet};
 use crate::error::RunError;
 use crate::graph::{Graph, GraphNode, NodeBody};
 use crate::node::{CallContext, Executed, McpCaller, execute_mcp, execute_shell, failed};
+use crate::placeholder;
 use crate::route_exec::resolve_route;
 use crate::run::{NodeRecord, RunReport};
+use laya_core::agentic::STATE_CAP_BYTES;
 
 /// The deterministic topological order of `graph`'s nodes (R8).
 ///
@@ -198,7 +200,10 @@ pub async fn run_from(
 
     while let Some(outcome) = joins.join_next().await {
         let record = match outcome {
-            Ok(Outcome::Ran(record)) => record,
+            Ok(Outcome::Ran(record, stdout)) => {
+                tracker.stdouts.insert(record.node_id.clone(), stdout);
+                record
+            }
             // Halted before its work began: it gets no record, and
             // `nodes_without_record` accounts for it below (R2).
             Ok(Outcome::Halted) => continue,
@@ -256,6 +261,7 @@ pub async fn run_from(
         records,
         not_started,
         skipped,
+        skip_reasons: tracker.reasons.clone(),
         wall_ms: elapsed_ms(origin),
     })
 }
@@ -287,6 +293,10 @@ struct Tracker {
     out: HashMap<String, Vec<OutEdge>>,
     ready: BTreeSet<String>,
     skipped: BTreeSet<String>,
+    /// Why a node was skipped, where the reason is more than "its path was not taken" (spec 18).
+    reasons: BTreeMap<String, String>,
+    /// Each ran node's stdout alone, for `{{node_id}}` substitution (spec 18).
+    stdouts: HashMap<String, String>,
 }
 
 impl Tracker {
@@ -320,7 +330,16 @@ impl Tracker {
             out,
             ready,
             skipped: BTreeSet::new(),
+            reasons: BTreeMap::new(),
+            stdouts: HashMap::new(),
         }
+    }
+
+    /// Skip `id` for `reason` and propagate: its own outgoing edges resolve dead.
+    fn skip_with_reason(&mut self, id: &str, reason: String) {
+        self.skipped.insert(id.to_string());
+        self.reasons.insert(id.to_string(), reason);
+        self.resolve(id, |_| false);
     }
 
     /// Resolve every outgoing edge of `from` (which completed, or was skipped when `live` says
@@ -408,6 +427,13 @@ fn dispatch(
             tracker.resolve(&id, |edge| edge.to == selected);
             continue;
         }
+        let node = match substitute_prompt(node, records, &tracker.stdouts) {
+            Ok(node) => node,
+            Err((id, reason)) => {
+                tracker.skip_with_reason(&id, reason);
+                continue;
+            }
+        };
         let run_id = opts.run_id.clone();
         let fanout = Arc::clone(&gates.fanout);
         let write_lock = Arc::clone(&gates.write_lock);
@@ -416,6 +442,61 @@ fn dispatch(
         joins.spawn(run_one(node, run_id, fanout, write_lock, halt, mcp, origin));
     }
     Ok(None)
+}
+
+/// Resolve `{{node_id}}` in a lowered decide's `prompt` just before it is dispatched (spec 18).
+///
+/// A node with no placeholder is returned untouched. A referent that failed (even with
+/// `allow_failure`), has no record, printed nothing, or printed more than
+/// [`STATE_CAP_BYTES`] skips the decide: `Err((id, reason))`. An empty string is never
+/// substituted, because a decision over nothing reads exactly like one over real data.
+fn substitute_prompt(
+    mut node: GraphNode,
+    records: &[NodeRecord],
+    stdouts: &HashMap<String, String>,
+) -> Result<GraphNode, (String, String)> {
+    let NodeBody::Mcp { tool, arguments } = &mut node.body else {
+        return Ok(node);
+    };
+    if tool != "decide" {
+        return Ok(node);
+    }
+    let Some(prompt) = arguments.get("prompt").and_then(|p| p.as_str()) else {
+        return Ok(node);
+    };
+    let refs = placeholder::references(prompt);
+    if refs.is_empty() {
+        return Ok(node);
+    }
+    let id = node.id.clone();
+    let skip = |reason: String| (id.clone(), reason);
+    for target in refs {
+        let Some(record) = records.iter().find(|r| r.node_id == target) else {
+            return Err(skip(format!("referenced node `{target}` has no record")));
+        };
+        if !record.success {
+            return Err(skip(format!(
+                "referenced node `{target}` failed ({})",
+                record.error.as_deref().unwrap_or("no error recorded")
+            )));
+        }
+        let value = stdouts.get(target).map_or("", |s| s.trim());
+        if value.is_empty() {
+            return Err(skip(format!("referenced node `{target}` printed nothing")));
+        }
+        if value.len() > STATE_CAP_BYTES {
+            return Err(skip(format!(
+                "referenced node `{target}` printed {} bytes, over the {STATE_CAP_BYTES}-byte state cap",
+                value.len()
+            )));
+        }
+    }
+    let substituted = placeholder::substitute(prompt, |t| stdouts.get(t).map(|s| s.trim()))
+        .map_err(|t| skip(format!("referenced node `{t}` has no stdout")))?;
+    if let Some(slot) = arguments.get_mut("prompt") {
+        *slot = serde_json::Value::String(substituted);
+    }
+    Ok(node)
 }
 
 /// The shared gates every node passes before its work begins.
@@ -430,7 +511,7 @@ struct Gates {
 /// What a spawned node task came to: its record, or that it was halted
 /// before its work began.
 enum Outcome {
-    Ran(NodeRecord),
+    Ran(NodeRecord, String),
     Halted,
 }
 
@@ -487,21 +568,19 @@ async fn run_one(
 ) -> Outcome {
     let spawned = Instant::now();
     let Ok(_fanout_permit) = fanout.acquire_owned().await else {
-        return Outcome::Ran(failed_record(
-            run_id,
-            node.id,
-            "internal: fan-out semaphore closed",
-        ));
+        return Outcome::Ran(
+            failed_record(run_id, node.id, "internal: fan-out semaphore closed"),
+            String::new(),
+        );
     };
     let _write_permit = if node.writes {
         match write_lock.acquire_owned().await {
             Ok(permit) => Some(permit),
             Err(_) => {
-                return Outcome::Ran(failed_record(
-                    run_id,
-                    node.id,
-                    "internal: write-lock semaphore closed",
-                ));
+                return Outcome::Ran(
+                    failed_record(run_id, node.id, "internal: write-lock semaphore closed"),
+                    String::new(),
+                );
             }
         }
     } else {
@@ -543,18 +622,21 @@ async fn run_one(
         halt.store(true, Ordering::SeqCst);
     }
 
-    Outcome::Ran(NodeRecord {
-        run_id,
-        node_id: node.id,
-        success: executed.success,
-        exit_code: executed.exit_code,
-        output: executed.output,
-        error: executed.error,
-        duration_ms: executed.duration_ms,
-        timed_out: executed.timed_out,
-        queued_ms,
-        started_at_ms,
-    })
+    Outcome::Ran(
+        NodeRecord {
+            run_id,
+            node_id: node.id,
+            success: executed.success,
+            exit_code: executed.exit_code,
+            output: executed.output,
+            error: executed.error,
+            duration_ms: executed.duration_ms,
+            timed_out: executed.timed_out,
+            queued_ms,
+            started_at_ms,
+        },
+        executed.stdout,
+    )
 }
 
 /// Run an `mcp` node under its optional deadline (R1).
@@ -592,6 +674,7 @@ async fn join_executed(handle: JoinHandle<Executed>) -> Executed {
             success: false,
             exit_code: None,
             output: String::new(),
+            stdout: String::new(),
             error: Some(format!("node task failed: {e}")),
             duration_ms: 0,
             timed_out: false,

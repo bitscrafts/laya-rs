@@ -78,16 +78,16 @@ watching it go red, and restoring.
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_shell_output_reaches_the_decision_and_changes_the_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_the_same_flow_with_the_other_value_takes_the_other_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unlisted_reference_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failed_referent_skips_the_decide_rather_than_asking_over_empty 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_literal_prompt_without_placeholders_is_unchanged 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] **a real end-to-end `wc` example that genuinely depends on `wc`** exists and is run: write `/projects/laya-rs/_docs/02-guides/wc-classify-measured.flow.json` where the shell emits ONLY the number (`wc -w < file`) and the decide's **`prompt` is the state** `The word count in the file is {{count}} words.` and its **`question` is separate**: `Is it greater than 300?`. Do NOT put the question in the prompt -- `prompt` is the state handed to the head, `question` is what it is asked. Run it on both documents and paste both reports showing the branches **differ**.
-- [ ] `cd /projects/laya-rs && laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the older committed example still runs
-- [ ] `cd /projects/laya-rs && cargo test --workspace`
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [ ] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_shell_output_reaches_the_decision_and_changes_the_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_the_same_flow_with_the_other_value_takes_the_other_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unlisted_reference_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failed_referent_skips_the_decide_rather_than_asking_over_empty 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_literal_prompt_without_placeholders_is_unchanged 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] **a real end-to-end `wc` example that genuinely depends on `wc`** exists and is run: write `/projects/laya-rs/_docs/02-guides/wc-classify-measured.flow.json` where the shell emits ONLY the number (`wc -w < file`) and the decide's **`prompt` is the state** `The word count in the file is {{count}} words.` and its **`question` is separate**: `Is it greater than 300?`. Do NOT put the question in the prompt -- `prompt` is the state handed to the head, `question` is what it is asked. Run it on both documents and paste both reports showing the branches **differ**.
+- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the older committed example still runs
+- [x] `cd /projects/laya-rs && cargo test --workspace`
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
 
 The end-to-end criterion is the one that matters: **a `wc` whose value actually drives the branch**,
 which no flow in this repo can do today. If the head answers wrongly on the substituted shape, that
@@ -103,3 +103,57 @@ it passes.
 - Do NOT modify `specs/`.
 - **Run graphs, do not only read code** (user instruction: *"graph must be ran from laya!"*).
 - Do not delete anything; `mv` aside and say so.
+
+---
+
+## Verification of this spec (run here, 2026-10-02, after the worker finished)
+
+### The criterion that mattered: a `wc` whose value DRIVES the branch
+
+No flow in this repository could do this before today. Run through the CLI on the committed
+`_docs/02-guides/wc-classify-measured.flow.json`, where the shell emits **only the number**
+(`wc -w < "$WC_FILE"`) and the prompt is `The word count in the file is {{count_words}} words.`:
+
+```
+$ WC_FILE=…/short-note.txt ./target/debug/laya graph run wc-classify-measured.flow.json
+    0 ms  count_words   13
+    2 ms  gt300         label=no   band=mid  confidence=0.6451      <- the SUBSTITUTED value
+  145 ms  gt300/route   selected_port=class_short
+  145 ms  class_short   CLASSIFIED: SHORT (not more than 300 words)
+
+$ WC_FILE=…/long-note.txt ./target/debug/laya graph run wc-classify-measured.flow.json
+            gt300         label=yes  band=low  confidence=0.2389
+            class_long    CLASSIFIED: LONG (more than 300 words)
+```
+
+**The branch flips because the substituted value changed** — 13 words is not over 300, 412 words is.
+That is the control that makes the first run mean something: without it, a hardcoded substitution
+would pass identically.
+
+**Honest note:** the 412-word answer came back **`band=low`** (confidence 0.2389). The label is right
+and the branch is right, but the head is not confident at that phrasing — which is the same limit
+recorded in `HEAD-QUESTION-SHAPE-LIMITS.md`, now reachable inside a flow. A flow that needs to act on
+low confidence should band-gate, as the earlier examples do.
+
+### Everything else
+
+| check | result |
+|---|---|
+| 7 named tests (5 required + 2 controls) | **7/7 PASS**, each `ok. 1 passed` |
+| `cargo test --workspace` | **589 passed, 0 failed** |
+| clippy `-D warnings` / fmt / doc citations | 0 / clean / 65 docs resolve |
+
+### The one thing the worker could not verify, and it said so
+
+`scripts/verify-all.sh` never returned a verdict — the worker's monitor windows expired while it ran,
+twice. It recorded that as unverified rather than claiming it. **That is the correct behaviour and it
+is why the report was worth reading**: it distinguished what it had run from what it had not.
+
+**The `timeout` on a decide is now live** (see `04-development/STALE-REFUSALS-2026-10-02.md`), which
+makes spec 20's interim refusal of that field **stale** — filed as spec 21.
+
+### Note: this criterion named `laya` (the PATH binary), which is STALE
+
+`/root/.local/bin/laya` was built at 14:27 and is not a build of this tree. Both CLI criteria that
+named it have been re-pointed at `./target/debug/laya` and verified that way. **A criterion must name
+the binary it tests** — this is the third spec in this batch to need that correction.

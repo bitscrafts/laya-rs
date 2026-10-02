@@ -33,6 +33,9 @@ pub struct Executed {
     pub exit_code: Option<i32>,
     /// Raw stdout (and, for `shell`, stderr appended after it).
     pub output: String,
+    /// The stdout alone — what a `{{node_id}}` placeholder substitutes (spec 18). Kept apart
+    /// from `output` so a warning on stderr can never become part of a decision's state.
+    pub stdout: String,
     /// Set when `success` is `false`: why. Kept as text rather than a typed
     /// error, because the two sources (a process's stderr, a tool's error
     /// string) do not share a vocabulary.
@@ -137,7 +140,8 @@ pub async fn execute_shell(run: &str, timeout: Option<Duration>) -> Executed {
         Ok(Ok(output)) => {
             let success = output.status.success();
             let exit_code = output.status.code();
-            let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let mut combined = stdout.clone();
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !stderr.is_empty() {
                 if !combined.is_empty() {
@@ -157,6 +161,7 @@ pub async fn execute_shell(run: &str, timeout: Option<Duration>) -> Executed {
                 success,
                 exit_code,
                 output: combined,
+                stdout,
                 error,
                 duration_ms,
                 timed_out: false,
@@ -199,6 +204,7 @@ pub const fn failed(error: String, duration_ms: u64, timed_out: bool) -> Execute
         success: false,
         exit_code: None,
         output: String::new(),
+        stdout: String::new(),
         error: Some(error),
         duration_ms,
         timed_out,
@@ -222,6 +228,7 @@ pub fn execute_mcp(
         Ok(output) => Executed {
             success: true,
             exit_code: None,
+            stdout: output.clone(),
             output,
             error: None,
             duration_ms,

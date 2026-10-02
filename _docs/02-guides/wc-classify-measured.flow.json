@@ -1,0 +1,24 @@
+{
+  "flow": "wc-classify-measured",
+  "version": 1,
+  "description": "A shell's output drives a decision (spec 18). `count_words` emits ONLY the number (`wc -w < file`); the decide's `prompt` is the STATE, `The word count in the file is {{count_words}} words.`, with `{{count_words}}` replaced at dispatch by that node's trimmed stdout; its `question` is the separate field `Is it greater than 300?`. The file is read from $WC_FILE (default: the 13-word note), so the same flow runs on two documents and the branch follows the document. A threshold over a count is inside this head's measured competence; set-membership over a list is not -- do not use this pattern for the latter.",
+  "nodes": [
+    {
+      "id": "count_words",
+      "kind": "shell",
+      "run": "wc -w < \"${WC_FILE:-/projects/_tmp/wc-example/short-note.txt}\"",
+      "timeout": 30
+    },
+    {
+      "id": "gt300",
+      "kind": "decide",
+      "depends_on": ["count_words"],
+      "prompt": "The word count in the file is {{count_words}} words.",
+      "question": "Is it greater than 300?",
+      "options": ["yes", "no"],
+      "ports": { "yes": "class_long", "no": "class_short" }
+    },
+    { "id": "class_short", "kind": "shell", "run": "echo 'CLASSIFIED: SHORT (not more than 300 words)'" },
+    { "id": "class_long", "kind": "shell", "run": "echo 'CLASSIFIED: LONG (more than 300 words)'" }
+  ]
+}

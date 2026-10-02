@@ -69,6 +69,7 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
         validate_required(node)?;
         if node.kind == Kind::Decide {
             validate_decide(node, &ids)?;
+            crate::placeholder::validate_references(node, flow)?;
         }
         validate_retry(node)?;
     }

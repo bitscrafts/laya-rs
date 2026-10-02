@@ -24,10 +24,10 @@ Two rules, stated here once; other documents link to this section rather than re
 Both come from `_docs/04-development/OPUS-REVIEW-GENERIC-GRAPHS.md` and were measured with
 `laya graph run`.
 
-1. **A `decide`'s state is a literal; a shell in the same flow cannot inform it.** The `prompt` is
-   sent to the head as written. A shell's output is never substituted into it, so a `count_words`
-   node next to a `decide` is a *witness*, not an input (see `GRAPH-EXAMPLE-WORDCOUNT.md`). This
-   holds until spec 18 (`18-a-shell-can-inform-a-decision.md`) lands; it has not.
+1. **A `decide`'s state is a literal unless it names a `{{node_id}}`.** The `prompt` is sent to the
+   head as written, except that each `{{id}}` is replaced by that node's trimmed stdout (spec 18;
+   see "`{{node_id}}` in a decide's prompt" below). Without a placeholder a shell next to a
+   `decide` is a *witness*, not an input (see `GRAPH-EXAMPLE-WORDCOUNT.md`).
 2. **Which nodes run was a function of the node array order.** Measured with the `p6-file-order` /
    `p6c-file-order-control` pair (identical graphs, array reordered): the executed-node sets differed.
    **Superseded 2026-10-02 by spec 17 (commit `ac9e94f`)**: routing is now a function of the graph,
@@ -145,6 +145,45 @@ fix. Read-only nodes fan out freely.
 computed by *our* thresholds from the head's confidence. An uncertain answer then escalates
 along an edge that was drawn at author time — no graph change, no new node, and tuning the
 threshold changes a number in our config, never the flow.
+
+### `{{node_id}}` in a decide's `prompt` (spec 18)
+
+```json
+{ "id": "count", "kind": "shell", "run": "wc -w < doc.txt" },
+{ "id": "gt300", "kind": "decide", "depends_on": ["count"],
+  "prompt": "The word count in the file is {{count}} words.",
+  "question": "Is it greater than 300?", "options": ["yes", "no"],
+  "ports": { "yes": "long", "no": "short" } }
+```
+
+Worked, run example: `_docs/02-guides/wc-classify-measured.flow.json`.
+
+* **What it is.** `{{id}}` in `prompt` is replaced, once, just before the call, by the **trimmed
+  stdout** of node `id` (stdout only: a warning on stderr is not part of it). It is a value, not
+  an expression: there is no arithmetic, no comparison, no default. The head is the only thing
+  that decides.
+* **`prompt` is the state; `question` is what is asked.** Keep the question out of the prompt.
+  The shell should print only the value (`wc -w < f`) so the flow owns the phrasing.
+* **It must name a `depends_on` entry.** `validate` refuses, naming the id and the decide, when
+  the id is not a node (`MissingPlaceholderTarget`), is a node not in this decide's `depends_on`
+  (`PlaceholderNotDependency`), or is the decide itself (`PlaceholderSelf`).
+* **A referent with no value skips the decide.** If the referenced node failed (**including one
+  with `allow_failure: true`**), has no record, or printed nothing, the decide is **skipped**: it
+  is listed in `RunReport.skipped` with a reason in `RunReport.skip_reasons`, its branches are
+  skipped with it, and the head is never called. An empty string is never substituted.
+* **The cap.** A value over 256 KiB (`laya_core::agentic::STATE_CAP_BYTES`, the cap on a composed
+  state) skips the decide the same way; it is a refusal, never a truncation. A value at the cap is
+  asked. Separately, the head
+  tokenizer truncates a long state on the right (512 tokens including the question), so a large
+  value is not a good state: print a count, not a file.
+* **`{{` in a literal prompt is now ambiguous.** A prompt containing `{{x}}` is always read as a
+  reference, so a literal one is refused by the rules above. A `{{` with no closing `}}` is left as
+  literal text. A flow with no placeholder is unchanged.
+* **Measured limit of the head.** A threshold over a count is answered reliably; **set
+  membership over a list is not** ("which of these paths changed?" answered wrongly), so feed it
+  counts, not lists.
+* **Scope.** Only a lowered `decide` is substituted. A hand-written `mcp` node is not validated
+  for placeholders.
 
 ### Composition (suggested)
 

@@ -28,6 +28,7 @@ in exactly one place; this index points at it, never restates it.
 
 ### 02-guides
 - [Graph example — the `wc` word count, and what it exposed](02-guides/GRAPH-EXAMPLE-WORDCOUNT.md) — A worked graph using `wc`, its control, and the fix: the head answered MEDIUM across a 77x range with confidence 0.09-0.26 (band=low) every time, and only the flow that routed on `band` escalated instead of acting on a label the head had disowned.
+- [wc-classify-measured.flow.json — a word count that drives the branch](02-guides/wc-classify-measured.flow.json) — The end-to-end example for the placeholder: the shell emits only the number and the decision reads it, so the branch flips with the document.
 - [Guides](02-guides/README.md) — How to build, gate and call laya-rs.
 
 ### 03-reference
@@ -43,6 +44,7 @@ in exactly one place; this index points at it, never restates it.
 - [Opus review — running generic graphs through laya](04-development/OPUS-REVIEW-GENERIC-GRAPHS.md) — An independent review that re-ran every claim with laya graph run. Found that routing is not a function of the graph (node ARRAY ORDER decides execution), that the near-tie target runs unconditionally, and that 'no data flow at all' was wrong: data CAN reach the head, it cannot reach an edge. Five contradictions, three re-verified here.
 - [Analysis — why a generic graph cannot run today](04-development/GENERIC-GRAPHS-ANALYSIS.md) — The engine has no data flow at all: every decide input is a literal compiled into the flow file, and all four mechanisms that could carry run-time data are absent. The two-phase execution model, what a flow can actually express, and a ranked set of fixes.
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md) — depends_on does not order a decide before its shell (measured: the shell ran LAST); escalate_on_near_tie is validated but inert; and a decide's question type is hardcoded to choice, so a flow can never ask the noul the head answers best.
+- [Stale refusals — a rule that outlives its reason is a defect too](04-development/STALE-REFUSALS-2026-10-02.md) — Spec 20 refused timeout and allow_failure on a decide 'until spec 17'. Spec 17 landed and the timeout now works: a decide with timeout zero fails as timed out. The refusal was stale and blocked a working feature. The other half is worse than refused -- allow_failure is accepted, looks honoured, then the synthetic route node stops the run anyway.
 - [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md) — A 3-option choice does not track a number while a noul threshold does (15/15, incl. the boundary); and a bare noul on a subjective question returns a confident CONSTANT (no at 1.0 for both positive and negative text). Why the correct handling is bounding one signal.
 - [Development](04-development/README.md) — Design decisions and implementation notes.
 

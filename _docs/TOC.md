@@ -10,6 +10,7 @@ reading order.
 ## 02-guides
 - [Guides](02-guides/README.md)
 - [Graph example — the `wc` word count, and what it exposed](02-guides/GRAPH-EXAMPLE-WORDCOUNT.md)
+- [wc-classify-measured.flow.json — a word count that drives the branch](02-guides/wc-classify-measured.flow.json)
 
 ## 03-reference
 - [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md)
@@ -25,6 +26,7 @@ reading order.
 - [Opus review — running generic graphs through laya](04-development/OPUS-REVIEW-GENERIC-GRAPHS.md)
 - [Analysis — why a generic graph cannot run today](04-development/GENERIC-GRAPHS-ANALYSIS.md)
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md)
+- [Stale refusals — a rule that outlives its reason is a defect too](04-development/STALE-REFUSALS-2026-10-02.md)
 - [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md)
 
 ## 05-operations

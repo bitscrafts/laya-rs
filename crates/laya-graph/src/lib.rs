@@ -39,12 +39,15 @@ pub mod graph;
 pub mod lower;
 pub mod node;
 pub mod on_expr;
+pub mod placeholder;
 pub mod render;
 pub mod route_exec;
 #[cfg(test)]
 mod routing_order;
 pub mod run;
 pub mod sched;
+#[cfg(test)]
+mod shell_value;
 pub mod validate;
 
 pub use error::{FlowError, RunError};

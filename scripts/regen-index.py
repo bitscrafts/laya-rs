@@ -89,6 +89,18 @@ DOCS = {
         "escalate_on_near_tie is validated but inert; and a decide's question type is hardcoded to "
         "choice, so a flow can never ask the noul the head answers best."
     ),
+    "04-development/STALE-REFUSALS-2026-10-02.md": (
+        "Stale refusals — a rule that outlives its reason is a defect too",
+        "Spec 20 refused timeout and allow_failure on a decide 'until spec 17'. Spec 17 landed and the "
+        "timeout now works: a decide with timeout zero fails as timed out. The refusal was stale and "
+        "blocked a working feature. The other half is worse than refused -- allow_failure is accepted, "
+        "looks honoured, then the synthetic route node stops the run anyway."
+    ),
+    "02-guides/wc-classify-measured.flow.json": (
+        "wc-classify-measured.flow.json — a word count that drives the branch",
+        "The end-to-end example for the placeholder: the shell emits only the number and the decision "
+        "reads it, so the branch flips with the document."
+    ),
     "04-development/HEAD-QUESTION-SHAPE-LIMITS.md": (
         "The head's question-shape limits — measured",
         "A 3-option choice does not track a number while a noul threshold does (15/15, incl. the "

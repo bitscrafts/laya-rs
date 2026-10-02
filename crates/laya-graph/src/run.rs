@@ -85,6 +85,11 @@ pub struct RunReport {
     /// without this field a pruned branch was indistinguishable from a completed run.
     #[serde(default)]
     pub skipped: Vec<String>,
+    /// Why a node in `skipped` was skipped, when the reason is more than "its path was not
+    /// taken": a `{{node_id}}` referent that failed, printed nothing, or was over the cap
+    /// (spec 18). Keyed by the skipped node's id; absent for an ordinary pruned branch.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub skip_reasons: std::collections::BTreeMap<String, String>,
     /// Wall-clock milliseconds the whole run took (spec 11, R5).
     #[serde(default)]
     pub wall_ms: u64,
