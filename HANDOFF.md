@@ -1,71 +1,48 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (17) · **Status**: GREEN — **specs 16–22 complete; 23 filed.** The graph's repair
-is finished and the examples now work in any shell. The one remaining filed item is a hardening spec the
-mutation gate produced.
+**Date**: 2026-10-02 (19) · **Status**: GREEN — **intervention closed.** Specs 16–24 complete and
+deployed; the graph surface is repaired, two worked examples ship with it, and the remaining limits are
+measured and written down rather than left to be discovered.
 
 ```
-cargo test --workspace                    605 passed · 0 failed
-cargo clippy --workspace --all-targets    0
-cargo fmt --all --check                   clean
-python3 scripts/check-doc-citations.py    69 docs, every citation resolves
-                                         108 links, 4 anchored, 0 broken
-
-deployed == tree:  laya 6a259415e91cdb77 · laya-mcp 7178bbb4755bc504 · laya-gate 9d2f45af7c023c3b
-previous binaries kept as /root/.local/bin/*.old-20261002T205648Z
-verify the DEPLOYED path:  bash scripts/smoke-deployed.sh   (covers specs 16, 18, 20, 21, 22)
+HEAD 1cb07ad · tree clean · 0 deleted            deployed == tree (laya, laya-mcp, laya-gate)
+cargo test --workspace      612 passed · 0 failed
+cargo clippy --all-targets  0        cargo fmt --all --check  clean
+check-doc-citations.py      71 docs, every citation resolves
+regen-index.py              124 links, 4 anchored, 0 broken
+laya-gate                   firing live, 649 verdicts logged
 ```
 
-## What landed, and the measurement that carried each
+Verify the deployed path: `bash scripts/smoke-deployed.sh` (specs 16, 18, 20, 21, 22).
 
-| spec | commit | the thing that proves it |
-|---|---|---|
-| 20 — the format is a contract | `10fc381` | a typo'd key is refused with a nearest-key hint; removing the guard fails the test |
-| 17 — routing is a function of the graph | `ac9e94f` | **both array orders execute the same set**; the unselected branch is gone |
-| 19 — docs + fixtures | `98d99d3` | four dated corrections; the order fixtures checked in |
-| 18 — a shell's output can inform a decision | `10b26ef` | **a `wc` that drives the branch**: 13 words → short, 412 → long |
-| 16 — `question_type` | `355b636` | **`noul` 0.9677 band HIGH vs `choice` 0.2389 band low** — same question |
-| 21 — the refusals catch up | `f985d75` | a decide's `timeout: 0` now fails as timed out; `allow_failure` no longer stops the run |
-| 22 — a binary finds its sibling | `6979152` | **every example succeeds with a stripped `PATH`**; a bad `LAYA_MCP_BIN` is refused by name |
-| examples de-scratched | `3bbe7cf` | the two documents are committed beside the flows; the counts match the prompts |
+## The capability boundary, measured — read this before designing a graph
 
-## What is open
+| capability | result |
+|---|---|
+| shell loops internally, branching via `decide`, `allow_failure`, timeouts | **WORKS** |
+| data from a shell into a **decide** (`{{x}}` in `prompt`) | **WORKS** |
+| data from a shell into **another shell** | **NOT substituted** — passes files instead |
+| a shell's outcome driving a **`route`** | **REFUSED** — only a decide produces a routable payload |
+| `subflow` from the CLI | **REFUSED** — needs a library the CLI does not load |
+| iteration as a graph construct | **none** — unroll, or loop in bash |
 
-**Spec 23, filed and not dispatched** — `specs/23-the-scheduler-cannot-wait-forever.md`. The mutation
-gate reports **2 hanging mutants, both replacing `dependency_tables`** (`sched.rs:89`). `missed.txt` is
-empty — zero mutants survived — but the hangs expose a real failure mode: that table is the **shared**
-source of the graph's shape for `topo_order`, `refuse_cycle` and the `Tracker`, `refuse_cycle` is the
-**only** cycle guard and is built on it, and **there is no spin bound anywhere in `scheduler.rs`**. So a
-node that never settles is waited on forever, holding permits, **with no test name in the output**.
-Detail: `_docs/04-development/SCHEDULER-SINGLE-GUARD.md`.
+**The consequence:** a deterministic branch on a shell's exit status is not expressible. The only router
+is a model call. Measured: asked whether a build that exited 7 succeeded, the head said `yes` at 0.79.
+**Therefore: the loop lives outside the graph, and bash decides control flow. The head is for judgement,
+never for routing.** Detail: `_docs/05-operations/RESUME-REGISTER.md` (2026-10-02 (19)).
 
-```sh
-cd /projects/laya-rs && IS_SANDBOX=1 MAX_TURNS=180 scripts/run-spec-part.sh 23
-```
+## Next, in order
 
-**Spec 17's mutation criterion stays open on purpose**, and this document is its explanation: `exit 0`
-demands no hanging mutants *in addition to* zero misses, and a hang is neither a pass nor a miss. The
-honest criterion is *`missed.txt` is empty, and every `timeout.txt` entry is explained*. If spec 23
-lands, those mutants should fail fast and be caught — then `exit 0` is true again.
+1. **A committed test that RUNS the examples** (hermetic, scripted caller — the p6/p7 fixture pattern).
+   Today only *validation* is tested, so the strongest example claim rests on scratch. **Do this first.**
+2. **Rewrite the three examples that hardcode their value** in the decide's prompt
+   (`wc-classify`, `wc-classify-band`, `wc-classify-chained`) to use the placeholder, as spec 18 fixed
+   in the engine. Their `count_words` node currently runs and is discarded.
+3. The `sched.rs` timing flake (`_docs/05-operations/TEST-HARNESS-FLAKE.md`) — fix by controlling the
+   interleaving with a blocking caller instead of racing a stopwatch.
+4. `subflow` from the CLI, if composition is wanted.
 
-**Also open, unchanged:** `subflow` is not a variant of `Kind` so such a node falls through to `Other`,
-and the CLI loads no library — its message now names the real problem.
 
-## The rules this session produced, which are the real deliverable
-
-1. **A declared field must be observable, refused by name, or documented as carrying no behaviour — and
-   whichever it is must be RE-CHECKED when the engine beneath it changes.** Spec 17 made a decide's
-   `timeout` work in one afternoon, which turned spec 20's refusal of it into a lie. Two structural
-   guards now exist: the field-effect table, and a rule that every refusal must say what it waits for.
-2. **A check has two parts — the command and the reading of it — and either can be wrong.** Ten
-   instances this session, all mine; they are listed in `docs/05-operations/RESUME-REGISTER.md`.
-   **A criterion must be satisfiable only by the thing it names**, and **a default value that is never
-   exercised is an untested path**.
-3. **Before concluding "flake", compare the ENVIRONMENT the passes and the failures ran in.** A
-   nondeterministic cause and a differing environment look identical from a single result — this
-   session filed the `laya-mcp`-on-`PATH` defect as a race and chased it for three checks.
-
-## The graph is the active work
 
 **Read first:** `_docs/04-development/OPUS-REVIEW-GENERIC-GRAPHS.md` (the review, with the
 re-verification of each finding) and `_docs/03-reference/GRAPH-FEATURES.md` (composability, branches,
