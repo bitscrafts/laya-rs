@@ -331,8 +331,21 @@ mod tests {
 
     /// Write an executable `laya-mcp` stand-in into a fresh temp dir.
     fn fake_server(tag: &str, script: &str) -> (PathBuf, PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("laya-mcp-client-{tag}-{}", std::process::id()));
+        // The scratch dir must be unique PER CALL, not per process. It was `{tag}-{pid}`, which is
+        // unique only while every tag in this file stays distinct -- a property maintained by hand in a
+        // file that grows. A collision means one test writes the fake server while another `exec`s the
+        // same path, and the kernel refuses with `Text file busy` (ETXTBSY, os error 26).
+        //
+        // MEASURED 2026-10-02: one such failure in ~20 runs of this binary, load-dependent, never
+        // reproduced in 12 quiet runs + 8 runs of the affected test alone. The MECHANISM was not
+        // established -- every tag in the file is in fact distinct -- so the counter is not a fix for a
+        // proven collision. It removes the possibility by construction rather than by discipline.
+        static NEXT_DIR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let seq = NEXT_DIR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "laya-mcp-client-{tag}-{}-{seq}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).expect("create tmp dir");
         let bin = dir.join("fake-laya-mcp");
         let pid_file = dir.join("pid");

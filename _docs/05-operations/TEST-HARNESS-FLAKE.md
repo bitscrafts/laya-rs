@@ -29,13 +29,22 @@ std::fs::write(&bin, script).expect("write script");
 std::fs::set_permissions(&bin, Permissions::from_mode(0o755)).expect("chmod");
 ```
 
-**Every test in the binary shares one process id.** Two tests that use the **same tag** therefore
-compute the **same path**; `libtest` runs them on parallel threads; one writes while the other
-`exec`s that exact path. The kernel refuses with `ETXTBSY` (`os error 26`).
+**Every test in the binary shares one process id**, so the path is unique only while every tag in the
+file stays distinct -- a property maintained by hand in a file that grows.
 
-The tag is the collision key, so the tags in use are the thing to check. A tag that appears on more
-than one test is a latent failure, and the more tests are added to this binary the more likely the
-collision becomes.
+> **CORRECTED 2026-10-02, a few hours after this was written.** The paragraph above originally said
+> *"two tests that use the same tag therefore compute the same path"* and named the tag as **the**
+> collision key. **That mechanism is not supported:** every `fake_server` call site in
+> `crates/laya-cli/src/mcp_client.rs` uses a **distinct** tag (`hung`, `answers`, `ctx`, `ctx-decide`,
+> `s16-default`, `s16-choice`, `s16-noul`, `s16-yolo`, `wire-{field}-{n}`), verified by listing them.
+> So the class is real — **one** `ETXTBSY` in ~20 binary runs, never reproduced in 12 quiet runs or 8
+> runs of the affected test alone — but **the mechanism was not established**, and a plausible story is
+> not an explanation. The tag claim was a hypothesis that read like a finding, which is the failure this
+> whole document is about.
+>
+> **What was done instead of guessing further:** the scratch path is now unique **per call** (an atomic
+> counter appended), so two calls can never share a directory regardless of tag. That removes the
+> possibility by construction rather than by the discipline of keeping tags distinct.
 
 ## Measured frequency — and why it is hard to attribute
 
@@ -140,3 +149,15 @@ Measured from a bare environment: all of them fail. Fixed — it now sets the in
 **pins this tree's build** when one exists, so a criterion about this tree cannot silently test an
 installed older binary. That is the same defect that cost **three specs** a criterion correction in this
 session, so it is now impossible by construction in this script.
+
+---
+
+## Status of the harness flake, after the fix
+
+| | |
+|---|---|
+| the class | real — `ETXTBSY` (`os error 26`) on `exec` of the fake server, 1 observed in ~20 binary runs |
+| the mechanism | **not established.** An earlier claim (two tests sharing a tag) does not hold: all tags are distinct |
+| the fix applied | the scratch dir is unique **per call** (atomic counter), so a collision is impossible regardless of tag |
+| still open | the two **`sched.rs` timing-family** flakes, which are a different phenomenon (ordering under a wall-clock race) and are unrelated to this path |
+
