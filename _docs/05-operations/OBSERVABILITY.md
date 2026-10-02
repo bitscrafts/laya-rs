@@ -143,3 +143,52 @@ The probes were written as scratch and are listed here because the numbers above
 
 They live in `_tmp/` **deliberately, and they must not become load-bearing**: nothing in the repo may
 depend on them existing. The durable checks are the exit criteria in the specs.
+
+## The deployment records, but nothing had ever compacted (measured 2026-10-02)
+
+The distinction that matters when reading `stats` on this box: **is the ledger off, or is it on with
+nothing ingested?** They look identical from the outside, and the earlier note in this doc ("the
+ledger was off for the life of the installation") is now the *other* state. Corrected by measurement:
+
+```
+deployed server pids 1068293 / 1068334 / 1070199
+  LAYA_LEDGER_DIR=/var/lib/laya-ledger      <- present, so recording IS on
+  LAYA_READ_ROOTS=/projects:/root
+
+on disk:  7 segment files, 7 rows (ledger-<pid>.jsonl, one per probing process)
+
+laya ledger stats --dir /var/lib/laya-ledger     (reads ledger.redb)
+  decisions:      0      outcomes: 0      latency p50/p95/max: unknown ms
+
+laya ledger compact --dir /var/lib/laya-ledger   (the step nobody had run)
+  segments read: 7   records seen: 7   inserted: 7   already present: 0
+
+laya ledger stats --dir /var/lib/laya-ledger     (same command, after)
+  decisions:      7      band low 1 / mid 6      near ties: 1
+  latency p50:    226 ms   p95: 353   max: 353
+```
+
+**So the recorded answer is 7 decisions — not 0.** The rows were on disk the whole time, in the write
+path's append-only segments, and `stats` reads `ledger.redb`, which only `compact` fills. An operator
+running `stats` on this box gets "unknown" and is told nothing can be calibrated, while seven real
+decisions sit unread one directory away.
+
+This is **by design, and the design is documented** — `DECISION-LEDGER.md:59` states compaction is an
+explicit act, not a background task, "easy to reason about, easy to test". What follows from it was
+not stated anywhere: **`stats` cannot see a single row until someone runs `compact`.** Two consequences
+worth knowing before answering any question from this ledger:
+
+1. **"unknown latency" does not mean no data.** Check the segment count first:
+   `ls /var/lib/laya-ledger/*.jsonl | wc -l`. If it is non-zero while `stats` says 0, the store needs
+   compacting, not investigating.
+2. **No scheduled compaction exists on this host.** Verified: no systemd timer, no crontab entry, no
+   Hermes job for `laya` (the only job naming it is the specs 09–13 implementation). Compaction is
+   therefore manual, and until it runs, every question in the table at the top of this document is
+   answered from an empty store.
+
+**The honest one-line answer to "is observability implemented?"**: *the write path is on and provably
+records; the read path is honest and reports `unknown` rather than zeros; and there is no ingestion
+step, so nothing an operator asks is answered until someone compacts by hand.* The instrumentation
+spec 11 adds — per-tool blocks, run/node ids, wall-comparable ordering — is what makes the read path
+worth running; the missing compaction step is the operational half, and it is a one-line unit or a
+documented ritual, not a code change.
