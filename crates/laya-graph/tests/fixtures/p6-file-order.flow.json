@@ -1,0 +1,7 @@
+{"flow":"p6","version":1,"description":"inner decide B listed BEFORE outer decide A; A's 'yes' port leads to B, 'no' to other. State makes A answer no.","nodes":[
+ {"id":"inner_B","kind":"decide","depends_on":["outer_A"],"prompt":"The word count in the file is 412 words.","question":"Is the word count greater than 300 words?","options":["yes","no"],"ports":{"yes":"B_yes","no":"B_no","_":"B_no"}},
+ {"id":"outer_A","kind":"decide","prompt":"The word count in the file is 13 words.","question":"Is the word count greater than 300 words?","options":["yes","no"],"ports":{"yes":"inner_B","no":"A_no","_":"A_no"}},
+ {"id":"B_yes","kind":"shell","run":"echo B_yes RAN"},
+ {"id":"B_no","kind":"shell","run":"echo B_no RAN"},
+ {"id":"A_no","kind":"shell","run":"echo A_no RAN"}
+]}

@@ -1,0 +1,6 @@
+{"flow":"p13","version":1,"description":"two independent decides share their branch targets; d1 answers no (13), d2 answers yes (412)","nodes":[
+ {"id":"d1","kind":"decide","prompt":"The word count is 13.","question":"Is the word count greater than 300?","options":["yes","no"],"ports":{"yes":"handle_yes","no":"handle_no"}},
+ {"id":"d2","kind":"decide","prompt":"The word count is 5000.","question":"Is the word count greater than 300?","options":["yes","no"],"ports":{"yes":"handle_yes","no":"handle_no"}},
+ {"id":"handle_yes","kind":"shell","run":"echo handle_yes RAN"},
+ {"id":"handle_no","kind":"shell","run":"echo handle_no RAN"}
+]}

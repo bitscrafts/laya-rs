@@ -1,0 +1,7 @@
+{"flow":"p7","version":1,"description":"join depends on both branches + an independent shell; one branch is pruned","nodes":[
+ {"id":"prep","kind":"shell","run":"echo prep"},
+ {"id":"d","kind":"decide","prompt":"The word count in the file is 13 words.","question":"Is the word count greater than 300 words?","options":["yes","no"],"ports":{"yes":"long_path","no":"short_path","_":"short_path"}},
+ {"id":"long_path","kind":"shell","run":"echo long_path RAN"},
+ {"id":"short_path","kind":"shell","run":"echo short_path RAN"},
+ {"id":"needs_long","kind":"shell","depends_on":["long_path","prep"],"run":"echo needs_long RAN although long_path never ran"}
+]}

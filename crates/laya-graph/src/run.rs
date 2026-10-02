@@ -79,6 +79,12 @@ pub struct RunReport {
     /// equals the graph's node count.
     #[serde(default)]
     pub not_started: Vec<String>,
+    /// Sorted ids of the nodes that did not run because their path was not taken: a route
+    /// did not select the port leading to them, or a `depends_on` predecessor was itself
+    /// skipped (spec 17). Distinct from `not_started`, which is "a stop prevented it" —
+    /// without this field a pruned branch was indistinguishable from a completed run.
+    #[serde(default)]
+    pub skipped: Vec<String>,
     /// Wall-clock milliseconds the whole run took (spec 11, R5).
     #[serde(default)]
     pub wall_ms: u64,

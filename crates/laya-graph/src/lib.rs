@@ -41,6 +41,8 @@ pub mod node;
 pub mod on_expr;
 pub mod render;
 pub mod route_exec;
+#[cfg(test)]
+mod routing_order;
 pub mod run;
 pub mod sched;
 pub mod validate;

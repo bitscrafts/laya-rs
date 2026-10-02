@@ -13,6 +13,23 @@
 //! same graph dispatch nodes in the same order. Once dispatched, how two
 //! concurrently-running nodes interleave in real time is explicitly not
 //! reproducible, and nothing here claims otherwise.
+//!
+//! **This scheduler owns every edge, including the conditional ones (spec 17).** It used to be
+//! "frozen" (parts 1-3 committed and consumed) and `route_exec` resolved each `decide` in a
+//! separate drain *before* handing the remainder here; that drain pruned by array position, so
+//! which nodes ran depended on the order of the flow's `nodes`. The freeze is lifted on
+//! purpose: a `route` node is now resolved HERE, when its turn comes, from its upstream node's
+//! recorded output, and the graph alone decides what is live.
+//!
+//! Two edge classes, stated once:
+//! * a plain edge (`depends_on`, and the `decide -> route` link) is an **AND**: if any such
+//!   predecessor is dead or skipped, the node is skipped, and skipping propagates;
+//! * a port edge (`route -> target`) is an **OR**: the target is reachable if any route
+//!   selected it.
+//!
+//! A node with BOTH is live **iff at least one port edge was selected AND every plain
+//! predecessor completed** — the gate -> ask pattern of `wc-classify-chained` is exactly this.
+//! A node is settled (live or skipped) only when every inbound edge is resolved.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -25,6 +42,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use crate::error::RunError;
 use crate::graph::{Graph, GraphNode, NodeBody};
 use crate::node::{CallContext, Executed, McpCaller, execute_mcp, execute_shell, failed};
+use crate::route_exec::resolve_route;
 use crate::run::{NodeRecord, RunReport};
 
 /// The deterministic topological order of `graph`'s nodes (R8).
@@ -156,12 +174,7 @@ pub async fn run_from(
 
     refuse_cycle(graph)?;
 
-    let (mut indegree, successors) = dependency_tables(graph);
-    let mut ready: BTreeSet<String> = indegree
-        .iter()
-        .filter(|&(_, &deg)| deg == 0)
-        .map(|(id, _)| id.clone())
-        .collect();
+    let mut tracker = Tracker::new(graph);
 
     let halt = Arc::new(AtomicBool::new(false));
     let gates = Gates {
@@ -171,11 +184,17 @@ pub async fn run_from(
     };
     let mut joins: JoinSet<Outcome> = JoinSet::new();
     let mut records = Vec::new();
-    let mut stopped_early = false;
-    let mut failed_node: Option<String> = None;
-    let mut stop_scheduling = false;
-
-    spawn_ready(graph, &mut ready, &mut joins, &opts, &gates, origin);
+    let mut failed_node = dispatch(
+        graph,
+        &mut tracker,
+        &mut records,
+        &mut joins,
+        &opts,
+        &gates,
+        origin,
+    )?;
+    let mut stopped_early = failed_node.is_some();
+    let mut stop_scheduling = stopped_early;
 
     while let Some(outcome) = joins.join_next().await {
         let record = match outcome {
@@ -192,36 +211,42 @@ pub async fn run_from(
 
         let allow_failure = graph.node(&record.node_id).is_some_and(|n| n.allow_failure);
         let failed = !record.success;
+        let completed = record.node_id.clone();
+        records.push(record);
 
         if failed && !allow_failure {
             // Fail fast (R11): stop admitting new work. Already-spawned
             // tasks are in-flight and are not cancelled (N4/spec: "no
             // cancellation of in-flight work"); only nodes not yet dispatched
-            // are affected, because `stop_scheduling` gates `spawn_ready`
+            // are affected, because `stop_scheduling` gates `dispatch`
             // below and the failed node's own successors are never unlocked.
             stopped_early = true;
             if failed_node.is_none() {
-                failed_node = Some(record.node_id.clone());
+                failed_node = Some(completed);
             }
             stop_scheduling = true;
         } else if !stop_scheduling {
-            if let Some(succs) = successors.get(&record.node_id) {
-                for succ in succs {
-                    if let Some(deg) = indegree.get_mut(succ) {
-                        *deg = deg.saturating_sub(1);
-                        if *deg == 0 {
-                            ready.insert(succ.clone());
-                        }
-                    }
+            tracker.resolve(&completed, |_| true);
+            if let Some(failed_route) = dispatch(
+                graph,
+                &mut tracker,
+                &mut records,
+                &mut joins,
+                &opts,
+                &gates,
+                origin,
+            )? {
+                stopped_early = true;
+                if failed_node.is_none() {
+                    failed_node = Some(failed_route);
                 }
+                stop_scheduling = true;
             }
-            spawn_ready(graph, &mut ready, &mut joins, &opts, &gates, origin);
         }
-
-        records.push(record);
     }
 
-    let not_started = nodes_without_record(graph, &records);
+    let skipped: Vec<String> = tracker.skipped.iter().cloned().collect();
+    let not_started = nodes_without_record(graph, &records, &tracker.skipped);
 
     Ok(RunReport {
         run_id: opts.run_id,
@@ -230,8 +255,167 @@ pub async fn run_from(
         worker_limit: opts.limit,
         records,
         not_started,
+        skipped,
         wall_ms: elapsed_ms(origin),
     })
+}
+
+/// One outgoing edge of a node, as the tracker sees it.
+struct OutEdge {
+    to: String,
+    /// The `port` label when this is a `route` rule's edge (an OR edge); `None` for an AND edge.
+    port: Option<String>,
+}
+
+/// What a node is still waiting on.
+#[derive(Default)]
+struct Inbound {
+    /// Plain (AND) edges not yet resolved.
+    and_left: usize,
+    /// Some plain predecessor is dead or skipped.
+    and_dead: bool,
+    /// Port (OR) edges in total, and not yet resolved.
+    port_total: usize,
+    port_left: usize,
+    /// Some route selected the port leading here.
+    port_selected: bool,
+}
+
+/// Edge-resolution state for [`run_from`]: which nodes are ready, which are skipped.
+struct Tracker {
+    state: HashMap<String, Inbound>,
+    out: HashMap<String, Vec<OutEdge>>,
+    ready: BTreeSet<String>,
+    skipped: BTreeSet<String>,
+}
+
+impl Tracker {
+    fn new(graph: &Graph) -> Self {
+        let mut state: HashMap<String, Inbound> = graph
+            .nodes
+            .iter()
+            .map(|n| (n.id.clone(), Inbound::default()))
+            .collect();
+        let mut out: HashMap<String, Vec<OutEdge>> = HashMap::new();
+        for edge in &graph.edges {
+            let inbound = state.entry(edge.to.clone()).or_default();
+            if edge.port.is_some() {
+                inbound.port_total += 1;
+                inbound.port_left += 1;
+            } else {
+                inbound.and_left += 1;
+            }
+            out.entry(edge.from.clone()).or_default().push(OutEdge {
+                to: edge.to.clone(),
+                port: edge.port.clone(),
+            });
+        }
+        let ready = state
+            .iter()
+            .filter(|(_, s)| s.and_left == 0 && s.port_left == 0)
+            .map(|(id, _)| id.clone())
+            .collect();
+        Self {
+            state,
+            out,
+            ready,
+            skipped: BTreeSet::new(),
+        }
+    }
+
+    /// Resolve every outgoing edge of `from` (which completed, or was skipped when `live` says
+    /// no): `live(edge)` is whether that edge carries a completion. A node whose last inbound
+    /// edge resolves is settled — ready, or skipped — and a skip propagates to its own edges.
+    fn resolve(&mut self, from: &str, live: impl Fn(&OutEdge) -> bool) {
+        let mut work: Vec<(String, bool, bool)> = self
+            .out
+            .get(from)
+            .map(|edges| {
+                edges
+                    .iter()
+                    .map(|e| (e.to.clone(), e.port.is_some(), live(e)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        while let Some((to, is_port, edge_live)) = work.pop() {
+            let Some(inbound) = self.state.get_mut(&to) else {
+                continue;
+            };
+            if is_port {
+                inbound.port_left = inbound.port_left.saturating_sub(1);
+                inbound.port_selected |= edge_live;
+            } else {
+                inbound.and_left = inbound.and_left.saturating_sub(1);
+                inbound.and_dead |= !edge_live;
+            }
+            if inbound.and_left > 0 || inbound.port_left > 0 {
+                continue;
+            }
+            let node_live = !inbound.and_dead && (inbound.port_total == 0 || inbound.port_selected);
+            if node_live {
+                self.ready.insert(to);
+            } else {
+                self.skipped.insert(to.clone());
+                if let Some(edges) = self.out.get(&to) {
+                    work.extend(
+                        edges
+                            .iter()
+                            .map(|e| (e.to.clone(), e.port.is_some(), false)),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Drain the ready set in id order (R8): spawn each `shell`/`mcp` node, and resolve each
+/// `route` node on the spot from its upstream node's record — selecting ONE port edge and
+/// killing the rest. Resolving a route can ready more nodes, hence the loop.
+///
+/// `Ok(Some(id))` names a route whose value could not be read: its failed record is pushed and
+/// the caller stops the run (R4 — a wrong-typed decide answer is data, not `Err`).
+fn dispatch(
+    graph: &Graph,
+    tracker: &mut Tracker,
+    records: &mut Vec<NodeRecord>,
+    joins: &mut JoinSet<Outcome>,
+    opts: &RunOptions,
+    gates: &Gates,
+    origin: Instant,
+) -> Result<Option<String>, RunError> {
+    while let Some(id) = pop_first(&mut tracker.ready) {
+        // Unreachable once `run_from` has validated every edge's endpoints exist, kept so a
+        // future caller of this private helper fails safe rather than panicking.
+        let Some(node) = graph.node(&id).cloned() else {
+            continue;
+        };
+        if matches!(node.body, NodeBody::Route { .. }) {
+            let upstream = graph
+                .edges
+                .iter()
+                .find(|e| e.to == id && e.port.is_none())
+                .and_then(|e| records.iter().find(|r| r.node_id == e.from))
+                .ok_or_else(|| RunError::UnknownNode {
+                    node_id: id.clone(),
+                })?;
+            let (route_record, selected) =
+                resolve_route(&opts.run_id, &node, &upstream.output, origin)?;
+            let route_ok = route_record.success;
+            records.push(route_record);
+            let Some(selected) = selected.filter(|_| route_ok) else {
+                return Ok(Some(id));
+            };
+            tracker.resolve(&id, |edge| edge.to == selected);
+            continue;
+        }
+        let run_id = opts.run_id.clone();
+        let fanout = Arc::clone(&gates.fanout);
+        let write_lock = Arc::clone(&gates.write_lock);
+        let halt = Arc::clone(&gates.halt);
+        let mcp = Arc::clone(&opts.mcp);
+        joins.spawn(run_one(node, run_id, fanout, write_lock, halt, mcp, origin));
+    }
+    Ok(None)
 }
 
 /// The shared gates every node passes before its work begins.
@@ -269,46 +453,23 @@ fn refuse_cycle(graph: &Graph) -> Result<(), RunError> {
     })
 }
 
-/// Sorted ids of the graph's nodes with no record: halted tasks plus nodes
-/// never spawned because scheduling stopped (R2).
-fn nodes_without_record(graph: &Graph, records: &[NodeRecord]) -> Vec<String> {
+/// Sorted ids of the graph's nodes with no record that were not skipped either: halted tasks
+/// plus nodes never spawned because scheduling stopped (R2). A skipped node is accounted for
+/// in `RunReport::skipped`, not here.
+fn nodes_without_record(
+    graph: &Graph,
+    records: &[NodeRecord],
+    skipped: &BTreeSet<String>,
+) -> Vec<String> {
     let recorded: BTreeSet<&str> = records.iter().map(|r| r.node_id.as_str()).collect();
     graph
         .nodes
         .iter()
         .map(|n| n.id.clone())
-        .filter(|id| !recorded.contains(id.as_str()))
+        .filter(|id| !recorded.contains(id.as_str()) && !skipped.contains(id))
         .collect::<BTreeSet<String>>()
         .into_iter()
         .collect()
-}
-
-/// Spawn every currently-ready node, in id order (R8) — the dispatch ORDER is
-/// deterministic. Actual concurrency is bounded inside [`run_one`] by the
-/// shared semaphores, not by how many tasks are spawned here, so spawning
-/// every ready node up front does not itself create unbounded concurrency.
-fn spawn_ready(
-    graph: &Graph,
-    ready: &mut BTreeSet<String>,
-    joins: &mut JoinSet<Outcome>,
-    opts: &RunOptions,
-    gates: &Gates,
-    origin: Instant,
-) {
-    while let Some(id) = pop_first(ready) {
-        // Unreachable once `run` has validated every edge's endpoints exist,
-        // kept so a future caller of this private helper fails safe rather
-        // than panicking.
-        let Some(node) = graph.node(&id).cloned() else {
-            continue;
-        };
-        let run_id = opts.run_id.clone();
-        let fanout = Arc::clone(&gates.fanout);
-        let write_lock = Arc::clone(&gates.write_lock);
-        let halt = Arc::clone(&gates.halt);
-        let mcp = Arc::clone(&opts.mcp);
-        joins.spawn(run_one(node, run_id, fanout, write_lock, halt, mcp, origin));
-    }
 }
 
 /// Run one node: acquire its permits, check the halt flag, do the work,
@@ -366,17 +527,13 @@ async fn run_one(
     let executed = match node.body {
         NodeBody::Shell { run } => execute_shell(&run, timeout).await,
         NodeBody::Mcp { tool, arguments } => run_mcp(mcp, tool, arguments, ctx, timeout).await,
-        // A lowered `route` node picks a port; it has no work of its own to
-        // run here. Threading a payload through it is the CLI's concern
-        // (a later part) — out of scope for R12, which covers `shell`/`mcp`.
-        NodeBody::Route { .. } => Executed {
-            success: true,
-            exit_code: None,
-            output: String::new(),
-            error: None,
-            duration_ms: 0,
-            timed_out: false,
-        },
+        // A `route` node is resolved by `dispatch`, from its upstream's record; it is never
+        // spawned. Reaching here is a scheduler bug, reported as data rather than a panic.
+        NodeBody::Route { .. } => failed(
+            "internal: a route node reached run_one".to_string(),
+            0,
+            false,
+        ),
     };
 
     // Raised HERE, while this task still holds its permits: the next queued

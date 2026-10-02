@@ -1,35 +1,20 @@
-//! Thread a `decide` node's real payload into its `route` node, then hand the
-//! rest of the graph to [`crate::sched::run`].
+//! The entry point `laya graph run` uses, and the one place a `route` node's value is read.
 //!
-//! This is the piece [`crate::node`]'s own docs name as deliberately out of
-//! scope for part 3: *"Threading a payload through it is the CLI's concern (a
-//! later part)."* [`crate::sched::run`] cannot do this itself: its dependency
-//! tables are built once from the WHOLE edge set, so finishing a `route` node
-//! unlocks every edge leaving it — all of a `decide`'s branches, not only the
-//! one the answer selected. That is correct for [`crate::sched::run`]'s own
-//! job (ordinary DAG fan-out has no conditional edges to begin with) and
-//! wrong for a graph containing `route` nodes, which is exactly why this
-//! lives in a NEW module rather than as an edit to `sched.rs` (frozen: parts
-//! 1-3 are committed and consumed, not revised).
-//!
-//! The approach: resolve every `decide`-lowered `mcp` + `route` pair
-//! sequentially, in the order encountered, calling the real
-//! [`crate::node::McpCaller`] and pruning the branches the answer did not
-//! select out of the live graph *before* anything downstream is scheduled.
-//! Once no `route` node remains, the (possibly pruned) remainder is handed to
-//! [`crate::sched::run`] unchanged — so a flow with no `decide` at all
-//! degrades to exactly that call, and parts 1-3's own tested guarantees
-//! (R8-R11) still apply to everything after the last routing decision.
+//! [`run_flow`] hands the whole graph to [`crate::sched::run_from`]: since spec 17 the
+//! scheduler resolves `route` nodes itself (see its module docs for the AND/OR edge rules),
+//! instead of the two-phase drain this module used to run first. That drain deleted the
+//! unselected port targets by position in the node array, so which nodes ran depended on the
+//! order of the flow's `nodes`; it is gone, not repaired. What stays here is the route
+//! semantics — [`resolve_route`] and the `on` extraction — which `sched` calls.
 
-use std::collections::BTreeSet;
+#[cfg(test)]
 use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::Value;
 
 use crate::error::RunError;
-use crate::graph::{Edge, Graph, GraphNode, NodeBody};
-use crate::node::{CallContext, execute_mcp};
+use crate::graph::{Graph, GraphNode, NodeBody};
 use crate::run::{NodeRecord, RunReport};
 use crate::sched::{self, RunOptions};
 
@@ -53,179 +38,20 @@ use crate::sched::{self, RunOptions};
 /// (malformed or wrong-typed decide response) is DATA, not `Err`: the route
 /// node's record is `success: false` and the run is `stopped_early` (R4).
 pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError> {
-    if opts.limit == 0 {
-        return Err(RunError::BadLimit { limit: opts.limit });
-    }
-
-    // The instant the WHOLE run began: the route decisions below and the tail both measure their
-    // `started_at_ms` from it, so the timeline is one timeline and not two that each start at 0.
-    let origin = Instant::now();
-    let mut nodes = graph.nodes.clone();
-    let mut edges = graph.edges.clone();
-    let mut records: Vec<NodeRecord> = Vec::new();
-
-    while let Some((route_node, upstream_node)) = find_route_pair(&nodes, &edges)? {
-        let NodeBody::Mcp { tool, arguments } = upstream_node.body.clone() else {
-            // `lower_decide` always emits an `mcp` node immediately upstream
-            // of its `route` node — a non-`mcp` upstream means this graph
-            // was not produced by `lower`, which G21 forbids.
-            return Err(RunError::UnknownNode {
-                node_id: upstream_node.id.clone(),
-            });
-        };
-
-        let upstream_record =
-            call_upstream(&opts, upstream_node.id.clone(), tool, arguments, origin).await?;
-        let upstream_failed = !upstream_record.success;
-        records.push(upstream_record.clone());
-
-        remove_node(&mut nodes, &mut edges, &upstream_node.id);
-        remove_node(&mut nodes, &mut edges, &route_node.id);
-
-        if upstream_failed && !upstream_node.allow_failure {
-            return Ok(stopped_report(
-                opts,
-                upstream_node.id,
-                records,
-                &nodes,
-                origin,
-            ));
-        }
-
-        let (route_record, unselected) =
-            resolve_route(&opts.run_id, &route_node, &upstream_record.output, origin)?;
-        if !route_record.success {
-            // A wrong-typed route value is an upstream fault, reported as
-            // data exactly like a failing upstream call (R4).
-            let failed = route_record.node_id.clone();
-            records.push(route_record);
-            return Ok(stopped_report(opts, failed, records, &nodes, origin));
-        }
-        records.push(route_record);
-        prune_unreached(&mut nodes, &mut edges, unselected);
-    }
-
-    let pruned = Graph { nodes, edges };
-    let tail_opts = RunOptions {
-        run_id: opts.run_id.clone(),
-        limit: opts.limit,
-        mcp: Arc::clone(&opts.mcp),
-    };
-    let mut tail = sched::run_from(&pruned, tail_opts, origin).await?;
-    records.append(&mut tail.records);
-
-    Ok(RunReport {
-        run_id: opts.run_id,
-        stopped_early: tail.stopped_early,
-        failed_node: tail.failed_node,
-        worker_limit: tail.worker_limit,
-        records,
-        not_started: tail.not_started,
-        wall_ms: elapsed_ms(origin),
-    })
-}
-
-/// The report for a run stopped before the tail: every node still live in
-/// `remaining` never started.
-fn stopped_report(
-    opts: RunOptions,
-    failed_node: String,
-    records: Vec<NodeRecord>,
-    remaining: &[GraphNode],
-    origin: Instant,
-) -> RunReport {
-    let mut not_started: Vec<String> = remaining.iter().map(|n| n.id.clone()).collect();
-    not_started.sort();
-    RunReport {
-        run_id: opts.run_id,
-        stopped_early: true,
-        failed_node: Some(failed_node),
-        worker_limit: opts.limit,
-        records,
-        not_started,
-        wall_ms: elapsed_ms(origin),
-    }
-}
-
-/// Find a `route` node still live in `nodes`, together with its upstream
-/// node (the edge whose `to` names it) — `find`, never a position + index,
-/// so a malformed graph reports [`RunError::UnknownNode`] instead of
-/// panicking.
-fn find_route_pair(
-    nodes: &[GraphNode],
-    edges: &[Edge],
-) -> Result<Option<(GraphNode, GraphNode)>, RunError> {
-    let Some(route_node) = nodes
-        .iter()
-        .find(|n| matches!(n.body, NodeBody::Route { .. }))
-        .cloned()
-    else {
-        return Ok(None);
-    };
-    let Some(upstream_id) = edges
-        .iter()
-        .find(|e| e.to == route_node.id)
-        .map(|e| e.from.clone())
-    else {
-        return Err(RunError::UnknownNode {
-            node_id: route_node.id,
-        });
-    };
-    let Some(upstream_node) = nodes.iter().find(|n| n.id == upstream_id).cloned() else {
-        return Err(RunError::UnknownNode {
-            node_id: upstream_id,
-        });
-    };
-    Ok(Some((route_node, upstream_node)))
-}
-
-/// Call the real `mcp` node feeding a `route` node, off the async executor
-/// (the same `spawn_blocking` pattern [`crate::sched`] uses for every `mcp`
-/// node), and wrap the result as its [`NodeRecord`].
-async fn call_upstream(
-    opts: &RunOptions,
-    node_id: String,
-    tool: String,
-    arguments: Value,
-    origin: Instant,
-) -> Result<NodeRecord, RunError> {
-    let caller = Arc::clone(&opts.mcp);
-    let ctx = CallContext {
-        run_id: opts.run_id.clone(),
-        node_id: node_id.clone(),
-    };
-    // No permit is taken for a route's upstream call, so it never queues.
-    let started_at_ms = elapsed_ms(origin);
-    let executed =
-        tokio::task::spawn_blocking(move || execute_mcp(caller.as_ref(), &tool, &arguments, &ctx))
-            .await
-            .map_err(|e| RunError::NodeTaskFailed {
-                reason: e.to_string(),
-            })?;
-    Ok(NodeRecord {
-        run_id: opts.run_id.clone(),
-        node_id,
-        success: executed.success,
-        exit_code: executed.exit_code,
-        output: executed.output,
-        error: executed.error,
-        duration_ms: executed.duration_ms,
-        timed_out: executed.timed_out,
-        queued_ms: 0,
-        started_at_ms,
-    })
+    sched::run_from(graph, opts, Instant::now()).await
 }
 
 /// Match `route_node`'s `on` expression against `upstream_output`, returning
 /// the route node's own [`NodeRecord`] (carrying the matched value and the
-/// chosen port — the evidence R-ACC requires) plus every OTHER candidate
-/// port this decision did not select, for the caller to prune.
-fn resolve_route(
+/// chosen port — the evidence R-ACC requires) plus the selected port's target,
+/// `None` when the value could not be read (the record is then `success: false`).
+/// The caller keeps only that port's edge live.
+pub(crate) fn resolve_route(
     run_id: &str,
     route_node: &GraphNode,
     upstream_output: &str,
     origin: Instant,
-) -> Result<(NodeRecord, BTreeSet<String>), RunError> {
+) -> Result<(NodeRecord, Option<String>), RunError> {
     let NodeBody::Route { on, rules } = route_node.body.clone() else {
         return Err(RunError::UnknownNode {
             node_id: route_node.id.clone(),
@@ -246,12 +72,12 @@ fn resolve_route(
                 queued_ms: 0,
                 started_at_ms: elapsed_ms(origin),
             };
-            return Ok((record, BTreeSet::new()));
+            return Ok((record, None));
         }
     };
     let body = NodeBody::Route {
         on: on.clone(),
-        rules: rules.clone(),
+        rules,
     };
     let Some(target) = body.route_port(&value) else {
         return Err(RunError::UnknownNode {
@@ -278,48 +104,11 @@ fn resolve_route(
         started_at_ms: elapsed_ms(origin),
     };
 
-    let mut unselected: BTreeSet<String> = rules.iter().map(|r| r.port.clone()).collect();
-    unselected.remove(&target);
-    Ok((record, unselected))
+    Ok((record, Some(target)))
 }
 
 fn elapsed_ms(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
-}
-
-/// Remove `id` and every edge touching it.
-fn remove_node(nodes: &mut Vec<GraphNode>, edges: &mut Vec<Edge>, id: &str) {
-    nodes.retain(|n| n.id != id);
-    edges.retain(|e| e.from != id && e.to != id);
-}
-
-/// Remove every node in `targets`, and cascade: a successor left with no
-/// remaining inbound edge was reachable only through a pruned branch, so it
-/// is pruned too. A successor some OTHER surviving path still reaches is
-/// left alone — pruning one branch of a `route` must never remove a node a
-/// different part of the graph still depends on.
-fn prune_unreached(
-    nodes: &mut Vec<GraphNode>,
-    edges: &mut Vec<Edge>,
-    mut targets: BTreeSet<String>,
-) {
-    while let Some(id) = targets.iter().next().cloned() {
-        targets.remove(&id);
-        if !nodes.iter().any(|n| n.id == id) {
-            continue;
-        }
-        let successors: Vec<String> = edges
-            .iter()
-            .filter(|e| e.from == id)
-            .map(|e| e.to.clone())
-            .collect();
-        remove_node(nodes, edges, &id);
-        for succ in successors {
-            if !edges.iter().any(|e| e.to == succ) {
-                targets.insert(succ);
-            }
-        }
-    }
 }
 
 /// Read `$.payload.<field>` out of an `mcp` node's raw output text.
