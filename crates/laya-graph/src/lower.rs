@@ -49,6 +49,28 @@ pub fn lower(flow: &Flow) -> Result<Graph, FlowError> {
                 allow_failure: node.allow_failure,
                 timeout: deadline(node, flow),
             }),
+            Kind::Check => {
+                let ports = node.ports.clone().unwrap_or_default();
+                for key in ports.keys() {
+                    if let Some(target) = ports.get(key) {
+                        edges.push(Edge {
+                            from: node.id.clone(),
+                            to: target.clone(),
+                            port: Some(key.clone()),
+                        });
+                    }
+                }
+                nodes.push(GraphNode {
+                    id: node.id.clone(),
+                    body: NodeBody::Check {
+                        run: node.run.clone().unwrap_or_default(),
+                        ports,
+                    },
+                    writes: node.writes,
+                    allow_failure: false,
+                    timeout: deadline(node, flow),
+                });
+            }
             Kind::Mcp => nodes.push(GraphNode {
                 id: node.id.clone(),
                 body: NodeBody::Mcp {

@@ -1,0 +1,33 @@
+{
+  "flow": "wc-classify-check",
+  "version": 1,
+  "description": "Spec 25: the 300-word threshold decided by a `check`, not a model. The exit status of `[ N -gt 300 ]` selects the port: 0 -> class_long, non-zero -> class_short. No model, no sidecar, no laya-mcp; exact at 300/301, which the decide version (wc-classify-measured) is not guaranteed to be. File is read from $WC_FILE (default: the 13-word note).",
+  "nodes": [
+    {
+      "id": "over300",
+      "kind": "check",
+      "run": "[ \"$(wc -w < \"${WC_FILE:-_docs/02-guides/wc-example/short-note.txt}\")\" -gt 300 ]",
+      "timeout": 30,
+      "ports": {
+        "pass": "class_long",
+        "fail": "class_short",
+        "_": "escalate"
+      }
+    },
+    {
+      "id": "class_short",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: SHORT (not more than 300 words)'"
+    },
+    {
+      "id": "class_long",
+      "kind": "shell",
+      "run": "echo 'CLASSIFIED: LONG (more than 300 words)'"
+    },
+    {
+      "id": "escalate",
+      "kind": "shell",
+      "run": "echo 'ESCALATED: unreachable for this check -- both pass and fail are declared'"
+    }
+  ]
+}

@@ -183,6 +183,35 @@ pub enum FlowError {
         field: String,
     },
 
+    /// A `check` has no `_` catch-all port (spec 25, R2).
+    #[error(
+        "check node `{id}` needs a `_` catch-all port, as a decide does: say where the run goes when neither `pass` nor `fail` is declared"
+    )]
+    CheckNeedsFallback {
+        /// The node.
+        id: String,
+    },
+
+    /// A `check` port key other than `pass`, `fail` or `_` (spec 25).
+    #[error(
+        "check node `{id}` has port `{key}`; a check's exit status can only select `pass` (exit 0), `fail` (non-zero) or `_`"
+    )]
+    BadCheckPort {
+        /// The node.
+        id: String,
+        /// The offending key.
+        key: String,
+    },
+
+    /// `allow_failure` on a `check` (spec 25, R2).
+    #[error(
+        "check node `{id}` sets `allow_failure`, which a check does not take: its non-zero exit is its answer, not a failure. Remove it"
+    )]
+    CheckAllowFailure {
+        /// The node.
+        id: String,
+    },
+
     /// `version` is not 1.
     #[error("flow `version` is {version}; this engine reads only version 1")]
     BadVersion {

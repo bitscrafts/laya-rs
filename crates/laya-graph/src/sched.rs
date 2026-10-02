@@ -41,7 +41,9 @@ use tokio::task::{JoinHandle, JoinSet};
 
 use crate::error::RunError;
 use crate::graph::{Graph, GraphNode, NodeBody};
-use crate::node::{CallContext, Executed, McpCaller, execute_mcp, execute_shell, failed};
+use crate::node::{
+    CallContext, Executed, McpCaller, execute_check, execute_mcp, execute_shell, failed,
+};
 use crate::placeholder;
 use crate::route_exec::resolve_route;
 use crate::run::{NodeRecord, RunReport};
@@ -268,7 +270,13 @@ async fn run_tracked(
             }
             stop_scheduling = true;
         } else if !stop_scheduling {
-            tracker.resolve(&completed, |_| true);
+            // A `check` selects its port from its own exit status (spec 25); every other node
+            // completes all of its outgoing edges. EVERY inbound edge still resolves: the ones
+            // not selected resolve dead, which is what lets their targets be skipped, not hang.
+            let selected = check_selection(graph, &records, &completed);
+            tracker.resolve(&completed, |edge| {
+                selected.as_deref().is_none_or(|target| edge.to == target)
+            });
             if let Some(failed_route) = dispatch(
                 graph,
                 &mut tracker,
@@ -430,6 +438,19 @@ impl Tracker {
             }
         }
     }
+}
+
+/// The target a completed `check` node's exit status selected; `None` for any other node.
+fn check_selection(graph: &Graph, records: &[NodeRecord], completed: &str) -> Option<String> {
+    let node = graph.node(completed)?;
+    if !matches!(node.body, NodeBody::Check { .. }) {
+        return None;
+    }
+    let code = records
+        .iter()
+        .find(|r| r.node_id == completed)
+        .and_then(|r| r.exit_code)?;
+    node.body.check_target(code).map(str::to_string)
 }
 
 /// Drain the ready set in id order (R8): spawn each `shell`/`mcp` node, and resolve each
@@ -694,6 +715,7 @@ async fn run_one(
     let executed = match node.body {
         NodeBody::Shell { run } => execute_shell(&run, timeout).await,
         NodeBody::Mcp { tool, arguments } => run_mcp(mcp, tool, arguments, ctx, timeout).await,
+        NodeBody::Check { run, .. } => execute_check(&run, timeout).await,
         // A `route` node is resolved by `dispatch`, from its upstream's record; it is never
         // spawned. Reaching here is a scheduler bug, reported as data rather than a panic.
         NodeBody::Route { .. } => failed(

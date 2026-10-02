@@ -84,23 +84,23 @@ shell: compute a value / count
 | `allow_failure_on_a_check_is_refused` | `allow_failure: true` | refused by name |
 | `a_timed_out_check_fails_the_node_not_the_fail_port` | `run: "sleep 5"`, `timeout: 0` | node fails, run stops |
 | `no_model_is_called_by_a_check` | a `check` flow, sidecar **stopped** | both ports still reachable, run completes |
-| `the_control_a_decide_still_works` | an existing decide flow | unchanged behaviour (NF3) |
+| `the_control_a_decide_still_works` | an existing decide flow | unchanged behaviour (NF3) — **no such unit test was written.** The property is covered by the "every committed flow still runs clean" criterion and by the raw `judge/route` record quoted in the appendix. |
 
 The last four rows are the ones that catch the real mistakes: a `check` whose failure stops the run is
 indistinguishable from a broken node, and a `check` that calls the model is not a `check`.
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_check_takes_the_pass_port_on_exit_zero 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_failing_check_does_not_fail_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_check_whose_command_cannot_be_executed_fails_the_node 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib no_model_is_called_by_a_check 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] **every committed flow still validates AND runs**, judged by the report (`git status` clean of `^ D`)
-- [ ] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [ ] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
-- [ ] `cd /projects/laya-rs && python3 scripts/regen-index.py` : 0 broken links
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_check_takes_the_pass_port_on_exit_zero 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_failing_check_does_not_fail_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_check_whose_command_cannot_be_executed_fails_the_node 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib no_model_is_called_by_a_check 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] **every committed flow still validates AND runs**, judged by the report (`git status` clean of `^ D`)
+- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cd /projects/laya-rs && python3 scripts/regen-index.py` : 0 broken links
 
 ## Fixtures this spec MUST be judged against (all measured today, all failing without it)
 
@@ -121,3 +121,89 @@ indistinguishable from a broken node, and a `check` that calls the model is not 
 - Do NOT weaken, re-pin or delete an existing test.
 - Do NOT commit. Leave the work in the tree.
 - Do NOT delete anything pre-existing; `mv` aside and say why.
+
+---
+
+## Verification of this spec (independent, run here 2026-10-02 after the worker finished)
+
+Worker did not commit (HEAD `29419f9`, 0 deleted). **33 substantive checks passed.**
+
+### R1 — the exit status selects the port, with no model
+
+```
+run: "exit 0"   the_check ok   -> on_pass  TOOK_PASS   skipped=['on_fail','on_other']
+run: "exit 1"   the_check ok   -> on_fail  TOOK_FAIL   skipped=['on_other','on_pass']
+```
+
+**The critical one — a non-zero exit must not fail the run:**
+
+```
+run: "exit 1"   stopped_early=False  failed_node=None  no node failed
+run: "exit 7"   took the fail port AND the run continued
+```
+
+**A command that cannot be executed FAILS the node rather than answering `fail`:**
+
+```
+the_check  FAIL  "sh: 1: /nonexistent/bin/nope: not found"
+stopped_early=True  failed_node=the_check   -- it did NOT take the _ port
+```
+
+That distinction is the requirement: *"the check did not run"* and *"the check said no"* are different.
+
+### NF1 — no model in the loop, PROVEN by stopping the sidecar
+
+```
+sidecar pid 168492  -> SIGSTOP
+the_check ok -> on_pass TOOK_PASS   stopped_early=False
+sidecar RESUMED
+```
+
+The flow completed with the server **suspended**. That is the only honest demonstration that a `check`
+does not ask the model — reading the code could not show it.
+
+### R4 — the four fixtures that fail without this primitive, all now exact
+
+| fixture | result |
+|---|---|
+| a spec set with unfinished criteria (10 and 11 of them) | **TOOK_FAIL**, correct in both |
+| **300 words / 301 words** | **PASS / FAIL — exact at the boundary** |
+| `guess == secret` | **TOOK_PASS** — a win is now expressible, which it was not |
+| a command exiting 7 | **fail port, run continued** |
+
+### R2 — the refusals
+
+```
+check node `c` requires `run`            refused
+allow_failure on a check                 refused
+a check without a `_` fallback port      refused
+```
+
+### Regression, which is what "production ready" turns on
+
+```
+every committed flow still VALIDATES        PASS
+every committed flow still RUNS clean       PASS   (includes the decide-based flows)
+spec 23's stall guard, all 3 tests          PASS   <- the risk flagged before dispatching
+workspace suite  625 passed / 0 failed      clippy 0 · fmt clean
+73 docs, every citation resolves            124 links, 0 broken
+```
+
+The decide path is intact — the raw record, verbatim:
+
+```
+judge/route  output: {"on":"$.payload.label","value":"yes","selected_port":"advise_lower"}
+check "closed"  exit_code=1 success=true  -> work_left ran, skipped ['escalate','release']
+```
+
+### Two corrections about my own verification, recorded not hidden
+
+1. **My harness invented a test name.** It checked for `the_control_a_decide_still_works`, which exists
+   only as a TDD-table row and was never an exit criterion, then reported that as the single FAIL. The
+   property is covered by the committed-flow regression check. **A criterion must name a test that
+   exists** — and so must a check.
+2. **My harness misread the report schema.** It read `selected_port` as a top-level record field; it is
+   JSON inside the record's `output` string. That extraction always returned empty, so a "decide routes"
+   assertion built on it would have been meaningless. It did not cause a false pass here (the port
+   assertions work off the target node actually running), but it is the same defect class as the rest of
+   this session: **a check whose reading of the artefact was wrong.**

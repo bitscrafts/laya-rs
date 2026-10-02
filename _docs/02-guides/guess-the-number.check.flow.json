@@ -1,0 +1,33 @@
+{
+  "flow": "guess-the-number-check",
+  "version": 1,
+  "description": "Spec 25: the guessing game's win condition as a `check`. `[ \"$guess\" = \"$secret\" ]` -- exit 0 is a WIN, non-zero is a miss. With guess == secret (the default here) the flow reaches `win`, which no decide flow can do (the head answers `higher` for an equal guess). Override with GUESS=<n>.",
+  "nodes": [
+    {
+      "id": "equal",
+      "kind": "check",
+      "run": "secret=41; guess=\"${GUESS:-41}\"; [ \"$guess\" = \"$secret\" ]",
+      "timeout": 30,
+      "ports": {
+        "pass": "win",
+        "fail": "miss",
+        "_": "escalate"
+      }
+    },
+    {
+      "id": "win",
+      "kind": "shell",
+      "run": "echo 'WIN: the guess is the secret'"
+    },
+    {
+      "id": "miss",
+      "kind": "shell",
+      "run": "echo 'MISS: keep guessing'"
+    },
+    {
+      "id": "escalate",
+      "kind": "shell",
+      "run": "echo 'ESCALATED: unreachable for this check'"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "flow": "specs-closed-check",
+  "version": 1,
+  "description": "Spec 25: 'is the number of unfinished criteria 0?' as a `check`. Counts open `- [ ]` criteria under $SPECS_DIR (default: specs) and takes `pass` only when there are none. The decide version of this question answered `yes` (band low 0.1115) with ONE criterion open and released.",
+  "nodes": [
+    {
+      "id": "closed",
+      "kind": "check",
+      "run": "[ \"$(cat \"${SPECS_DIR:-specs}\"/*.md | grep -c '^- \\[ \\]')\" = 0 ]",
+      "timeout": 30,
+      "ports": {
+        "pass": "release",
+        "fail": "work_left",
+        "_": "escalate"
+      }
+    },
+    {
+      "id": "release",
+      "kind": "shell",
+      "run": "echo 'RELEASE: no unfinished criteria'"
+    },
+    {
+      "id": "work_left",
+      "kind": "shell",
+      "run": "echo 'WORK LEFT: a criterion is open'"
+    },
+    {
+      "id": "escalate",
+      "kind": "shell",
+      "run": "echo 'ESCALATED: unreachable for this check'"
+    }
+  ]
+}

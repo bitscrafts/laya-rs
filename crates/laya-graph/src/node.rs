@@ -171,6 +171,32 @@ pub async fn execute_shell(run: &str, timeout: Option<Duration>) -> Executed {
     }
 }
 
+/// Run a `check` node's command (spec 25): a shell run in which the exit status is the ANSWER.
+///
+/// Any exit status the shell reports — zero or not — is `success: true`, with the status kept in
+/// `exit_code` for the scheduler to select a port from. What is NOT an answer stays a failure: a
+/// timeout, death by signal (no status), and 126/127, which `sh` reports when the command could
+/// not be executed at all. "The check did not run" and "the check said no" are different.
+pub async fn execute_check(run: &str, timeout: Option<Duration>) -> Executed {
+    let mut executed = execute_shell(run, timeout).await;
+    if executed.timed_out {
+        return executed;
+    }
+    match executed.exit_code {
+        Some(code @ (126 | 127)) => {
+            executed.error = Some(format!(
+                "the check command could not be executed (sh exited {code})"
+            ));
+        }
+        Some(_) => {
+            executed.success = true;
+            executed.error = None;
+        }
+        None => {}
+    }
+    executed
+}
+
 /// `SIGKILL` every process in group `pgid`, by running `kill -KILL -- -<pgid>`.
 ///
 /// The workspace forbids `unsafe_code`, so `libc::kill` is not available; the

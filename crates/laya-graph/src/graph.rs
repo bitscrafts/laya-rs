@@ -40,6 +40,14 @@ pub enum NodeBody {
         /// The tool's arguments.
         arguments: serde_json::Value,
     },
+    /// Run a shell command and select a port from its exit status — no model (spec 25). Unlike a
+    /// `route` it has no upstream payload, so the scheduler resolves it locally.
+    Check {
+        /// The command line.
+        run: String,
+        /// `pass` / `fail` / `_` to target node id.
+        ports: std::collections::BTreeMap<String, String>,
+    },
     /// Match `on` against `rules`, first match wins.
     Route {
         /// The member-access expression being matched, e.g. `$.payload.label`.
@@ -64,8 +72,22 @@ impl NodeBody {
                 .iter()
                 .find(|rule| rule.eq.as_deref().is_none_or(|eq| eq == value))
                 .map(|rule| rule.port.as_str()),
-            Self::Shell { .. } | Self::Mcp { .. } => None,
+            Self::Shell { .. } | Self::Mcp { .. } | Self::Check { .. } => None,
         }
+    }
+
+    /// For a `check` node, the target its exit status selects: exit 0 is `pass`, any other exit
+    /// is `fail`, and an absent key takes `_`. `None` for a non-check body.
+    #[must_use]
+    pub fn check_target(&self, exit_code: i32) -> Option<&str> {
+        let Self::Check { ports, .. } = self else {
+            return None;
+        };
+        let key = if exit_code == 0 { "pass" } else { "fail" };
+        ports
+            .get(key)
+            .or_else(|| ports.get("_"))
+            .map(String::as_str)
     }
 }
 

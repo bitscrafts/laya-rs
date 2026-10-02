@@ -71,6 +71,9 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
             validate_decide(node, &ids)?;
             crate::placeholder::validate_references(node, flow)?;
         }
+        if node.kind == Kind::Check {
+            validate_check(node, &ids)?;
+        }
         validate_retry(node)?;
     }
 
@@ -92,6 +95,7 @@ fn validate_required(node: &Node) -> Result<(), FlowError> {
         Kind::Shell if node.run.is_none() => Err(missing(node, "shell", "run")),
         Kind::Mcp if node.tool.is_none() => Err(missing(node, "mcp", "tool")),
         Kind::Decide if node.question.is_none() => Err(missing(node, "decide", "question")),
+        Kind::Check if node.run.is_none() => Err(missing(node, "check", "run")),
         Kind::Decide if node.prompt.is_none() => Err(missing(node, "decide", "prompt")),
         _ => Ok(()),
     }
@@ -215,6 +219,37 @@ fn validate_decide(node: &Node, ids: &HashSet<&str>) -> Result<(), FlowError> {
             until: "until near-tie routing exists; its target would run on EVERY run".to_string(),
             instead: "Remove the flag and the `near_tie_port` node, and route on `band` instead"
                 .to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// A `check` selects among `pass` / `fail` / `_` by exit status (spec 25, R2).
+fn validate_check(node: &Node, ids: &HashSet<&str>) -> Result<(), FlowError> {
+    if node.allow_failure {
+        return Err(FlowError::CheckAllowFailure {
+            id: node.id.clone(),
+        });
+    }
+    let ports = node.ports.as_ref();
+    for (key, target) in ports.into_iter().flatten() {
+        if !matches!(key.as_str(), "pass" | "fail" | "_") {
+            return Err(FlowError::BadCheckPort {
+                id: node.id.clone(),
+                key: key.clone(),
+            });
+        }
+        if !ids.contains(target.as_str()) {
+            return Err(FlowError::PortTargetMissing {
+                id: node.id.clone(),
+                port: key.clone(),
+                target: target.clone(),
+            });
+        }
+    }
+    if !ports.is_some_and(|p| p.contains_key("_")) {
+        return Err(FlowError::CheckNeedsFallback {
+            id: node.id.clone(),
         });
     }
     Ok(())

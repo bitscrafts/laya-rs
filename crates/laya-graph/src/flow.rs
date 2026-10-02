@@ -103,7 +103,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
 /// A node's kind.
 ///
-/// The closed set v1 implements is `shell`, `mcp`, `decide`, and the internal
+/// The closed set v1 implements is `shell`, `mcp`, `decide`, `check`, and the internal
 /// `route` produced only by lowering (never authored by hand). Anything else
 /// — including the deliberately deferred `agent` and `quorum` — parses into
 /// [`Kind::Other`] so the refusal happens in `validate`, named, rather than as
@@ -117,6 +117,8 @@ pub enum Kind {
     /// Asks Laya a question and routes on the answer. Lowered away entirely
     /// before execution — see [`crate::lower`].
     Decide,
+    /// Runs a command; its exit status selects the port, with no model (spec 25).
+    Check,
     /// Matches `on` against `rules`, first match wins. Produced only by
     /// lowering a `decide` node; never written by a flow author.
     Route,
@@ -133,6 +135,7 @@ impl Kind {
             Self::Shell => "shell",
             Self::Mcp => "mcp",
             Self::Decide => "decide",
+            Self::Check => "check",
             Self::Route => "route",
             Self::Other(s) => s.as_str(),
         }
@@ -158,6 +161,7 @@ impl<'de> Deserialize<'de> for Kind {
             "shell" => Self::Shell,
             "mcp" => Self::Mcp,
             "decide" => Self::Decide,
+            "check" => Self::Check,
             "route" => Self::Route,
             _ => Self::Other(raw),
         })
@@ -207,7 +211,7 @@ pub struct Node {
     #[serde(default)]
     pub writes: bool,
 
-    /// `shell`: the command line to run.
+    /// `shell` / `check`: the command line to run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<String>,
 
@@ -243,7 +247,7 @@ pub struct Node {
     /// `decide`: what the routing matches — `label` (default) or `band`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
-    /// `decide`: answer (or `_`) to target node id.
+    /// `decide`: answer (or `_`) to target node id. `check`: `pass` / `fail` / `_` to target node id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<BTreeMap<String, String>>,
     /// `decide`: send a near tie to `near_tie_port` instead of its label.

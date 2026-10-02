@@ -61,6 +61,7 @@ pub fn render(graph: &Graph) -> MermaidRender {
         let kind = match &node.body {
             NodeBody::Shell { .. } => "shell",
             NodeBody::Mcp { .. } => "mcp",
+            NodeBody::Check { .. } => "check",
             NodeBody::Route { .. } => "route",
         };
         let _ = writeln!(text, "    {}[\"{} ({kind})\"]", mermaid_id(index), node.id);
