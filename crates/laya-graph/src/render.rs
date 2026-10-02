@@ -30,7 +30,6 @@ use crate::graph::{Graph, NodeBody};
 /// specific flow being rendered uses any of them.
 pub const DROPPED_FIELDS: &[&str] = &[
     "retry",
-    "timeout",
     "allow_failure",
     "writes",
     "subflow with-bindings",
@@ -162,6 +161,7 @@ mod tests {
             version: 1,
             description: None,
             inputs: Vec::new(),
+            timeout: None,
             nodes: vec![node, human, handle_a, handle_b],
         }
     }
@@ -172,6 +172,7 @@ mod tests {
             version: 1,
             description: None,
             inputs: Vec::new(),
+            timeout: None,
             nodes: vec![
                 Node {
                     run: Some("true".to_string()),

@@ -17,13 +17,14 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tokio::sync::Semaphore;
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::error::RunError;
 use crate::graph::{Graph, GraphNode, NodeBody};
-use crate::node::{Executed, McpCaller, execute_mcp, execute_shell};
+use crate::node::{Executed, McpCaller, execute_mcp, execute_shell, failed};
 use crate::run::{NodeRecord, RunReport};
 
 /// The deterministic topological order of `graph`'s nodes (R8).
@@ -108,6 +109,11 @@ pub struct RunOptions {
 /// siblings not yet started are not started, in-flight work is not
 /// cancelled, and the returned [`RunReport::stopped_early`] is `true` with
 /// [`RunReport::failed_node`] named (R11).
+///
+/// A node's `timeout` is enforced (R1): an expired shell node is killed with
+/// its whole process group and recorded `timed_out`. Shell nodes spawn through
+/// `tokio::process`, so the runtime this runs on must have its I/O driver
+/// enabled (`enable_all`).
 ///
 /// # Errors
 /// [`RunError::BadLimit`] if `opts.limit` is zero. [`RunError::UnknownNode`]
@@ -329,16 +335,10 @@ async fn run_one(
     }
 
     let allow_failure = node.allow_failure;
+    let timeout = node.timeout;
     let executed = match node.body {
-        NodeBody::Shell { run } => {
-            join_executed(tokio::task::spawn_blocking(move || execute_shell(&run))).await
-        }
-        NodeBody::Mcp { tool, arguments } => {
-            join_executed(tokio::task::spawn_blocking(move || {
-                execute_mcp(mcp.as_ref(), &tool, &arguments)
-            }))
-            .await
-        }
+        NodeBody::Shell { run } => execute_shell(&run, timeout).await,
+        NodeBody::Mcp { tool, arguments } => run_mcp(mcp, tool, arguments, timeout).await,
         // A lowered `route` node picks a port; it has no work of its own to
         // run here. Threading a payload through it is the CLI's concern
         // (a later part) — out of scope for R12, which covers `shell`/`mcp`.
@@ -348,6 +348,7 @@ async fn run_one(
             output: String::new(),
             error: None,
             duration_ms: 0,
+            timed_out: false,
         },
     };
 
@@ -366,7 +367,34 @@ async fn run_one(
         output: executed.output,
         error: executed.error,
         duration_ms: executed.duration_ms,
+        timed_out: executed.timed_out,
     })
+}
+
+/// Run an `mcp` node under its optional deadline (R1).
+///
+/// The caller is synchronous and cannot be interrupted from here: an expiry
+/// reports the node as timed out and stops waiting, while the abandoned call
+/// ends by the caller's own bound (R4 makes the real client kill its child).
+async fn run_mcp(
+    mcp: Arc<dyn McpCaller>,
+    tool: String,
+    arguments: serde_json::Value,
+    timeout: Option<Duration>,
+) -> Executed {
+    let start = Instant::now();
+    let work = tokio::task::spawn_blocking(move || execute_mcp(mcp.as_ref(), &tool, &arguments));
+    let Some(limit) = timeout else {
+        return join_executed(work).await;
+    };
+    match tokio::time::timeout(limit, join_executed(work)).await {
+        Ok(executed) => executed,
+        Err(_elapsed) => failed(
+            format!("timed out after {}ms", limit.as_millis()),
+            u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            true,
+        ),
+    }
 }
 
 async fn join_executed(handle: JoinHandle<Executed>) -> Executed {
@@ -378,6 +406,7 @@ async fn join_executed(handle: JoinHandle<Executed>) -> Executed {
             output: String::new(),
             error: Some(format!("node task failed: {e}")),
             duration_ms: 0,
+            timed_out: false,
         },
     }
 }
@@ -391,6 +420,7 @@ fn failed_record(run_id: String, node_id: String, reason: &str) -> NodeRecord {
         output: String::new(),
         error: Some(reason.to_string()),
         duration_ms: 0,
+        timed_out: false,
     }
 }
 
@@ -402,11 +432,9 @@ mod tests {
         clippy::panic,
         clippy::indexing_slicing
     )]
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
-
     use super::*;
     use crate::graph::Edge;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     // ---- test fixtures ------------------------------------------------------
 
@@ -418,6 +446,7 @@ mod tests {
             },
             writes: false,
             allow_failure: false,
+            timeout: None,
         }
     }
 
@@ -430,6 +459,7 @@ mod tests {
             },
             writes: false,
             allow_failure: false,
+            timeout: None,
         }
     }
 
@@ -508,7 +538,7 @@ mod tests {
             within_4s(move || {
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(4)
-                    .enable_time()
+                    .enable_all()
                     .build()
                     .expect("runtime")
                     .block_on(async {
@@ -1246,5 +1276,229 @@ mod tests {
         )
         .await;
         assert_eq!(result, Err(RunError::BadLimit { limit: 0 }));
+    }
+
+    // ---- spec 10: deadlines that fire -----------------------------------------
+
+    fn with_timeout(mut node: GraphNode, secs: f64) -> GraphNode {
+        node.timeout = Some(Duration::from_secs_f64(secs));
+        node
+    }
+
+    async fn run_one_node(node: GraphNode, run_id: &str) -> RunReport {
+        let graph = Graph {
+            nodes: vec![node],
+            edges: vec![],
+        };
+        run_bounded(&graph, opts(run_id, 2))
+            .await
+            .expect("run must not error")
+    }
+
+    /// Whether `pid` is no longer a running process. A killed process that
+    /// nobody has reaped is a zombie: `kill -0` still succeeds on it, but it
+    /// is not running, so a zombie counts as gone.
+    fn process_is_gone(pid: &str) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(true, |stat| {
+            stat.rsplit(") ")
+                .next()
+                .is_some_and(|rest| rest.starts_with('Z'))
+        })
+    }
+
+    fn read_pid(file: &std::path::Path) -> String {
+        std::fs::read_to_string(file)
+            .expect("the node wrote its grandchild's pid")
+            .trim()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn a_node_past_its_timeout_is_killed_and_reported() {
+        let report = run_one_node(with_timeout(shell("n1", "sleep 30"), 1.0), "r-to").await;
+        let record = &report.records[0];
+        assert!(!record.success, "{record:?}");
+        assert!(record.timed_out, "{record:?}");
+        assert!(
+            (900..3000).contains(&record.duration_ms),
+            "duration_ms must be about the deadline, got {}",
+            record.duration_ms
+        );
+        assert!(report.stopped_early, "an expired node is a failure");
+        assert_eq!(report.failed_node.as_deref(), Some("n1"));
+    }
+
+    #[tokio::test]
+    async fn the_control_a_node_within_its_timeout_succeeds() {
+        let report = run_one_node(with_timeout(shell("n1", "sleep 0.1"), 5.0), "r-in").await;
+        let record = &report.records[0];
+        assert!(record.success, "{record:?}");
+        assert!(!record.timed_out, "{record:?}");
+        assert!(!report.stopped_early);
+    }
+
+    #[tokio::test]
+    async fn the_control_a_node_without_a_timeout_is_unbounded_as_before() {
+        let report = run_one_node(shell("n1", "sleep 1.5"), "r-none").await;
+        let record = &report.records[0];
+        assert!(record.success, "{record:?}");
+        assert!(!record.timed_out, "{record:?}");
+        assert!(record.duration_ms >= 1400, "{record:?}");
+    }
+
+    #[tokio::test]
+    async fn a_timeout_leaves_no_orphan() {
+        let dir = tmp_dir("orphan");
+        let pid_file = dir.join("pid-killed");
+        let node = with_timeout(
+            shell(
+                "n1",
+                &format!("sleep 600 & echo $! > {}; wait", pid_file.display()),
+            ),
+            1.0,
+        );
+        let report = run_one_node(node, "r-orphan").await;
+        assert!(report.records[0].timed_out, "{:?}", report.records[0]);
+
+        let pid = read_pid(&pid_file);
+        // The group signal is sent before the record returns, but delivery
+        // is the kernel's: allow it a moment, never an unbounded wait.
+        let mut gone = false;
+        for _ in 0..20 {
+            if process_is_gone(&pid) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(gone, "grandchild {pid} outlived the timeout");
+    }
+
+    #[tokio::test]
+    async fn the_control_a_node_that_finishes_in_time_is_not_group_killed() {
+        // Proves `process_is_gone` can answer "alive", and that nothing is
+        // signalled when the deadline is not reached: a backgrounded child of
+        // a node that completed in time must still be running afterwards.
+        let dir = tmp_dir("not-killed");
+        let pid_file = dir.join("pid-kept");
+        let node = with_timeout(
+            shell(
+                "n1",
+                &format!(
+                    "sleep 3 >/dev/null 2>&1 & echo $! > {}; exit 0",
+                    pid_file.display()
+                ),
+            ),
+            5.0,
+        );
+        let report = run_one_node(node, "r-kept").await;
+        assert!(report.records[0].success, "{:?}", report.records[0]);
+        let pid = read_pid(&pid_file);
+        assert!(
+            !process_is_gone(&pid),
+            "an in-time node's child must not have been killed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_flow_timeout_is_inherited() {
+        let flow = crate::flow::Flow {
+            flow: "t".to_string(),
+            version: 1,
+            description: None,
+            inputs: vec![],
+            timeout: Some(1),
+            nodes: vec![crate::flow::Node {
+                run: Some("sleep 30".to_string()),
+                ..crate::flow::Node::new("n1", crate::flow::Kind::Shell)
+            }],
+        };
+        let graph = crate::lower::lower(&flow).expect("lower");
+        let report = run_bounded(&graph, opts("r-inherit", 2))
+            .await
+            .expect("run");
+        assert!(report.records[0].timed_out, "{:?}", report.records[0]);
+    }
+
+    #[tokio::test]
+    async fn the_control_a_node_timeout_overrides_the_flow_timeout() {
+        // Near miss for inheritance: the node declares its own, longer
+        // deadline, so the flow's 1 s must NOT apply to it.
+        let flow = crate::flow::Flow {
+            flow: "t".to_string(),
+            version: 1,
+            description: None,
+            inputs: vec![],
+            timeout: Some(1),
+            nodes: vec![crate::flow::Node {
+                run: Some("sleep 1.5".to_string()),
+                timeout: Some(3),
+                ..crate::flow::Node::new("n1", crate::flow::Kind::Shell)
+            }],
+        };
+        let graph = crate::lower::lower(&flow).expect("lower");
+        let report = run_bounded(&graph, opts("r-override", 2))
+            .await
+            .expect("run");
+        let record = &report.records[0];
+        assert!(record.success && !record.timed_out, "{record:?}");
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not() {
+        // The stop flag and the deadline interact: an expiry is a failure, so
+        // a queued sibling must not start; with `allow_failure` it must.
+        let dir = tmp_dir("timeout-halt");
+        for (allow, label) in [(false, "strict"), (true, "lenient")] {
+            let mut slow = with_timeout(shell("n1", "sleep 30"), 0.5);
+            slow.allow_failure = allow;
+            let marker = dir.join(label);
+            let graph = Graph {
+                nodes: vec![slow, shell("n2", &format!("touch {}", marker.display()))],
+                edges: vec![],
+            };
+            let report = run_bounded(&graph, opts(label, 1)).await.expect("run");
+            assert_eq!(
+                marker.exists(),
+                allow,
+                "{label}: sibling ran = {}, expected {allow}; {report:?}",
+                marker.exists()
+            );
+            assert_eq!(report.stopped_early, !allow, "{label}: {report:?}");
+        }
+    }
+
+    struct SlowCaller(u64);
+    impl McpCaller for SlowCaller {
+        fn call(&self, _tool: &str, _arguments: &serde_json::Value) -> Result<String, String> {
+            std::thread::sleep(Duration::from_millis(self.0));
+            Ok("done".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_mcp_node_past_its_timeout_is_reported_timed_out() {
+        let graph = Graph {
+            nodes: vec![with_timeout(mcp("n1", "slow"), 0.5)],
+            edges: vec![],
+        };
+        let mut o = opts("r-mcp-to", 2);
+        o.mcp = Arc::new(SlowCaller(1500));
+        let report = run_bounded(&graph, o).await.expect("run");
+        let record = &report.records[0];
+        assert!(!record.success && record.timed_out, "{record:?}");
+    }
+
+    #[tokio::test]
+    async fn the_control_an_mcp_node_within_its_timeout_succeeds() {
+        let graph = Graph {
+            nodes: vec![with_timeout(mcp("n1", "quick"), 5.0)],
+            edges: vec![],
+        };
+        let mut o = opts("r-mcp-in", 2);
+        o.mcp = Arc::new(SlowCaller(50));
+        let report = run_bounded(&graph, o).await.expect("run");
+        let record = &report.records[0];
+        assert!(record.success && !record.timed_out, "{record:?}");
     }
 }

@@ -27,6 +27,10 @@ pub struct Flow {
     /// The inputs this flow expects.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<String>,
+    /// Default node timeout, in seconds, inherited by every node that does
+    /// not declare its own. `None` means no flow-wide deadline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
     /// Every node in the flow.
     pub nodes: Vec<Node>,
 }

@@ -15,7 +15,7 @@ use laya_graph::{Flow, Library, McpCaller, MermaidRender, RunOptions, RunReport}
 use laya_graph::{expand, lower, render as render_graph, run_flow, validate as validate_flow};
 use serde_json::Value;
 
-use crate::mcp_client::{LiveMcpCaller, resolve_mcp_binary};
+use crate::mcp_client::{DEFAULT_CALL_TIMEOUT, LiveMcpCaller, resolve_mcp_binary};
 
 /// `laya graph <validate|render|run> <flow.json>` — a dispatcher, kept
 /// deliberately thin like `ledger`'s.
@@ -145,6 +145,7 @@ fn graph_render(path: &str) -> ExitCode {
 fn graph_run(path: &str) -> ExitCode {
     let mcp: Arc<dyn McpCaller> = Arc::new(LiveMcpCaller {
         bin: resolve_mcp_binary(),
+        call_timeout: DEFAULT_CALL_TIMEOUT,
     });
     graph_run_with(path, mcp)
 }

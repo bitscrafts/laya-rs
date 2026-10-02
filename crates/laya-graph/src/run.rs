@@ -34,6 +34,10 @@ pub struct NodeRecord {
     pub error: Option<String>,
     /// Wall-clock duration of the node's own work, in milliseconds.
     pub duration_ms: u64,
+    /// `true` when the node's deadline expired and its work was killed — so a
+    /// report can say a node expired, not only that it failed (R5).
+    #[serde(default)]
+    pub timed_out: bool,
 }
 
 /// What a run produced, in full — never reported as a completed run when it

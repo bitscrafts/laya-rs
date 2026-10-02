@@ -35,7 +35,7 @@ pub const LAYA_MCP_BIN_ENV: &str = "LAYA_MCP_BIN";
 /// How long a single JSON-RPC round trip may take before this gives up and
 /// reports a labelled failure rather than hang. Generous: `decide` is a real
 /// forward pass through the sidecar, not a mock.
-const CALL_TIMEOUT: Duration = Duration::from_mins(2);
+pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// Where to find the real `laya-mcp` binary: `LAYA_MCP_BIN` if set, else the
 /// bare name, resolved from `PATH` by the OS when spawned.
@@ -52,12 +52,15 @@ pub fn resolve_mcp_binary() -> PathBuf {
 pub struct LiveMcpCaller {
     /// The `laya-mcp` binary to spawn — see [`resolve_mcp_binary`].
     pub bin: PathBuf,
+    /// How long one JSON-RPC round trip may take — [`DEFAULT_CALL_TIMEOUT`]
+    /// in production; a test shortens it to prove a hung server is killed.
+    pub call_timeout: Duration,
 }
 
 impl McpCaller for LiveMcpCaller {
     fn call(&self, tool: &str, arguments: &Value) -> Result<String, String> {
         if tool != "decide" {
-            return call_real_mcp(&self.bin, tool, arguments);
+            return call_real_mcp(&self.bin, tool, arguments, self.call_timeout);
         }
 
         let question = arguments
@@ -94,7 +97,7 @@ impl McpCaller for LiveMcpCaller {
             }
         });
 
-        let raw = call_real_mcp(&self.bin, "decide", &call_args)?;
+        let raw = call_real_mcp(&self.bin, "decide", &call_args, self.call_timeout)?;
         let parsed: Value = serde_json::from_str(&raw)
             .map_err(|e| format!("decide response was not JSON: {e}: {raw}"))?;
         let payload = parsed
@@ -109,18 +112,21 @@ impl McpCaller for LiveMcpCaller {
 /// Read one newline-delimited JSON-RPC message with a bounded wait, via a
 /// background reader thread — a plain blocking `read_line` cannot be given a
 /// timeout on a pipe the way a socket can.
-fn read_message(rx: &mpsc::Receiver<std::io::Result<String>>) -> Result<Value, String> {
+fn read_message(
+    rx: &mpsc::Receiver<std::io::Result<String>>,
+    call_timeout: Duration,
+) -> Result<Value, String> {
     let line = rx
-        .recv_timeout(CALL_TIMEOUT)
+        .recv_timeout(call_timeout)
         .map_err(|e| match e {
             // A std mpsc channel with no sender left returns `Disconnected`
             // IMMEDIATELY, never waiting for the timeout — so this must stay
             // a distinct message. Measured: reporting this as "within
-            // {CALL_TIMEOUT:?}" when laya-mcp actually exited in 16ms is
+            // {call_timeout:?}" when laya-mcp actually exited in 16ms is
             // exactly the class of lying diagnostic this project exists to
             // avoid (it would read as a hang that never happened).
             mpsc::RecvTimeoutError::Timeout => {
-                format!("no response from laya-mcp within {CALL_TIMEOUT:?} (it may be hung)")
+                format!("no response from laya-mcp within {call_timeout:?} (it may be hung)")
             }
             mpsc::RecvTimeoutError::Disconnected => {
                 "laya-mcp closed its stdout without responding (it likely exited early — \
@@ -139,7 +145,12 @@ fn read_message(rx: &mpsc::Receiver<std::io::Result<String>>) -> Result<Value, S
 /// here carries the specific reason (spawn failure, a protocol error
 /// `laya-mcp` returned, a timeout), so the CLI's caller can print the actual
 /// diagnosis rather than "something went wrong".
-fn call_real_mcp(bin: &Path, tool: &str, arguments: &Value) -> Result<String, String> {
+fn call_real_mcp(
+    bin: &Path,
+    tool: &str,
+    arguments: &Value,
+    call_timeout: Duration,
+) -> Result<String, String> {
     let mut child: Child = Command::new(bin)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -153,26 +164,19 @@ fn call_real_mcp(bin: &Path, tool: &str, arguments: &Value) -> Result<String, St
         })?;
 
     let Some(mut stdin) = child.stdin.take() else {
+        reap(&mut child, true);
         return Err("laya-mcp: stdin was not piped".to_string());
     };
     let Some(stdout) = child.stdout.take() else {
+        reap(&mut child, true);
         return Err("laya-mcp: stdout was not piped".to_string());
     };
     let Some(stderr) = child.stderr.take() else {
+        reap(&mut child, true);
         return Err("laya-mcp: stderr was not piped".to_string());
     };
 
-    let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    {
-        let sink = Arc::clone(&stderr_lines);
-        std::thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                if let Ok(mut v) = sink.lock() {
-                    v.push(line);
-                }
-            }
-        });
-    }
+    let stderr_lines = collect_stderr(stderr);
 
     let (tx, rx) = mpsc::channel::<std::io::Result<String>>();
     std::thread::spawn(move || {
@@ -206,7 +210,7 @@ fn call_real_mcp(bin: &Path, tool: &str, arguments: &Value) -> Result<String, St
             }
         });
         write_line(&mut stdin, &init_req)?;
-        let init_resp = read_message(&rx)?;
+        let init_resp = read_message(&rx, call_timeout)?;
         if init_resp.get("error").is_some() {
             return Err(format!("initialize was refused: {init_resp}"));
         }
@@ -221,7 +225,7 @@ fn call_real_mcp(bin: &Path, tool: &str, arguments: &Value) -> Result<String, St
             "params": {"name": tool, "arguments": arguments}
         });
         write_line(&mut stdin, &call_req)?;
-        let resp = read_message(&rx)?;
+        let resp = read_message(&rx, call_timeout)?;
 
         if let Some(err) = resp.get("error") {
             return Err(format!("laya-mcp refused `{tool}`: {err}"));
@@ -238,7 +242,9 @@ fn call_real_mcp(bin: &Path, tool: &str, arguments: &Value) -> Result<String, St
     })();
 
     drop(stdin);
-    let _ = child.wait();
+    // Every `Err` kills before it waits (R4): a server that is hung rather
+    // than slow ignores stdin EOF, and `wait()` alone would then never return.
+    reap(&mut child, result.is_err());
 
     result.map_err(|e| {
         let stderr_text = stderr_lines
@@ -249,8 +255,111 @@ fn call_real_mcp(bin: &Path, tool: &str, arguments: &Value) -> Result<String, St
     })
 }
 
+/// Drain `stderr` on a background thread, so a chatty server cannot block on a
+/// full pipe and the lines are there to report if the call fails.
+fn collect_stderr(stderr: std::process::ChildStderr) -> Arc<Mutex<Vec<String>>> {
+    let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&lines);
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Ok(mut v) = sink.lock() {
+                v.push(line);
+            }
+        }
+    });
+    lines
+}
+
+/// Optionally kill `child`, then wait for it so it is never left behind.
+fn reap(child: &mut Child, kill: bool) {
+    if kill {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
 fn write_line(stdin: &mut std::process::ChildStdin, value: &Value) -> Result<(), String> {
     let mut line = serde_json::to_string(value).map_err(|e| e.to_string())?;
     line.push('\n');
     stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Instant;
+
+    use super::*;
+
+    /// Write an executable `laya-mcp` stand-in into a fresh temp dir.
+    fn fake_server(tag: &str, script: &str) -> (PathBuf, PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("laya-mcp-client-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create tmp dir");
+        let bin = dir.join("fake-laya-mcp");
+        let pid_file = dir.join("pid");
+        let script = script.replace("{PID}", &pid_file.display().to_string());
+        std::fs::write(&bin, script).expect("write script");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        (bin, pid_file)
+    }
+
+    /// Run `call` on its own thread and fail if it has not returned in 5 s —
+    /// a `wait()` that never returns must read as a failure, not a hang.
+    fn within_5s<T: Send + 'static>(call: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(call());
+        });
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("the call did not return within 5s")
+    }
+
+    fn is_gone(pid: &str) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(true, |stat| {
+            stat.rsplit(") ")
+                .next()
+                .is_some_and(|rest| rest.starts_with('Z'))
+        })
+    }
+
+    #[test]
+    fn a_hung_server_is_killed_not_awaited_forever() {
+        // Reads nothing, answers nothing, ignores stdin EOF: `exec` makes the
+        // recorded pid the process that hangs.
+        let (bin, pid_file) = fake_server("hung", "#!/bin/sh\necho $$ > {PID}\nexec sleep 600\n");
+        let caller = LiveMcpCaller {
+            bin,
+            call_timeout: Duration::from_secs(1),
+        };
+        let started = Instant::now();
+        let result = within_5s(move || caller.call("anything", &json!({})));
+        let err = result.expect_err("a hung server must be an error");
+        assert!(err.contains("no response"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+
+        let pid = std::fs::read_to_string(&pid_file)
+            .expect("pid")
+            .trim()
+            .to_string();
+        assert!(is_gone(&pid), "the hung server {pid} was left running");
+    }
+
+    #[test]
+    fn the_control_a_server_that_answers_is_not_an_error() {
+        // A near miss for "kill on error": a server that completes the
+        // handshake and answers inside the deadline must return its text.
+        let script = "#!/bin/sh\n\
+            read init; echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'\n\
+            read note; read call\n\
+            echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"pong\"}]}}'\n";
+        let (bin, _) = fake_server("answers", script);
+        let caller = LiveMcpCaller {
+            bin,
+            call_timeout: Duration::from_secs(5),
+        };
+        let result = within_5s(move || caller.call("anything", &json!({})));
+        assert_eq!(result.as_deref(), Ok("pong"));
+    }
 }

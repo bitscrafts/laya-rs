@@ -13,6 +13,8 @@
 //! `lowering_leaves_the_input_flow_unchanged` can assert the input `Flow`
 //! compares equal after the call.
 
+use std::time::Duration;
+
 use serde_json::json;
 
 use crate::error::FlowError;
@@ -37,7 +39,7 @@ pub fn lower(flow: &Flow) -> Result<Graph, FlowError> {
 
     for node in &flow.nodes {
         match &node.kind {
-            Kind::Decide => lower_decide(node, &mut nodes, &mut edges)?,
+            Kind::Decide => lower_decide(node, flow, &mut nodes, &mut edges)?,
             Kind::Shell => nodes.push(GraphNode {
                 id: node.id.clone(),
                 body: NodeBody::Shell {
@@ -45,6 +47,7 @@ pub fn lower(flow: &Flow) -> Result<Graph, FlowError> {
                 },
                 writes: node.writes,
                 allow_failure: node.allow_failure,
+                timeout: deadline(node, flow),
             }),
             Kind::Mcp => nodes.push(GraphNode {
                 id: node.id.clone(),
@@ -54,6 +57,7 @@ pub fn lower(flow: &Flow) -> Result<Graph, FlowError> {
                 },
                 writes: node.writes,
                 allow_failure: node.allow_failure,
+                timeout: deadline(node, flow),
             }),
             Kind::Route | Kind::Other(_) => {
                 return Err(FlowError::UnknownKind {
@@ -75,8 +79,15 @@ pub fn lower(flow: &Flow) -> Result<Graph, FlowError> {
     Ok(Graph { nodes, edges })
 }
 
+/// A node's own `timeout` (seconds), else the flow's; `None` when neither is
+/// set, which keeps a node unbounded (R3).
+fn deadline(node: &Node, flow: &Flow) -> Option<Duration> {
+    node.timeout.or(flow.timeout).map(Duration::from_secs)
+}
+
 fn lower_decide(
     node: &Node,
+    flow: &Flow,
     nodes: &mut Vec<GraphNode>,
     edges: &mut Vec<Edge>,
 ) -> Result<(), FlowError> {
@@ -95,6 +106,7 @@ fn lower_decide(
         },
         writes: node.writes,
         allow_failure: node.allow_failure,
+        timeout: deadline(node, flow),
     });
 
     let field = match node.on.as_deref() {
@@ -136,6 +148,7 @@ fn lower_decide(
         },
         writes: false,
         allow_failure: false,
+        timeout: None,
     });
 
     edges.push(Edge {
@@ -178,6 +191,7 @@ mod tests {
             version: 1,
             description: None,
             inputs: Vec::new(),
+            timeout: None,
             nodes: vec![node],
         }
     }

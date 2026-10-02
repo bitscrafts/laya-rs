@@ -276,6 +276,7 @@ mod tests {
             version: 1,
             description: None,
             inputs: Vec::new(),
+            timeout: None,
             nodes,
         }
     }

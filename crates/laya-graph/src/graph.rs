@@ -83,6 +83,10 @@ pub struct GraphNode {
     /// Whether a failure here is non-fatal to the run (part 3).
     #[serde(default)]
     pub allow_failure: bool,
+    /// The deadline for this node's own work, from the node's `timeout` or
+    /// else the flow's. `None` means unbounded (R1, R3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<std::time::Duration>,
 }
 
 /// One edge: `from` runs before `to`. `port` is set when the edge

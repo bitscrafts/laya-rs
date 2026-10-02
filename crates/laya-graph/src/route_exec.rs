@@ -190,6 +190,7 @@ async fn call_upstream(
         output: executed.output,
         error: executed.error,
         duration_ms: executed.duration_ms,
+        timed_out: executed.timed_out,
     })
 }
 
@@ -218,6 +219,7 @@ fn resolve_route(
                 output: String::new(),
                 error: Some(format!("route `{}`: {reason}", route_node.id)),
                 duration_ms: 0,
+                timed_out: false,
             };
             return Ok((record, BTreeSet::new()));
         }
@@ -246,6 +248,7 @@ fn resolve_route(
         .to_string(),
         error: None,
         duration_ms: 0,
+        timed_out: false,
     };
 
     let mut unselected: BTreeSet<String> = rules.iter().map(|r| r.port.clone()).collect();
@@ -343,7 +346,7 @@ mod tests {
         std::thread::spawn(move || {
             let result = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
-                .enable_time()
+                .enable_all()
                 .build()
                 .map(|rt| {
                     rt.block_on(async {
@@ -435,6 +438,7 @@ mod tests {
             version: 1,
             description: None,
             inputs: Vec::new(),
+            timeout: None,
             nodes: vec![classify, handle_a, handle_b, human],
         }
     }
@@ -609,6 +613,7 @@ mod tests {
             version: 1,
             description: None,
             inputs: Vec::new(),
+            timeout: None,
             nodes: vec![Node {
                 run: Some("echo plain".to_string()),
                 ..Node::new("only", Kind::Shell)

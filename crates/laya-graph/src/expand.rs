@@ -95,6 +95,7 @@ fn expand_doc(doc: &Value, library: &Library, stack: &mut Vec<String>) -> Result
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let timeout = doc.get("timeout").and_then(Value::as_u64);
 
     let mut out_nodes: Vec<Node> = Vec::new();
     let mut subflow_terminals: HashMap<String, Vec<String>> = HashMap::new();
@@ -145,6 +146,7 @@ fn expand_doc(doc: &Value, library: &Library, stack: &mut Vec<String>) -> Result
         version,
         description,
         inputs,
+        timeout,
         nodes: out_nodes,
     })
 }
@@ -229,6 +231,9 @@ fn expand_subflow_node(
     }
 
     let prefix = format!("{id}/");
+    // The child's own flow-level default must travel with its nodes: once they
+    // are spliced into the parent, `Flow.timeout` is the parent's (R3).
+    let child_timeout = child_flow.timeout;
     let local_ids: HashSet<String> = child_flow.nodes.iter().map(|n| n.id.clone()).collect();
     let prefixed_nodes: Vec<Node> = child_flow
         .nodes
@@ -247,6 +252,7 @@ fn expand_subflow_node(
                 })
                 .collect();
             n.id = format!("{prefix}{}", n.id);
+            n.timeout = n.timeout.or(child_timeout);
             if is_root {
                 n.depends_on.extend(parent_depends_on.iter().cloned());
             }

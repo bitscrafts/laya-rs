@@ -100,16 +100,16 @@ and the orphan is the defect.
 
 **New, each watched to FAIL on `b0ee704`:**
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_node_past_its_timeout_is_killed_and_reported 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_node_without_a_timeout_is_unbounded_as_before 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1 control
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_timeout_leaves_no_orphan 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_hung_server_is_killed_not_awaited_forever 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_node_past_its_timeout_is_killed_and_reported 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_node_without_a_timeout_is_unbounded_as_before 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1 control
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_timeout_leaves_no_orphan 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_hung_server_is_killed_not_awaited_forever 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
 - [ ] `cd /projects/laya-rs && cargo build -q -p laya-cli && d=$(mktemp -d) && printf '%s' '{"flow":"t","nodes":[{"id":"s","kind":"shell","run":"sleep 3","timeout":1}]}' > "$d/f.json" && ! timeout 10 ./target/debug/laya graph run "$d/f.json" >/dev/null 2>&1`: **live, end to end**. The CLI must report the run as failed. Measured pre-implementation: exit 0, `completed`, `duration_ms: 3002`
 
 **Carried re-checks:**
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph`: no regression
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph`: no regression
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings`
 
 ---
 

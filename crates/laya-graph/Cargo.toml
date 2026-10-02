@@ -23,7 +23,7 @@ blake3 = { workspace = true }
 # on this. The workspace pin is `default-features = false`, so the runtime
 # features actually needed are stated explicitly here, as `laya-mcp` already
 # does — a bare `workspace = true` gives a tokio that cannot spawn tasks.
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process"] }
 
 [lints]
 workspace = true
