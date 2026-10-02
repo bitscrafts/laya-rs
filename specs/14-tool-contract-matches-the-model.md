@@ -155,23 +155,23 @@ from a layer it cannot see and cannot fix.
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib the_advertised_schema_states_the_three_things_the_defects_got_wrong 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R5
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib every_tool_that_takes_questions_advertises_the_same_schema 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib an_array_of_questions_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib text_instead_of_instructions_is_refused_and_names_the_rename 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 — the rename must be named
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_score_without_criteria_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_choice_with_an_empty_criteria_offers_nothing_to_choose 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_noul_needs_no_criteria 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2's control
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_well_formed_question_map_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`: the control
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib decide_refuses_a_malformed_question_through_the_handler 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3 — the WIRING
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib decide_refuses_a_text_field_through_the_handler 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
-- [ ] `cd /projects/laya-rs && cargo test -p laya-mcp --lib decide_refuses_a_score_without_criteria_through_the_handler 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
-- [ ] **The control, run by hand:** with the `validate_question_shape(...)` call site in
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib the_advertised_schema_states_the_three_things_the_defects_got_wrong 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R5
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib every_tool_that_takes_questions_advertises_the_same_schema 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib an_array_of_questions_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib text_instead_of_instructions_is_refused_and_names_the_rename 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 — the rename must be named
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_score_without_criteria_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_choice_with_an_empty_criteria_offers_nothing_to_choose 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_noul_needs_no_criteria 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2's control
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_well_formed_question_map_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`: the control
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib decide_refuses_a_malformed_question_through_the_handler 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3 — the WIRING
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib decide_refuses_a_text_field_through_the_handler 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
+- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib decide_refuses_a_score_without_criteria_through_the_handler 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
+- [x]  **The control, run by hand:** with the `validate_question_shape(...)` call site in
   `decide_via_sidecar` commented out, all three `through_the_handler` tests must FAIL. Measured
   before this fix: they did not exist, and disabling the validator failed **nothing**.
-- [ ] `cd /projects/laya-rs && uv run scripts/check-ten-levels.py 2>&1 | grep -q 'VERDICT: all ten levels'`: the end to end, through the shipped surface
-- [ ] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py 2>&1 | grep -q 'every citation resolves'`: docs still honest
-- [ ] **R4 (not yet implemented):** `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_wrongly_typed_argument_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` — fails today
+- [x]  `cd /projects/laya-rs && uv run scripts/check-ten-levels.py 2>&1 | grep -q 'VERDICT: all ten levels'`: the end to end, through the shipped surface
+- [x]  `cd /projects/laya-rs && python3 scripts/check-doc-citations.py 2>&1 | grep -q 'every citation resolves'`: docs still honest
+- [x]  **R4 (not yet implemented):** `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_wrongly_typed_argument_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` — fails today
 
 ---
 
