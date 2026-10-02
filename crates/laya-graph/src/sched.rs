@@ -58,7 +58,15 @@ use laya_core::agentic::STATE_CAP_BYTES;
 /// hand-built one.
 #[must_use]
 pub fn topo_order(graph: &Graph) -> Vec<String> {
+    // An inconsistent table orders nothing: the empty order is "shorter than the graph", which
+    // every caller already treats as unorderable. `refuse_cycle` surfaces the named error.
+    try_topo_order(graph).unwrap_or_default()
+}
+
+/// [`topo_order`], refusing by name a dependency table that is not about `graph` (spec 23, R1).
+fn try_topo_order(graph: &Graph) -> Result<Vec<String>, RunError> {
     let (mut indegree, successors) = dependency_tables(graph);
+    verify_tables(graph, &indegree)?;
     let mut ready: BTreeSet<String> = indegree
         .iter()
         .filter(|&(_, &deg)| deg == 0)
@@ -79,7 +87,7 @@ pub fn topo_order(graph: &Graph) -> Vec<String> {
         }
         order.push(id);
     }
-    order
+    Ok(order)
 }
 
 /// `(indegree, successors)` for every node `graph.nodes` declares — built
@@ -99,6 +107,25 @@ fn dependency_tables(graph: &Graph) -> (HashMap<String, usize>, HashMap<String, 
             .push(edge.to.clone());
     }
     (indegree, successors)
+}
+
+/// Assert the invariant [`dependency_tables`] owes every consumer: an entry for every node id
+/// `graph.nodes` declares (spec 23, R1). Checked by the caller on what it was handed, so a
+/// replacement of `dependency_tables` itself cannot skip it.
+fn verify_tables(graph: &Graph, indegree: &HashMap<String, usize>) -> Result<(), RunError> {
+    let missing: BTreeSet<String> = graph
+        .nodes
+        .iter()
+        .filter(|n| !indegree.contains_key(&n.id))
+        .map(|n| n.id.clone())
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(RunError::InconsistentTable {
+            missing: missing.into_iter().collect(),
+        })
+    }
 }
 
 /// The smallest id in `set`, removed — the tie-break R8 requires.
@@ -176,8 +203,18 @@ pub async fn run_from(
 
     refuse_cycle(graph)?;
 
-    let mut tracker = Tracker::new(graph);
+    let tracker = Tracker::new(graph);
+    run_tracked(graph, opts, origin, tracker).await
+}
 
+/// [`run_from`] after validation, with the tracker supplied — so a test can hand it a tracker
+/// that is deliberately inconsistent with the graph (spec 23, R3).
+async fn run_tracked(
+    graph: &Graph,
+    opts: RunOptions,
+    origin: Instant,
+    mut tracker: Tracker,
+) -> Result<RunReport, RunError> {
     let halt = Arc::new(AtomicBool::new(false));
     let gates = Gates {
         fanout: Arc::new(Semaphore::new(opts.limit)),
@@ -252,6 +289,11 @@ pub async fn run_from(
 
     let skipped: Vec<String> = tracker.skipped.iter().cloned().collect();
     let not_started = nodes_without_record(graph, &records, &tracker.skipped);
+    // A run nothing stopped must have settled every node (spec 23, R2). Leftovers here are a
+    // scheduler that went quiet with work undone — reported by name, not as a complete report.
+    if !stopped_early && !not_started.is_empty() {
+        return Err(stalled(graph, &records, &tracker, not_started));
+    }
 
     Ok(RunReport {
         run_id: opts.run_id,
@@ -293,6 +335,8 @@ struct Tracker {
     out: HashMap<String, Vec<OutEdge>>,
     ready: BTreeSet<String>,
     skipped: BTreeSet<String>,
+    /// Nodes `dispatch` has already taken from `ready`: a node is settled once (spec 23, R2).
+    dispatched: BTreeSet<String>,
     /// Why a node was skipped, where the reason is more than "its path was not taken" (spec 18).
     reasons: BTreeMap<String, String>,
     /// Each ran node's stdout alone, for `{{node_id}}` substitution (spec 18).
@@ -330,6 +374,7 @@ impl Tracker {
             out,
             ready,
             skipped: BTreeSet::new(),
+            dispatched: BTreeSet::new(),
             reasons: BTreeMap::new(),
             stdouts: HashMap::new(),
         }
@@ -403,10 +448,18 @@ fn dispatch(
     origin: Instant,
 ) -> Result<Option<String>, RunError> {
     while let Some(id) = pop_first(&mut tracker.ready) {
-        // Unreachable once `run_from` has validated every edge's endpoints exist, kept so a
-        // future caller of this private helper fails safe rather than panicking.
+        // Every iteration must spawn, settle or skip a node, and never the same node twice
+        // (spec 23, R2): a repeat is a scheduler that could loop, so it is named instead.
+        if !tracker.dispatched.insert(id.clone()) || tracker.skipped.contains(&id) {
+            return Err(RunError::SettledTwice { node_id: id });
+        }
+        // Unreachable once `run_from` has validated every edge's endpoints exist. An iteration
+        // that does nothing is the spin R2 forbids, so it is a named stall, not a `continue`.
         let Some(node) = graph.node(&id).cloned() else {
-            continue;
+            return Err(RunError::Stalled {
+                unsettled: vec![id],
+                unresolved_edges: Vec::new(),
+            });
         };
         if matches!(node.body, NodeBody::Route { .. }) {
             let upstream = graph
@@ -524,7 +577,7 @@ enum Outcome {
 /// Refuse a graph `topo_order` cannot fully order, naming what is left over
 /// (R3). Runs before anything executes.
 fn refuse_cycle(graph: &Graph) -> Result<(), RunError> {
-    let ordered = topo_order(graph);
+    let ordered = try_topo_order(graph)?;
     if ordered.len() >= graph.nodes.len() {
         return Ok(());
     }
@@ -538,6 +591,35 @@ fn refuse_cycle(graph: &Graph) -> Result<(), RunError> {
     Err(RunError::Cycle {
         nodes: nodes.into_iter().collect(),
     })
+}
+
+/// The [`RunError::Stalled`] for `unsettled` nodes: the edges into them whose source has not
+/// settled, or — when every source has — all edges into them, because the tracker still counts
+/// them as waiting (spec 23, R2).
+fn stalled(
+    graph: &Graph,
+    records: &[NodeRecord],
+    tracker: &Tracker,
+    unsettled: Vec<String>,
+) -> RunError {
+    let settled =
+        |id: &str| tracker.skipped.contains(id) || records.iter().any(|r| r.node_id == id);
+    let mut unresolved_edges = BTreeSet::new();
+    for node in &unsettled {
+        let inbound: Vec<&crate::graph::Edge> =
+            graph.edges.iter().filter(|e| &e.to == node).collect();
+        let open: Vec<&&crate::graph::Edge> =
+            inbound.iter().filter(|e| !settled(&e.from)).collect();
+        if open.is_empty() {
+            unresolved_edges.extend(inbound.iter().map(|e| format!("{} -> {}", e.from, e.to)));
+        } else {
+            unresolved_edges.extend(open.iter().map(|e| format!("{} -> {}", e.from, e.to)));
+        }
+    }
+    RunError::Stalled {
+        unsettled,
+        unresolved_edges: unresolved_edges.into_iter().collect(),
+    }
 }
 
 /// Sorted ids of the graph's nodes with no record that were not skipped either: halted tasks
@@ -1886,5 +1968,167 @@ mod tests {
         let _ = run_bounded(&graph, o).await.expect("run");
         let seen = caller.0.lock().expect("lock").clone();
         assert_eq!(seen, vec![("run-ctx".to_string(), "classify".to_string())]);
+    }
+
+    // ---- spec 23: the scheduler cannot wait forever -----------------------------------
+
+    fn two_node_chain() -> Graph {
+        Graph {
+            nodes: vec![shell("a", "true"), shell("b", "true")],
+            edges: vec![edge("a", "b")],
+        }
+    }
+
+    /// [`run_tracked`] with a deliberately hand-built tracker, under the same 4s watchdog.
+    async fn run_tracked_bounded(
+        graph: &Graph,
+        tracker: Tracker,
+        run_id: &str,
+    ) -> Result<RunReport, RunError> {
+        let graph = graph.clone();
+        let o = opts(run_id, 4);
+        tokio::task::spawn_blocking(move || {
+            within_4s(move || {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                    .expect("runtime")
+                    .block_on(async {
+                        tokio::time::timeout(
+                            Duration::from_secs(4),
+                            run_tracked(&graph, o, Instant::now(), tracker),
+                        )
+                        .await
+                        .expect("the run hung past 4s")
+                    })
+            })
+        })
+        .await
+        .expect("watchdog task")
+    }
+
+    #[test]
+    fn an_inconsistent_dependency_table_is_refused_by_name() {
+        // The shape the two hanging mutants return: one phantom key, no real node id.
+        let graph = two_node_chain();
+        let bogus: HashMap<String, usize> = HashMap::from_iter([(String::new(), 1)]);
+        assert_eq!(
+            verify_tables(&graph, &bogus),
+            Err(RunError::InconsistentTable {
+                missing: vec!["a".to_string(), "b".to_string()]
+            })
+        );
+        // Near-miss: only ONE id missing names exactly that one.
+        let partial: HashMap<String, usize> = HashMap::from_iter([("a".to_string(), 0)]);
+        assert_eq!(
+            verify_tables(&graph, &partial),
+            Err(RunError::InconsistentTable {
+                missing: vec!["b".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn the_control_a_consistent_table_is_accepted() {
+        let graph = two_node_chain();
+        let (indegree, _) = dependency_tables(&graph);
+        assert_eq!(verify_tables(&graph, &indegree), Ok(()));
+        // And the real entry points accept the real graph.
+        assert_eq!(refuse_cycle(&graph), Ok(()));
+        assert_eq!(topo_order(&graph), vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_scheduler_that_cannot_settle_a_node_reports_which_one() {
+        let graph = two_node_chain();
+        let mut tracker = Tracker::new(&graph);
+        // `b` waits on one more plain edge than the graph has: nothing can ever resolve it.
+        tracker.state.get_mut("b").expect("b").and_left += 1;
+        let result = run_tracked_bounded(&graph, tracker, "stall").await;
+        assert_eq!(
+            result.map(|_| ()),
+            Err(RunError::Stalled {
+                unsettled: vec!["b".to_string()],
+                unresolved_edges: vec!["a -> b".to_string()],
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stall_names_only_the_edges_that_never_resolved() {
+        // `d` has two inbound edges: `a -> d` resolved (a ran), `x -> d` never did (x is stuck).
+        // The report must name the open one and not the resolved one.
+        let graph = Graph {
+            nodes: vec![
+                shell("a", "true"),
+                shell("p", "true"),
+                shell("x", "true"),
+                shell("d", "true"),
+            ],
+            edges: vec![edge("p", "x"), edge("x", "d"), edge("a", "d")],
+        };
+        let mut tracker = Tracker::new(&graph);
+        tracker.state.get_mut("x").expect("x").and_left += 1;
+        let result = run_tracked_bounded(&graph, tracker, "stall-edges").await;
+        assert_eq!(
+            result.map(|_| ()),
+            Err(RunError::Stalled {
+                unsettled: vec!["d".to_string(), "x".to_string()],
+                unresolved_edges: vec!["p -> x".to_string(), "x -> d".to_string()],
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn the_control_a_satisfiable_graph_completes() {
+        // Slow-but-valid: a chain with a sleeping middle node and a fan-in. The bound must not
+        // turn a slow run into a failure.
+        let graph = Graph {
+            nodes: vec![
+                shell("a", "true"),
+                shell("b", "sleep 0.5"),
+                shell("c", "true"),
+                shell("d", "true"),
+            ],
+            edges: vec![edge("a", "b"), edge("b", "d"), edge("c", "d")],
+        };
+        let report = run_tracked_bounded(&graph, Tracker::new(&graph), "slow-ok")
+            .await
+            .expect("a satisfiable graph must complete");
+        assert!(!report.stopped_early);
+        assert_eq!(report.records.len(), 4);
+        assert!(report.not_started.is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_node_is_settled_twice() {
+        let graph = Graph {
+            nodes: vec![shell("a", "true"), shell("b", "true"), shell("c", "true")],
+            edges: vec![edge("a", "c"), edge("b", "c")],
+        };
+        let report = run_tracked_bounded(&graph, Tracker::new(&graph), "fan-in")
+            .await
+            .expect("run");
+        let mut ids: Vec<&str> = report.records.iter().map(|r| r.node_id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["a", "b", "c"], "each node settles exactly once");
+    }
+
+    #[tokio::test]
+    async fn a_node_made_ready_twice_is_refused_by_name() {
+        let graph = two_node_chain();
+        let mut tracker = Tracker::new(&graph);
+        // `b` is wrongly ready from the start, so it runs alongside `a` and is readied AGAIN
+        // when `a` resolves.
+        tracker.state.get_mut("b").expect("b").and_left = 0;
+        tracker.ready.insert("b".to_string());
+        let result = run_tracked_bounded(&graph, tracker, "twice").await;
+        assert_eq!(
+            result.map(|_| ()),
+            Err(RunError::SettledTwice {
+                node_id: "b".to_string()
+            })
+        );
     }
 }

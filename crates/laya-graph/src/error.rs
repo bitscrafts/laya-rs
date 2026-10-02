@@ -329,4 +329,34 @@ pub enum RunError {
         /// The ids left over once every runnable node was ordered, sorted.
         nodes: Vec<String>,
     },
+
+    /// The dependency table the scheduler was about to rely on has no entry for some node the
+    /// graph declares (spec 23, R1). Every consumer — the cycle guard included — trusts that
+    /// table, so a table that is not about the graph is refused by name, never run on.
+    #[error(
+        "the dependency table is inconsistent with the graph; it has no entry for: {missing:?}"
+    )]
+    InconsistentTable {
+        /// The declared node ids the table lacks, sorted.
+        missing: Vec<String>,
+    },
+
+    /// The run ended with nodes neither run nor skipped, and nothing had stopped it (spec 23,
+    /// R2). A report built from this would read as complete; naming the leftovers is the point.
+    #[error(
+        "the scheduler stalled; unsettled nodes: {unsettled:?}; edges never resolved: {unresolved_edges:?}"
+    )]
+    Stalled {
+        /// The ids that were neither run nor skipped, sorted.
+        unsettled: Vec<String>,
+        /// The `from -> to` edges into those nodes that never resolved, sorted.
+        unresolved_edges: Vec<String>,
+    },
+
+    /// A node was settled (ran, or was skipped) more than once (spec 23, R2).
+    #[error("node `{node_id}` was settled twice")]
+    SettledTwice {
+        /// The node.
+        node_id: String,
+    },
 }
