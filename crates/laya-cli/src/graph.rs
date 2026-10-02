@@ -265,9 +265,12 @@ mod tests {
 
     #[test]
     fn laya_graph_render_prints_the_dropped_list() {
+        // Re-pinned by spec 20: this fixture used to carry `retry`, which `validate` now refuses
+        // (declared but inert). The dropped list is a constant naming what the render cannot
+        // carry, so the assertion below on `retry` is unchanged — only the fixture is valid again.
         let path = fixture(
             r#"{"flow":"t","version":1,"nodes":[
-                {"id":"a","kind":"shell","run":"true","retry":{"attempts":3,"backoff_ms":100}}
+                {"id":"a","kind":"shell","run":"true","allow_failure":true}
             ]}"#,
         );
         let rendered = do_render(path.to_str().expect("utf8 path")).expect("must render");

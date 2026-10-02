@@ -22,6 +22,17 @@ use crate::flow::{Flow, Kind, Node};
 /// Returns the first [`FlowError`] found, named with the offending node id
 /// (and, for a cycle, the full chain).
 pub fn validate(flow: &Flow) -> Result<(), FlowError> {
+    if flow.version != 1 {
+        return Err(FlowError::BadVersion {
+            version: flow.version,
+        });
+    }
+    if !flow.inputs.is_empty() {
+        return Err(FlowError::InputsUnsupported {
+            location: "the flow".to_string(),
+        });
+    }
+
     let mut seen = HashSet::new();
     for node in &flow.nodes {
         if !seen.insert(node.id.as_str()) {
@@ -44,14 +55,20 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     }
 
     for node in &flow.nodes {
+        if node.id.contains('/') {
+            return Err(FlowError::BadNodeId {
+                id: node.id.clone(),
+            });
+        }
         if let Kind::Other(kind) = &node.kind {
             return Err(FlowError::UnknownKind {
                 id: node.id.clone(),
                 kind: kind.clone(),
             });
         }
+        validate_required(node)?;
         if node.kind == Kind::Decide {
-            validate_decide(node)?;
+            validate_decide(node, &ids)?;
         }
         validate_retry(node)?;
     }
@@ -59,20 +76,89 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     detect_cycle(flow)
 }
 
-fn validate_decide(node: &Node) -> Result<(), FlowError> {
+fn missing(node: &Node, kind: &str, field: &str) -> FlowError {
+    FlowError::MissingField {
+        id: node.id.clone(),
+        kind: kind.to_string(),
+        field: field.to_string(),
+    }
+}
+
+/// Fields a kind cannot work without (spec 20 row 6): an absent `run` used to
+/// succeed with an empty command.
+fn validate_required(node: &Node) -> Result<(), FlowError> {
+    match node.kind {
+        Kind::Shell if node.run.is_none() => Err(missing(node, "shell", "run")),
+        Kind::Mcp if node.tool.is_none() => Err(missing(node, "mcp", "tool")),
+        Kind::Decide if node.question.is_none() => Err(missing(node, "decide", "question")),
+        Kind::Decide if node.prompt.is_none() => Err(missing(node, "decide", "prompt")),
+        _ => Ok(()),
+    }
+}
+
+/// The values `decide.on = band` can produce.
+const BANDS: [&str; 3] = ["low", "mid", "high"];
+
+fn validate_decide(node: &Node, ids: &HashSet<&str>) -> Result<(), FlowError> {
+    if node
+        .prompt
+        .as_deref()
+        .is_some_and(|p| p.contains("$.inputs"))
+    {
+        return Err(FlowError::InputsUnsupported {
+            location: format!("decide node `{}` prompt", node.id),
+        });
+    }
+
+    let on = match node.on.as_deref() {
+        None | Some("label") => "label",
+        Some("band") => "band",
+        Some(other) => {
+            return Err(FlowError::BadOn {
+                id: node.id.clone(),
+                on: other.to_string(),
+            });
+        }
+    };
+
     let options = node.options.as_deref().unwrap_or_default();
     let ports = node.ports.as_ref();
     let has_fallback = ports.is_some_and(|p| p.contains_key("_"));
 
-    let missing: Vec<String> = options
+    // What a port key may be: the options when routing on `label`, the band
+    // names when routing on `band`.
+    let expected: Vec<String> = if on == "band" {
+        BANDS.iter().map(|b| (*b).to_string()).collect()
+    } else {
+        options.to_vec()
+    };
+    for key in ports.into_iter().flat_map(|p| p.keys()) {
+        if key != "_" && !expected.contains(key) {
+            let candidates: Vec<&str> = expected.iter().map(String::as_str).collect();
+            let hint = crate::flow::nearest_key(key, &candidates)
+                .map(|near| format!(", did you mean `{near}`?"))
+                .unwrap_or_default();
+            return Err(FlowError::UnknownPortKey {
+                id: node.id.clone(),
+                key: key.clone(),
+                on: on.to_string(),
+                expected,
+                hint,
+            });
+        }
+    }
+
+    let missing_keys: Vec<String> = expected
         .iter()
-        .filter(|option| !ports.is_some_and(|p| p.contains_key(option.as_str())))
+        .filter(|key| !ports.is_some_and(|p| p.contains_key(key.as_str())))
         .cloned()
         .collect();
-    if !missing.is_empty() && !has_fallback {
+    // Completeness is a `label` rule: every option needs a port or a fallback.
+    // A band routing names the bands it cares about and may leave the rest out.
+    if on == "label" && !missing_keys.is_empty() && !has_fallback {
         return Err(FlowError::IncompletePorts {
             id: node.id.clone(),
-            missing,
+            missing: missing_keys,
         });
     }
 
@@ -80,6 +166,43 @@ fn validate_decide(node: &Node) -> Result<(), FlowError> {
         return Err(FlowError::MissingNearTiePort {
             id: node.id.clone(),
         });
+    }
+    for (key, target) in ports.into_iter().flatten() {
+        if !ids.contains(target.as_str()) {
+            return Err(FlowError::PortTargetMissing {
+                id: node.id.clone(),
+                port: key.clone(),
+                target: target.clone(),
+            });
+        }
+    }
+    if node.escalate_on_near_tie || node.near_tie_port.is_some() {
+        return Err(FlowError::NotImplemented {
+            id: node.id.clone(),
+            field: if node.escalate_on_near_tie {
+                "escalate_on_near_tie"
+            } else {
+                "near_tie_port"
+            }
+            .to_string(),
+            until: "until near-tie routing exists; its target would run on EVERY run".to_string(),
+            instead: "Remove the flag and the `near_tie_port` node, and route on `band` instead"
+                .to_string(),
+        });
+    }
+    for (field, set) in [
+        ("timeout", node.timeout.is_some()),
+        ("allow_failure", node.allow_failure),
+    ] {
+        if set {
+            return Err(FlowError::NotImplemented {
+                id: node.id.clone(),
+                field: field.to_string(),
+                until: "dead on a `decide` until spec 17".to_string(),
+                instead: "Remove it from the decide node; a flow-level `timeout` still applies"
+                    .to_string(),
+            });
+        }
     }
 
     Ok(())
@@ -91,6 +214,14 @@ fn validate_retry(node: &Node) -> Result<(), FlowError> {
     {
         return Err(FlowError::HalfRetryPolicy {
             id: node.id.clone(),
+        });
+    }
+    if node.retry.is_some() {
+        return Err(FlowError::NotImplemented {
+            id: node.id.clone(),
+            field: "retry".to_string(),
+            until: "it was declared but inert — the run fails on the first error; a later spec will implement it for non-`decide`, non-`writes` nodes".to_string(),
+            instead: "Wrap the command in a shell loop, or remove `retry`".to_string(),
         });
     }
     Ok(())
@@ -259,6 +390,9 @@ mod tests {
     fn decide(id: &str, options: &[&str], ports: &[(&str, &str)]) -> Node {
         Node {
             question: Some("q?".to_string()),
+            // Spec 20 row 6: a `decide` requires `prompt`; the helper carries one so the
+            // tests below keep testing what they name, not the new refusal.
+            prompt: Some("state".to_string()),
             options: Some(options.iter().map(|s| (*s).to_string()).collect()),
             ports: Some(
                 ports
@@ -386,5 +520,242 @@ mod tests {
             shell("z", &[]),
         ]);
         assert!(validate(&f).is_ok(), "a well-formed flow must validate");
+    }
+
+    // ---- spec 20: the format is a contract ---------------------------------
+
+    /// Parse + validate JSON text, returning the refusal's rendered message.
+    fn refusal(json: &str) -> Result<(), String> {
+        let f = Flow::parse(json).map_err(|e| e.to_string())?;
+        validate(&f).map_err(|e| e.to_string())
+    }
+
+    fn decide_json(on: &str, ports: &str) -> String {
+        format!(
+            r#"{{"flow":"t","version":1,"nodes":[
+              {{"id":"d","kind":"decide","question":"q?","prompt":"p","options":["yes","no"]{on},"ports":{ports}}},
+              {{"id":"x","kind":"shell","run":"true"}},{{"id":"y","kind":"shell","run":"true"}}]}}"#
+        )
+    }
+
+    #[test]
+    fn the_control_a_known_key_is_accepted() {
+        let json = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"a","kind":"shell","run":"true"},
+          {"id":"b","kind":"shell","run":"true","depends_on":["a"]}]}"#;
+        assert_eq!(
+            refusal(json),
+            Ok(()),
+            "strictness must not refuse valid flows"
+        );
+    }
+
+    #[test]
+    fn an_unknown_key_names_the_nearest_known_key() {
+        let json = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"a","kind":"shell","run":"true"},
+          {"id":"b","kind":"shell","run":"true","depend_on":["a"]}]}"#;
+        let err = refusal(json).expect_err("a typo of depends_on must be refused");
+        assert!(err.contains("depend_on"), "must name the key: {err}");
+        assert!(
+            err.contains("did you mean `depends_on`"),
+            "must offer the fix: {err}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_flow_level_key_is_refused_by_name() {
+        let json = r#"{"flow":"t","version":1,"descripton":"x","nodes":[]}"#;
+        let err = refusal(json).expect_err("a flow-level typo must be refused");
+        assert!(
+            err.contains("descripton") && err.contains("description"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_port_key_is_refused_by_name() {
+        let err = refusal(&decide_json("", r#"{"yes":"x","noo":"y","_":"y"}"#))
+            .expect_err("`noo` is not an option");
+        assert!(err.contains("noo"), "must name the key: {err}");
+    }
+
+    #[test]
+    fn a_port_target_that_names_no_node_is_refused_by_name() {
+        let err = refusal(&decide_json("", r#"{"yes":"x","no":"nosuch"}"#))
+            .expect_err("a target naming no node must be refused");
+        assert!(err.contains("nosuch"), "must name the target: {err}");
+    }
+
+    #[test]
+    fn a_band_routing_with_label_port_keys_is_refused_by_name() {
+        let err = refusal(&decide_json(r#","on":"band""#, r#"{"yes":"x","no":"y"}"#))
+            .expect_err("band routing with label keys sends everything to the fallback");
+        // BTreeMap order: `no` is the first offending key.
+        assert!(err.contains("band") && err.contains("`no`"), "{err}");
+    }
+
+    #[test]
+    fn the_control_band_routing_with_band_port_keys_is_accepted() {
+        let ports = r#"{"high":"x","mid":"x","low":"y"}"#;
+        assert_eq!(refusal(&decide_json(r#","on":"band""#, ports)), Ok(()));
+    }
+
+    #[test]
+    fn a_misspelled_on_is_refused_by_name() {
+        let err = refusal(&decide_json(r#","on":"bnad""#, r#"{"yes":"x","no":"y"}"#))
+            .expect_err("`bnad` silently meant label");
+        assert!(err.contains("bnad") && err.contains("band"), "{err}");
+    }
+
+    #[test]
+    fn the_control_a_shell_with_a_run_is_accepted() {
+        let json = r#"{"flow":"t","version":1,"nodes":[{"id":"a","kind":"shell","run":"echo a"}]}"#;
+        assert_eq!(refusal(json), Ok(()));
+    }
+
+    #[test]
+    fn a_shell_without_a_run_is_refused_by_name() {
+        let json = r#"{"flow":"t","version":1,"nodes":[{"id":"a","kind":"shell"}]}"#;
+        let err = refusal(json).expect_err("an absent run must not succeed with an empty command");
+        assert!(err.contains("`a`") && err.contains("run"), "{err}");
+    }
+
+    #[test]
+    fn an_mcp_without_a_tool_is_refused_by_name() {
+        let json = r#"{"flow":"t","version":1,"nodes":[{"id":"m","kind":"mcp"}]}"#;
+        let err = refusal(json).expect_err("an mcp needs a tool");
+        assert!(err.contains("`m`") && err.contains("tool"), "{err}");
+    }
+
+    #[test]
+    fn a_decide_without_a_question_or_prompt_is_refused_by_name() {
+        for (field, json) in [
+            (
+                "question",
+                r#"{"flow":"t","version":1,"nodes":[{"id":"d","kind":"decide","prompt":"p","options":["a"],"ports":{"_":"d"}}]}"#,
+            ),
+            (
+                "prompt",
+                r#"{"flow":"t","version":1,"nodes":[{"id":"d","kind":"decide","question":"q","options":["a"],"ports":{"_":"d"}}]}"#,
+            ),
+        ] {
+            let err = refusal(json).expect_err("a decide needs both");
+            assert!(err.contains(field), "{field}: {err}");
+        }
+    }
+
+    #[test]
+    fn inputs_and_dollar_inputs_are_refused_by_name() {
+        let with_inputs = r#"{"flow":"t","version":1,"inputs":["doc"],"nodes":[
+          {"id":"a","kind":"shell","run":"true"}]}"#;
+        let err = refusal(with_inputs).expect_err("`inputs` is not implemented");
+        assert!(err.contains("inputs"), "{err}");
+
+        let with_ref = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"d","kind":"decide","question":"q","prompt":"$.inputs.doc","options":["a"],"ports":{"_":"d"}}]}"#;
+        let err = refusal(with_ref).expect_err("`$.inputs.doc` is sent as literal text");
+        assert!(err.contains("$.inputs"), "{err}");
+    }
+
+    #[test]
+    fn retry_is_refused_and_names_the_alternative() {
+        let json = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"a","kind":"shell","run":"true","retry":{"attempts":3,"backoff_ms":10}}]}"#;
+        let err = refusal(json).expect_err("retry is inert, so it is refused");
+        assert!(err.contains("retry") && err.contains("shell loop"), "{err}");
+    }
+
+    #[test]
+    fn near_tie_routing_is_refused_as_not_implemented() {
+        let json = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"d","kind":"decide","question":"q","prompt":"p","options":["a"],
+           "ports":{"a":"x"},"escalate_on_near_tie":true,"near_tie_port":"x"},
+          {"id":"x","kind":"shell","run":"true"}]}"#;
+        let err = refusal(json).expect_err("the target would run unconditionally");
+        assert!(
+            err.contains("escalate_on_near_tie") && err.contains("not implemented"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn timeout_and_allow_failure_on_a_decide_are_refused_until_spec_17() {
+        for field in ["\"timeout\":5", "\"allow_failure\":true"] {
+            let json = format!(
+                r#"{{"flow":"t","version":1,"nodes":[
+                  {{"id":"d","kind":"decide","question":"q","prompt":"p","options":["a"],"ports":{{"a":"x"}},{field}}},
+                  {{"id":"x","kind":"shell","run":"true"}}]}}"#
+            );
+            let err = refusal(&json).expect_err("dead on a decide");
+            assert!(err.contains("spec 17"), "{field}: {err}");
+        }
+    }
+
+    #[test]
+    fn the_control_timeout_and_allow_failure_on_a_shell_are_accepted() {
+        let json = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"a","kind":"shell","run":"true","timeout":5,"allow_failure":true}]}"#;
+        assert_eq!(refusal(json), Ok(()));
+    }
+
+    #[test]
+    fn a_version_other_than_1_is_refused() {
+        let json = r#"{"flow":"t","version":999,"nodes":[]}"#;
+        let err = refusal(json).expect_err("version 999 is not a format this engine reads");
+        assert!(err.contains("999"), "{err}");
+    }
+
+    #[test]
+    fn a_slash_in_a_node_id_is_refused() {
+        let json =
+            r#"{"flow":"t","version":1,"nodes":[{"id":"a/route","kind":"shell","run":"true"}]}"#;
+        let err = refusal(json).expect_err("`/` collides with the synthetic route id");
+        assert!(err.contains("a/route"), "{err}");
+    }
+
+    #[test]
+    fn a_subflow_node_is_refused_naming_the_missing_library() {
+        let root: serde_json::Value = serde_json::from_str(
+            r#"{"flow":"t","version":1,"nodes":[{"id":"v","kind":"subflow","uses":"build"}]}"#,
+        )
+        .unwrap();
+        let err = crate::expand(&root, &crate::Library::new()).expect_err("no library");
+        let msg = err.to_string();
+        assert!(msg.contains("subflow") && msg.contains("library"), "{msg}");
+        assert!(
+            !msg.contains("depends_on"),
+            "must not blame depends_on: {msg}"
+        );
+    }
+
+    /// Spec 20's control, run through the same loader the CLI uses: every committed flow —
+    /// including `wc-classify-chained`, the gate-then-ask pattern — still validates.
+    #[test]
+    fn the_control_every_committed_flow_still_validates() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut paths = Vec::new();
+        for dir in ["_docs/02-guides", "crates/laya-graph/tests/fixtures"] {
+            for entry in std::fs::read_dir(root.join(dir)).expect("dir") {
+                let path = entry.expect("entry").path();
+                if path.extension().is_some_and(|e| e == "json") {
+                    paths.push(path);
+                }
+            }
+        }
+        paths.sort();
+        assert!(
+            paths.iter().any(|p| p
+                .to_string_lossy()
+                .contains("wc-classify-chained.flow.json")),
+            "the chained flow must be among them: {paths:?}"
+        );
+        for path in &paths {
+            let raw: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).expect("read")).expect("json");
+            let flow = crate::expand(&raw, &crate::Library::new())
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            validate(&flow).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        }
     }
 }

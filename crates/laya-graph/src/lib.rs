@@ -32,6 +32,8 @@
 
 pub mod error;
 pub mod expand;
+#[cfg(test)]
+mod field_contract;
 pub mod flow;
 pub mod graph;
 pub mod lower;

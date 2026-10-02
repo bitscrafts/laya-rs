@@ -33,6 +33,7 @@ reading order.
 - [Observability — what can be seen, and what could not](05-operations/OBSERVABILITY.md)
 - [Operations](05-operations/README.md)
 - [Tool coverage — what has actually been exercised](05-operations/TOOL-COVERAGE.md)
+- [A flake in the test harness — ETXTBSY on the fake MCP server](05-operations/TEST-HARNESS-FLAKE.md)
 - [Resuming the opus analysis session](05-operations/RESUMING-OPUS.md)
 - [Token economy — what it saves, what it costs, how it was measured](05-operations/TOKEN-ECONOMY.md)
 - [Resume prompt — 2026-10-02 (read this first after the restart)](05-operations/RESUME-PROMPT-2026-10-02.md)

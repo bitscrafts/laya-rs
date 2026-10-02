@@ -23,13 +23,19 @@ what lets us change one without re-verifying the other.
 JSON, versioned. Text is canonical and reviewable; the store is a cache of it (see the
 research write-up §2.3 for why the renderer must exist before the store).
 
+> **Withdrawn 2026-10-02 (spec 20).** The `inputs` field and `$.inputs.*` below were a proposal that
+> was never built. Measured with `laya graph run`: `"prompt": "$.inputs.doc"` is sent to the head as the
+> literal string and the head answers it (band low, confidence 0.3985). `validate` now **refuses**
+> `inputs` and `$.inputs.*` by name. **The prompt is literal state text.** The example is kept so the
+> withdrawn claim stays visible; do not copy it.
+
 ```json
 {
   "flow": "triage",
   "version": 1,
   "description": "Route an incoming issue, then act on the route.",
 
-  "inputs": ["issue"],
+  "inputs": ["issue"],   // WITHDRAWN 2026-10-02 (spec 20): refused by `validate` — not implemented
 
   "nodes": [
     {
@@ -37,7 +43,7 @@ research write-up §2.3 for why the renderer must exist before the store).
       "kind": "decide",
       "question": "Which team owns this issue?",
       "options": ["billing", "auth"],
-      "prompt": "$.inputs.issue",
+      "prompt": "$.inputs.issue",   // WITHDRAWN 2026-10-02 (spec 20): sent as LITERAL text, refused by `validate`
       "ports": {
         "billing": "handle_billing",
         "auth":    "handle_auth",
@@ -82,7 +88,7 @@ exact equality is not one.**
 | `kind` | one of the table above | required |
 | `depends_on` | node ids that must finish first | usually **derived** from ports/edges — write it only for nodes with no port parent |
 | `timeout` | seconds | inherited from the flow |
-| `retry` | `{attempts, backoff_ms}` | none |
+| `retry` | `{attempts, backoff_ms}` — **refused 2026-10-02 (spec 20): declared but inert; wrap the command in a shell loop** | none |
 | `allow_failure` | a failure here does not fail the run | false |
 | `on_fail` | node(s) to run if this one fails | none |
 | `writes` | **whether this node edits a repository** — this is the worktree switch | false |
@@ -100,11 +106,11 @@ fix. Read-only nodes fan out freely.
   "kind": "decide",
   "question": "Is this change safe to apply?",
   "options": ["yes", "no"],
-  "prompt": "$.inputs.diff",
+  "prompt": "$.inputs.diff",   // WITHDRAWN 2026-10-02 (spec 20): sent as LITERAL text, refused by `validate`
   "on": "label",
   "ports": { "yes": "apply", "no": "review", "_": "review" },
 
-  "escalate_on_near_tie": true,
+  "escalate_on_near_tie": true,   // REFUSED 2026-10-02 (spec 20): not implemented; the target would run on every run
   "near_tie_port": "review"
 }
 ```

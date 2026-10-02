@@ -127,18 +127,25 @@ spec 19 proposed refusals too broad to pass this; they were dropped for exactly 
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_serialised_field_has_a_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unknown_key_is_refused 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unknown_port_key_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_port_target_that_names_no_node_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib inputs_and_dollar_inputs_are_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib retry_is_refused_and_names_the_alternative 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] **every committed flow still validates, run through the CLI**: `cd /projects/laya-rs && for f in $(git ls-files '_docs/**/*.flow.json' 'crates/laya-graph/tests/fixtures/*.json'); do laya graph validate "$f" >/dev/null || echo "BROKE: $f"; done` → no output
-- [ ] `cd /projects/laya-rs && grep -c 'inputs' _docs/03-reference/GRAPH-SPEC.md` : the `$.inputs` examples are gone (or annotated as withdrawn, per the project rule)
-- [ ] `cd /projects/laya-rs && cargo test --workspace`
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [ ] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_serialised_field_has_a_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unknown_key_is_refused 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unknown_port_key_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_port_target_that_names_no_node_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib inputs_and_dollar_inputs_are_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib retry_is_refused_and_names_the_alternative 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] **every committed flow still validates, run through the FRESH build** — `cd /projects/laya-rs && for f in $(git ls-files '_docs/**/*.flow.json' 'crates/laya-graph/tests/fixtures/*.json'); do ./target/debug/laya graph validate "$f" >/dev/null || echo "BROKE: $f"; done` → no output
+
+  **CORRECTED 2026-10-02: this criterion originally said `laya graph validate`, which is VACUOUS.** The
+  `laya` on `PATH` (`/root/.local/bin/laya`) was built at 14:27 and is **not** a build of this tree; it
+  reports a typo'd-key flow and a dangling-target flow as `is valid`, exit 0, so the loop passes
+  without testing anything. Measured both ways: installed binary → `.../typo.flow.json is valid`;
+  `./target/debug/laya` → `unknown field \`depend_on\` ... did you mean \`depends_on\`?`, exit 1.
+  **A criterion must name the binary it is testing.**
+- [x] `cd /projects/laya-rs && grep -c 'inputs' _docs/03-reference/GRAPH-SPEC.md` : the `$.inputs` examples are gone (or annotated as withdrawn, per the project rule)
+- [x] `cd /projects/laya-rs && cargo test --workspace`
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
 
 **Every criterion uses `grep -qE '^test result: ok\. 1 passed'`.** Not `ok\.` — a criterion that
 accepts `ok. 0 passed` is satisfied by a test name that matches nothing, which is how spec 16's
@@ -159,3 +166,40 @@ criteria came to pass with nothing implemented. Verify each criterion is non-vac
 - **Run graphs, do not only read code** (user instruction: *"graph must be ran from laya!"*). The
   committed-flows criterion requires real `laya graph validate` output.
 - Do not delete anything; `mv` aside and say so.
+
+---
+
+## Verification of this spec (run here, 2026-10-02, after the worker finished)
+
+The worker's report is a self-report; these are the checks re-run against the tree.
+
+| what | result |
+|---|---|
+| the six criterion tests, exactly as written | **6/6 PASS** — each `ok. 1 passed`, so none is vacuous |
+| control: remove `#[serde(deny_unknown_fields)]` from `flow.rs` | `an_unknown_key_is_refused` **FAILED** — the guard is what the test detects; restored after |
+| `every_serialised_field_has_a_row` enumerates `Node` | **17 rows for 17 fields, none missing, none extra** (checked against the struct, not the test) |
+| every committed flow, fresh build | **0 broken** of the committed set |
+| `cargo test --workspace` | 565 passed, 0 failed |
+| clippy `-D warnings` / fmt / doc citations | 0 / clean / 62 docs resolve |
+| the near-miss control (the working example) | `laya graph run _docs/02-guides/wc-classify-chained.flow.json` completes, 10 nodes, exit 0 |
+
+**Two defects found in the criteria themselves, both fixed above:**
+1. The CLI criterion named `laya` (PATH), which is a **stale binary** that reports refused flows as
+   valid — it would have passed vacuously. It now names `./target/debug/laya`.
+2. The committed-flow loop had the same problem for the same reason.
+
+**One flake found and NOT introduced by this spec.** `cargo test -p laya-cli --lib` fails
+occasionally with
+
+```
+Err("failed to spawn .../fake-laya-mcp ...: Text file busy (os error 26)")
+```
+
+in `mcp_client::tests::the_run_and_node_id_reach_the_server_as_tool_arguments` — a spec-11 test.
+Diagnosis: `fake_server` names its scratch file from `process::id()` plus a tag, and every test in the
+binary shares one pid, so two tests using the same tag write and `exec` the same path concurrently →
+ETXTBSY. Evidence this spec did not cause it: the diff is **+61/-0** lines in `mcp_client.rs`, the
+failing test name appears **0 times** in that diff, and the racing helper's body is **unchanged**.
+Measured frequency: 1 failure in ~20 binary runs (observed once under the full-suite load of
+`verify-all.sh`; 12 clean runs in a direct 6+6 check, and 8/8 clean for the test alone). **The suite is
+therefore not deterministic, and that is now on the record rather than attributed to this change.**

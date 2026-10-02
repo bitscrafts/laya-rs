@@ -102,6 +102,13 @@ DOCS = {
         "been called. Includes the SDD+TDD gate graph, the paired control, and the break-the-control "
         "check that proves the pair means something."
     ),
+    "05-operations/TEST-HARNESS-FLAKE.md": (
+        "A flake in the test harness — ETXTBSY on the fake MCP server",
+        "The suite is not deterministic: fake_server names its scratch file from the process id plus "
+        "a tag, every test shares one pid, so two tests with the same tag write and exec the same "
+        "path and the kernel refuses with Text file busy. Measured 1 failure in ~20 binary runs, "
+        "load-dependent, and proven not to come from the change that was being verified."
+    ),
     "05-operations/RESUMING-OPUS.md": (
         "Resuming the opus analysis session",
         "How to continue the claude+opus review session instead of starting fresh: the session id, "

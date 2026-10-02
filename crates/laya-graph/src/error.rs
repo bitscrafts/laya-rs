@@ -71,6 +71,107 @@ pub enum FlowError {
         id: String,
     },
 
+    /// `inputs` or a `$.inputs.*` reference. Nothing binds or substitutes
+    /// them: measured 2026-10-02, `$.inputs.doc` reached the head as literal
+    /// text.
+    #[error(
+        "{location} uses `inputs`, which is not implemented — `$.inputs.*` is NOT substituted; the prompt is literal text sent to the head. Remove `inputs` and write the text into `prompt` directly"
+    )]
+    InputsUnsupported {
+        /// Where it was found (the flow, or a node id).
+        location: String,
+    },
+
+    /// A `decide` node's `on` is neither `label` nor `band`.
+    #[error("decide node `{id}` has on = `{on}`; expected `label` or `band` (omit `on` for label)")]
+    BadOn {
+        /// The decide node.
+        id: String,
+        /// The value it gave.
+        on: String,
+    },
+
+    /// A `decide` port key is not a value the route can produce.
+    #[error(
+        "decide node `{id}` has port key `{key}`, which is not one of the {on} values {expected:?} or `_` — a mistyped key is hidden by the `_` catch-all. Rename it to one of those{hint}"
+    )]
+    UnknownPortKey {
+        /// The decide node.
+        id: String,
+        /// The offending key.
+        key: String,
+        /// What the routing matches: `label` or `band`.
+        on: String,
+        /// The keys that are accepted (besides `_`).
+        expected: Vec<String>,
+        /// A rendered ", did you mean `x`?" or empty.
+        hint: String,
+    },
+
+    /// A `decide` port targets a node that does not exist.
+    #[error(
+        "decide node `{id}` port `{port}` targets `{target}`, which is not a node in this flow — it would run nothing. Name an existing node id"
+    )]
+    PortTargetMissing {
+        /// The decide node.
+        id: String,
+        /// The port key.
+        port: String,
+        /// The target it named.
+        target: String,
+    },
+
+    /// A field the node's kind needs is absent.
+    #[error("{kind} node `{id}` requires `{field}`")]
+    MissingField {
+        /// The node.
+        id: String,
+        /// Its kind.
+        kind: String,
+        /// The required field.
+        field: String,
+    },
+
+    /// `version` is not 1.
+    #[error("flow `version` is {version}; this engine reads only version 1")]
+    BadVersion {
+        /// The version found.
+        version: u32,
+    },
+
+    /// A node id contains `/`, which is reserved for synthetic ids.
+    #[error(
+        "node id `{id}` contains `/`, which collides with the synthetic `<id>/route` and subflow-prefixed ids. Use another character"
+    )]
+    BadNodeId {
+        /// The id.
+        id: String,
+    },
+
+    /// A declared field that does nothing is refused until it is implemented.
+    #[error("node `{id}` sets `{field}`, which is not implemented ({until}). {instead}")]
+    NotImplemented {
+        /// The node.
+        id: String,
+        /// The field.
+        field: String,
+        /// When the refusal is lifted.
+        until: String,
+        /// What to do instead.
+        instead: String,
+    },
+
+    /// A `subflow` node reached a loader that has no library to resolve it.
+    #[error(
+        "node `{id}` is a `subflow` using `{uses}`, and `subflow` needs a library, which the CLI does not load. Inline the child's nodes into this flow"
+    )]
+    SubflowNeedsLibrary {
+        /// The subflow node.
+        id: String,
+        /// The `uses` reference.
+        uses: String,
+    },
+
     /// A cycle in `depends_on`. Detection always returns; it never hangs.
     #[error("dependency cycle: {chain}")]
     Cycle {

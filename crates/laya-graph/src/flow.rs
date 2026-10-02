@@ -15,7 +15,12 @@ use serde::{Deserialize, Serialize};
 use crate::error::FlowError;
 
 /// A flow document.
+///
+/// `deny_unknown_fields` (spec 20): a mistyped key is refused by name rather
+/// than silently ignored — a node written `depend_on` used to validate and run
+/// with no dependency at all.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Flow {
     /// The flow's name.
     pub flow: String,
@@ -24,7 +29,8 @@ pub struct Flow {
     /// A human-readable description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The inputs this flow expects.
+    /// Declared inputs. **Refused by `validate` (spec 20):** nothing binds or
+    /// substitutes them — the field only exists so the refusal can name it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<String>,
     /// Default node timeout, in seconds, inherited by every node that does
@@ -43,8 +49,56 @@ impl Flow {
     /// Returns [`FlowError::Json`] when the text is not valid JSON, or does
     /// not match the flow document shape.
     pub fn parse(text: &str) -> Result<Self, FlowError> {
-        serde_json::from_str(text).map_err(|e| FlowError::Json(e.to_string()))
+        serde_json::from_str(text).map_err(|e| refine_parse_error(&e))
     }
+}
+
+/// Turn a serde error into a [`FlowError::Json`]; an unknown-field refusal gains
+/// the nearest known key (`depend_on` -> "did you mean `depends_on`?").
+pub(crate) fn refine_parse_error(e: &serde_json::Error) -> FlowError {
+    let msg = e.to_string();
+    FlowError::Json(match suggestion(&msg) {
+        Some(near) => format!("{msg} — did you mean `{near}`?"),
+        None => msg,
+    })
+}
+
+/// Parse serde's "unknown field `x`, expected one of `a`, `b`" text and return
+/// the expected key closest to `x`, if any is close enough to be a typo.
+fn suggestion(msg: &str) -> Option<String> {
+    let rest = msg.split_once("unknown field `")?.1;
+    let (key, rest) = rest.split_once('`')?;
+    let expected = rest.split_once("expected ")?.1;
+    let candidates: Vec<&str> = expected.split('`').skip(1).step_by(2).collect();
+    nearest_key(key, &candidates)
+}
+
+/// The candidate within edit distance 3 (and under the key's own length) of
+/// `key`, nearest first; `None` when nothing is plausibly a typo of it.
+pub(crate) fn nearest_key(key: &str, candidates: &[&str]) -> Option<String> {
+    candidates
+        .iter()
+        .map(|c| (edit_distance(key, c), *c))
+        .filter(|(d, _)| *d <= 3 && *d < key.chars().count())
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, c)| c.to_string())
+}
+
+/// Levenshtein distance, two rows.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let sub = prev.get(j).copied().unwrap_or(0) + usize::from(ca != *cb);
+            let del = prev.get(j + 1).copied().unwrap_or(0) + 1;
+            let ins = cur.get(j).copied().unwrap_or(0) + 1;
+            cur.push(sub.min(del).min(ins));
+        }
+        prev = cur;
+    }
+    prev.last().copied().unwrap_or(0)
 }
 
 /// A node's kind.
@@ -127,7 +181,10 @@ pub struct Retry {
 /// Kind-specific fields are optional and simply unused by kinds that do not
 /// need them; `validate` is what enforces which fields a given `kind`
 /// requires.
+///
+/// `deny_unknown_fields` (spec 20): see [`Flow`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Node {
     /// Unique within the flow.
     pub id: String,
@@ -136,10 +193,11 @@ pub struct Node {
     /// Node ids that must finish before this one starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
-    /// Timeout, in seconds.
+    /// Timeout, in seconds. Refused on a `decide` until spec 17.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
-    /// The retry policy, if any.
+    /// The retry policy, if any. **Refused by `validate` (spec 20):** it was
+    /// declared and inert; the field exists so the refusal can name it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry: Option<Retry>,
     /// A failure here does not fail the run.
@@ -166,7 +224,13 @@ pub struct Node {
     /// `decide`: the options Laya may answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<String>>,
-    /// `decide`: the state to hand Laya, e.g. `$.inputs.issue`.
+    /// `decide`: the state to hand Laya. **Literal text** — nothing is
+    /// substituted into it.
+    ///
+    /// *Withdrawn 2026-10-02 (spec 20):* this comment used to give
+    /// `$.inputs.issue` as an example. That feature does not exist: measured,
+    /// `$.inputs.doc` is sent to the head as the literal string and the head
+    /// answers it (band low, confidence 0.3985). `validate` now refuses it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     /// `decide`: what the routing matches — `label` (default) or `band`.

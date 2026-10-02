@@ -67,35 +67,30 @@ pub fn expand(root: &Value, library: &Library) -> Result<Flow, FlowError> {
 /// Parse `doc` as a flow document, expanding every `subflow` node it
 /// contains into the returned [`Flow`]'s own node list.
 fn expand_doc(doc: &Value, library: &Library, stack: &mut Vec<String>) -> Result<Flow, FlowError> {
-    let flow_name = doc
-        .get("flow")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let version = doc
-        .get("version")
-        .and_then(Value::as_u64)
-        .and_then(|v| u32::try_from(v).ok())
-        .unwrap_or(1);
-    let description = doc
-        .get("description")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let inputs: Vec<String> = doc
-        .get("inputs")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
+    // Top-level keys are checked by `Flow`'s own `deny_unknown_fields`: parse the
+    // document with its nodes emptied (they are handled one by one below, since a
+    // `subflow` node is not a `Node`). Absent `flow` / `version` keep their old
+    // defaults rather than becoming a new refusal.
+    let mut header = doc.clone();
+    if let Some(obj) = header.as_object_mut() {
+        obj.insert("nodes".to_string(), Value::Array(Vec::new()));
+        obj.entry("flow")
+            .or_insert_with(|| Value::String(String::new()));
+        obj.entry("version").or_insert_with(|| Value::from(1));
+    }
+    let Flow {
+        flow: flow_name,
+        version,
+        description,
+        inputs,
+        timeout,
+        ..
+    } = serde_json::from_value::<Flow>(header).map_err(|e| crate::flow::refine_parse_error(&e))?;
     let raw_nodes = doc
         .get("nodes")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let timeout = doc.get("timeout").and_then(Value::as_u64);
 
     let mut out_nodes: Vec<Node> = Vec::new();
     let mut subflow_terminals: HashMap<String, Vec<String>> = HashMap::new();
@@ -106,12 +101,13 @@ fn expand_doc(doc: &Value, library: &Library, stack: &mut Vec<String>) -> Result
             .and_then(Value::as_str)
             .unwrap_or_default();
         if kind == "subflow" {
+            check_subflow_keys(node_val)?;
             let (expanded, id, terminals) = expand_subflow_node(node_val, library, stack)?;
             subflow_terminals.insert(id, terminals);
             out_nodes.extend(expanded);
         } else {
             let node: Node = serde_json::from_value(node_val.clone())
-                .map_err(|e| FlowError::Json(e.to_string()))?;
+                .map_err(|e| crate::flow::refine_parse_error(&e))?;
             out_nodes.push(node);
         }
     }
@@ -149,6 +145,40 @@ fn expand_doc(doc: &Value, library: &Library, stack: &mut Vec<String>) -> Result
         timeout,
         nodes: out_nodes,
     })
+}
+
+/// The keys a `subflow` node reads. It is parsed off the raw `Value`, so it does
+/// not pass through `Node`'s `deny_unknown_fields`; this gives it the same refusal.
+const SUBFLOW_KEYS: [&str; 6] = ["id", "kind", "uses", "with", "content_hash", "depends_on"];
+
+fn check_subflow_keys(node_val: &Value) -> Result<(), FlowError> {
+    for key in node_val.as_object().into_iter().flat_map(|o| o.keys()) {
+        if !SUBFLOW_KEYS.contains(&key.as_str()) {
+            let hint = crate::flow::nearest_key(key, &SUBFLOW_KEYS)
+                .map(|near| format!(" — did you mean `{near}`?"))
+                .unwrap_or_default();
+            return Err(FlowError::Json(format!(
+                "unknown field `{key}` on a subflow node, expected one of `id`, `kind`, `uses`, `with`, `content_hash`, `depends_on`{hint}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Why `uses` could not be resolved: with an empty library (the CLI's) the library itself is
+/// what is missing, and saying so beats blaming `depends_on`.
+fn unresolved_subflow(id: &str, uses: &str, library: &Library) -> FlowError {
+    if library.is_empty() {
+        FlowError::SubflowNeedsLibrary {
+            id: id.to_string(),
+            uses: uses.to_string(),
+        }
+    } else {
+        FlowError::DanglingDependsOn {
+            id: id.to_string(),
+            missing: uses.to_string(),
+        }
+    }
 }
 
 /// Expand one `subflow` node, returning its prefixed child nodes plus the
@@ -191,10 +221,7 @@ fn expand_subflow_node(
 
     let child_doc = library
         .get(&uses)
-        .ok_or_else(|| FlowError::DanglingDependsOn {
-            id: id.clone(),
-            missing: uses.clone(),
-        })?;
+        .ok_or_else(|| unresolved_subflow(&id, &uses, library))?;
 
     // R7 — checked on the STACK, before recursing. A cycle is refused the
     // instant it would recurse into itself, never discovered by recursing.
@@ -299,6 +326,21 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn an_unknown_key_on_a_subflow_node_is_refused_by_name() {
+        let root = json!({
+            "flow": "parent", "version": 1,
+            "nodes": [{"id": "v", "kind": "subflow", "use": "build"}],
+        });
+        let err = expand(&root, &Library::new())
+            .expect_err("typo of `uses`")
+            .to_string();
+        assert!(
+            err.contains("`use`") && err.contains("did you mean `uses`"),
+            "{err}"
+        );
+    }
 
     #[test]
     fn a_subflow_expands_with_prefixed_ids() {

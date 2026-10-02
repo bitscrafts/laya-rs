@@ -456,4 +456,65 @@ mod tests {
             "{sent}"
         );
     }
+
+    /// Spec 20 R4, wire level. Each `decide` field a flow can set is observable in the BYTES the
+    /// server receives: two calls differing only in that field must send different values at the
+    /// pointer named here. A field the translation dropped would fail its row.
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn every_decide_field_reaches_the_wire() {
+        // (field, call A, call B, where it lands in the `tools/call` params)
+        let base = json!({"question": "q", "options": ["a", "b"], "prompt": "p"});
+        let with = |field: &str, value: Value| {
+            let mut v = base.clone();
+            v[field] = value;
+            v
+        };
+        let table: [(&str, Value, Value, &str); 3] = [
+            (
+                "question",
+                with("question", json!("one?")),
+                with("question", json!("two?")),
+                "/params/arguments/questions/answer/instructions",
+            ),
+            (
+                "options",
+                with("options", json!(["a", "b"])),
+                with("options", json!(["a", "c"])),
+                "/params/arguments/questions/answer/criteria",
+            ),
+            (
+                "prompt",
+                with("prompt", json!("state one")),
+                with("prompt", json!("state two")),
+                "/params/arguments/state",
+            ),
+        ];
+        let script = "#!/bin/sh\n\
+            read init; echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'\n\
+            read note; read call\n\
+            echo \"$call\" > {PID}.call\n\
+            echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"payloads\\\":{\\\"answer\\\":{\\\"label\\\":\\\"a\\\"}}}\"}]}}'\n";
+        for (field, a, b, pointer) in table {
+            let mut seen = Vec::new();
+            for (n, args) in [a, b].into_iter().enumerate() {
+                let (bin, pid_file) = fake_server(&format!("wire-{field}-{n}"), script);
+                let caller = LiveMcpCaller {
+                    bin,
+                    call_timeout: Duration::from_secs(5),
+                };
+                let result = within_5s(move || caller.call("decide", &args, &ctx()));
+                assert!(result.is_ok(), "{field}: {result:?}");
+                let sent =
+                    std::fs::read_to_string(format!("{}.call", pid_file.display())).expect("call");
+                let sent: Value = serde_json::from_str(sent.trim()).expect("json");
+                seen.push(sent.pointer(pointer).cloned());
+            }
+            assert!(seen[0].is_some(), "{field}: nothing at {pointer}");
+            assert_ne!(
+                seen[0], seen[1],
+                "`{field}` did not reach the wire at {pointer}"
+            );
+        }
+    }
 }
