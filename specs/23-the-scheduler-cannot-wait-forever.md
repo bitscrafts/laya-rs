@@ -111,6 +111,10 @@ starting** — and note that the mutation-gate row can only be judged by reading
   unviable.txt   23 mutants
 ```
 
+The gate script's own verdict agrees: `bash scripts/mutants-gate.sh` now exits **0**. That value was
+previously inferred from the artefact sizes above; it is now measured, which is how this spec required
+the gate to be judged.
+
 **This is the result the spec existed for.** The two mutants that replaced `dependency_tables` used to
 hang for 37 s with no test name; they now **fail fast and are caught**, which is why `caught` rose by
 exactly 23 and `timeout` emptied. The gate's `exit 0` is now honest rather than an exception carved out.
