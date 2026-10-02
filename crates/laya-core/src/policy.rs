@@ -307,8 +307,10 @@ impl Policy {
     /// Decide a gate from a confidence and whether the proposition is one we must
     /// never get wrong.
     ///
-    /// `irreversible` inverts the default: for a destructive action the *only*
-    /// confidence that allows it is `High`. The video's measured example is the
+    /// `irreversible` is accepted for the caller's record but cannot change the outcome:
+    /// the *only* confidence that allows ANY action here is `High`, so an irreversible one
+    /// is already held to that bar. (It was matched in a guard whose arm did the same as the
+    /// arm after it — a branch no test could tell from its absence, found by mutation.) The video's measured example is the
     /// reason — `rm -rf node_modules && npm install` was classified "reversible"
     /// at confidence 0.35, and 0.35 must ask a human however the pick reads.
     ///
@@ -318,16 +320,14 @@ impl Policy {
     /// method has no notion of. Kept for the generic confidence-to-decision mapping other
     /// callers still use; `laya-mcp`'s `gate`/`ask` tools no longer call it directly.
     #[must_use]
-    pub fn gate(&self, confidence: f64, irreversible: bool, saturated: bool) -> GateDecision {
+    pub fn gate(&self, confidence: f64, _irreversible: bool, saturated: bool) -> GateDecision {
         if saturated && self.escalate_on_saturation {
             return GateDecision::Ask;
         }
         match self.band(confidence) {
             Band::High => GateDecision::Allow,
             Band::Low => GateDecision::Deny,
-            // Mid, and every irreversible case that is not High: the pick may be
-            // plausible, but the confidence is what we are acting on.
-            Band::Mid if irreversible => GateDecision::Ask,
+            // Mid: the pick may be plausible, but the confidence is what we are acting on.
             Band::Mid => GateDecision::Ask,
         }
     }
@@ -415,6 +415,78 @@ mod tests {
         // only ever *tightens*, never loosens.
         assert_eq!(p.gate(0.95, false, false), GateDecision::Allow);
         assert_eq!(p.gate(0.7, true, false), GateDecision::Ask);
+    }
+
+    #[test]
+    fn irreversible_never_loosens_at_any_confidence() {
+        // `irreversible` cannot change the outcome (only High allows, either way), so the
+        // two flags must agree everywhere — and the outcome must be exactly the band's.
+        let p = Policy::default();
+        for i in 0..=100_u32 {
+            let c = f64::from(i) / 100.0;
+            let expected = match p.band(c) {
+                Band::High => GateDecision::Allow,
+                Band::Mid => GateDecision::Ask,
+                Band::Low => GateDecision::Deny,
+            };
+            assert_eq!(p.gate(c, true, false), expected, "irreversible, c={c}");
+            assert_eq!(p.gate(c, false, false), expected, "reversible, c={c}");
+        }
+    }
+
+    #[test]
+    fn weighted_score_divides_by_a_non_unit_total() {
+        // Weights sum to 2, not 1: `/ 2` and `* 2` differ, as do `/` and `%`.
+        assert_eq!(Policy::weighted_score(&[(2.0, 1.0), (2.0, 0.0)]), Some(0.5));
+        assert_eq!(Policy::weighted_score(&[(1.0, 3.0), (3.0, 7.0)]), Some(6.0));
+        // CONTROL: empty and zero-sum weights still have no score.
+        assert_eq!(Policy::weighted_score(&[]), None);
+        assert_eq!(Policy::weighted_score(&[(0.0, 1.0)]), None);
+        // A total of exactly EPSILON is not "zero": it is the boundary, and it scores.
+        assert_eq!(Policy::weighted_score(&[(f64::EPSILON, 1.0)]), Some(1.0));
+    }
+
+    /// Seeded LCG (Knuth MMIX constants). A failure reproduces from the printed seed.
+    struct Lcg(u64);
+    impl Lcg {
+        #[allow(clippy::cast_precision_loss)]
+        fn unit(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 11) as f64) / ((1_u64 << 53) as f64)
+        }
+    }
+
+    const fn rank(b: Band) -> u8 {
+        match b {
+            Band::Low => 0,
+            Band::Mid => 1,
+            Band::High => 2,
+        }
+    }
+
+    #[test]
+    fn band_is_monotone_in_confidence() {
+        const SEED: u64 = 0x13B0_0001;
+        let p = Policy::default();
+        let mut rng = Lcg(SEED);
+        let mut distinct = std::collections::HashSet::new();
+        for case in 0..512_u32 {
+            let (a, b) = (rng.unit(), rng.unit());
+            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            for kind in [QuestionType::Choice, QuestionType::Noul] {
+                let (bl, bh) = (p.band_for(kind, lo), p.band_for(kind, hi));
+                assert!(
+                    rank(bl) <= rank(bh),
+                    "not monotone: seed {SEED:#x}, case {case}, {kind:?}: band({lo})={bl:?} > band({hi})={bh:?}"
+                );
+                distinct.insert(format!("{kind:?}/{bl:?}"));
+            }
+        }
+        // CONTROL: every band was reached for both kinds, so "monotone" is not vacuous.
+        assert_eq!(distinct.len(), 6, "{distinct:?}");
     }
 
     // ---- saturation: the flag we added from our own measurement -------------

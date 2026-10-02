@@ -396,7 +396,12 @@ fn failed_record(run_id: String, node_id: String, reason: &str) -> NodeRecord {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )]
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
@@ -572,6 +577,197 @@ mod tests {
     }
 
     // ---- R9: bounded concurrent fan-out --------------------------------------
+
+    /// Seeded LCG (Knuth MMIX constants). A failure reproduces from the printed seed.
+    struct Lcg(u64);
+    impl Lcg {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(self.0 >> 33).unwrap_or(0) % n.max(1)
+        }
+    }
+
+    /// Records, per call, how many calls and how many WRITER calls were in flight, and
+    /// sleeps 0-2 ms so overlap is real. The tool name is the node id.
+    struct RecordingCaller {
+        in_flight: AtomicUsize,
+        peak: AtomicUsize,
+        writers_in_flight: AtomicUsize,
+        peak_writers: AtomicUsize,
+        writers: Vec<String>,
+        failing: Vec<String>,
+        sleep_ms: Vec<u64>,
+        ran: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl McpCaller for RecordingCaller {
+        fn call(&self, tool: &str, _arguments: &serde_json::Value) -> Result<String, String> {
+            let is_writer = self.writers.iter().any(|w| w == tool);
+            let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(now, Ordering::SeqCst);
+            if is_writer {
+                let w = self.writers_in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                self.peak_writers.fetch_max(w, Ordering::SeqCst);
+            }
+            self.ran.lock().unwrap().push(tool.to_string());
+            let idx: usize = tool.trim_start_matches('n').parse().unwrap_or(0);
+            std::thread::sleep(Duration::from_millis(self.sleep_ms[idx]));
+            if is_writer {
+                self.writers_in_flight.fetch_sub(1, Ordering::SeqCst);
+            }
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            if self.failing.iter().any(|f| f == tool) {
+                Err(format!("{tool} failed"))
+            } else {
+                Ok(format!("{tool} ok"))
+            }
+        }
+    }
+
+    /// Model-based: random DAGs (n <= 12, edges only i -> j with i < j), random failing
+    /// subset, `allow_failure`, `writes`, limit 1..=4. The invariants are checked against the
+    /// graph and the options, never against the scheduler's own bookkeeping.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn scheduler_invariants_hold_for_random_dags() {
+        const SEED: u64 = 0x135C_ED01;
+        let mut rng = Lcg(SEED);
+        let (mut saw_stop, mut saw_allowed_failure, mut saw_overlap, mut saw_writer) =
+            (false, false, false, false);
+        let (mut saw_multi_dep_ran, mut saw_full_ok) = (false, false);
+        for case in 0..200_u32 {
+            let n = 1 + rng.below(12);
+            let id = |i: usize| format!("n{i}");
+            let mut nodes: Vec<GraphNode> = (0..n).map(|i| mcp(&id(i), &id(i))).collect();
+            let mut edges = Vec::new();
+            for j in 1..n {
+                for i in 0..j {
+                    if rng.below(100) < 25 {
+                        edges.push(edge(&id(i), &id(j)));
+                    }
+                }
+            }
+            // Roughly one case in three has no failures at all, so (iv) is really exercised.
+            let any_fail = rng.below(3) != 0;
+            let mut failing = Vec::new();
+            for (i, node) in nodes.iter_mut().enumerate() {
+                if any_fail && rng.below(100) < 20 {
+                    failing.push(id(i));
+                }
+                node.allow_failure = rng.below(100) < 30;
+                node.writes = rng.below(100) < 35;
+            }
+            let limit = 1 + rng.below(4);
+            let caller = Arc::new(RecordingCaller {
+                in_flight: AtomicUsize::new(0),
+                peak: AtomicUsize::new(0),
+                writers_in_flight: AtomicUsize::new(0),
+                peak_writers: AtomicUsize::new(0),
+                writers: nodes
+                    .iter()
+                    .filter(|x| x.writes)
+                    .map(|x| x.id.clone())
+                    .collect(),
+                failing: failing.clone(),
+                sleep_ms: (0..n).map(|_| rng.below(3) as u64).collect(),
+                ran: std::sync::Mutex::new(Vec::new()),
+            });
+            let graph = Graph { nodes, edges };
+            let report = run_bounded(
+                &graph,
+                RunOptions {
+                    run_id: format!("prop-{case}"),
+                    limit,
+                    mcp: Arc::clone(&caller) as Arc<dyn McpCaller>,
+                },
+            )
+            .await
+            .unwrap_or_else(|e| panic!("run errored: seed {SEED:#x}, case {case}: {e:?}"));
+
+            let ctx = format!(
+                "seed {SEED:#x}, case {case}, n={n}, limit={limit}, edges={:?}, failing={failing:?}",
+                graph.edge_set()
+            );
+            let ran: Vec<&str> = report.records.iter().map(|r| r.node_id.as_str()).collect();
+            let succeeded = |id: &str| report.records.iter().any(|r| r.node_id == id && r.success);
+            // (i) a node ran => every dependency ran, and succeeded or was allowed to fail.
+            for e in &graph.edges {
+                if ran.contains(&e.to.as_str()) {
+                    assert!(
+                        ran.contains(&e.from.as_str()),
+                        "(i) {} ran without {}: {ctx}",
+                        e.to,
+                        e.from
+                    );
+                    let dep_allowed = graph.node(&e.from).is_some_and(|d| d.allow_failure);
+                    assert!(
+                        succeeded(&e.from) || dep_allowed,
+                        "(i) {} ran after {} failed without allow_failure: {ctx}",
+                        e.to,
+                        e.from
+                    );
+                }
+            }
+            // (ii) / (iii) peak overlap, as measured by the callee.
+            let peak = caller.peak.load(Ordering::SeqCst);
+            let peak_w = caller.peak_writers.load(Ordering::SeqCst);
+            assert!(peak <= limit, "(ii) peak {peak} > limit: {ctx}");
+            assert!(peak_w <= 1, "(iii) {peak_w} writers overlapped: {ctx}");
+            // A node never runs twice.
+            let mut uniq = ran.clone();
+            uniq.sort_unstable();
+            uniq.dedup();
+            assert_eq!(uniq.len(), ran.len(), "a node ran twice: {ctx}");
+            // (iv) no failures => all n ran.
+            if failing.is_empty() {
+                assert_eq!(
+                    ran.len(),
+                    n,
+                    "(iv) a failure-free run did not run everything: {ctx}"
+                );
+                assert!(!report.stopped_early, "(iv) {ctx}");
+                saw_full_ok = true;
+            }
+            // (v) stopped_early => records + not_started == n. (Also true when it did not stop.)
+            assert_eq!(
+                report.records.len() + report.not_started.len(),
+                n,
+                "(v) {ctx}"
+            );
+            if report.stopped_early {
+                saw_stop = true;
+            } else {
+                assert!(
+                    report.not_started.is_empty(),
+                    "(v) a complete run left nodes: {ctx}"
+                );
+            }
+            saw_allowed_failure |= report
+                .records
+                .iter()
+                .any(|r| !r.success && graph.node(&r.node_id).is_some_and(|x| x.allow_failure));
+            saw_overlap |= peak >= 2;
+            saw_writer |= peak_w == 1;
+            saw_multi_dep_ran |= graph
+                .edges
+                .iter()
+                .any(|e| ran.contains(&e.to.as_str()) && ran.contains(&e.from.as_str()));
+        }
+        // CONTROL: the generator reached every regime the invariants are about, so a vacuous
+        // pass (nothing ever failed, nothing ever overlapped) is impossible.
+        assert!(
+            saw_stop
+                && saw_allowed_failure
+                && saw_overlap
+                && saw_writer
+                && saw_multi_dep_ran
+                && saw_full_ok,
+            "generator coverage: stop={saw_stop} allowed_failure={saw_allowed_failure} overlap={saw_overlap} writer={saw_writer} dep={saw_multi_dep_ran} ok={saw_full_ok}"
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn a_fan_out_runs_concurrently_up_to_the_limit() {

@@ -159,10 +159,7 @@ fn clip_stream(text: &str) -> String {
         return text.to_string();
     }
     // Clip on a char boundary so the composed state is always valid UTF-8.
-    let mut end = MAX_STREAM_BYTES;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = text.floor_char_boundary(MAX_STREAM_BYTES);
     let dropped = text.len() - end;
     format!(
         "{}\n[... TRUNCATED: {dropped} more bytes of this stream were not sent ...]",
@@ -601,6 +598,184 @@ mod tests {
         StateFile {
             path: path.to_string(),
             content: content.to_string(),
+        }
+    }
+
+    // ---- spec 13: mutant-killing tests and metamorphic properties -----------
+
+    #[test]
+    fn push_without_force_and_dash_f_without_push_are_clean() {
+        // Each half of `push && (--force || -f)` alone must NOT signal; kills `&&` -> `||`.
+        assert!(destructive_signals("git push origin main").is_empty());
+        assert!(destructive_signals("ls -f").is_empty());
+        // CONTROL: the two halves together still signal.
+        assert!(
+            destructive_signals("git push --force origin main")
+                .iter()
+                .any(|s| s.matched == "push --force")
+        );
+        assert!(
+            destructive_signals("git push -f origin main")
+                .iter()
+                .any(|s| s.matched == "push --force")
+        );
+    }
+
+    #[test]
+    fn clip_stream_keeps_exactly_the_cap_and_names_the_rest() {
+        let at_cap = "a".repeat(MAX_STREAM_BYTES);
+        assert_eq!(
+            clip_stream(&at_cap),
+            at_cap,
+            "exactly the cap is not clipped"
+        );
+
+        let over = "a".repeat(MAX_STREAM_BYTES + 5);
+        let out = clip_stream(&over);
+        assert!(out.starts_with(&"a".repeat(MAX_STREAM_BYTES)));
+        assert!(!out.starts_with(&"a".repeat(MAX_STREAM_BYTES + 1)));
+        assert!(out.contains("5 more bytes"), "{out}");
+        assert_eq!(
+            out.find('\n'),
+            Some(MAX_STREAM_BYTES),
+            "the marker begins right after exactly the cap"
+        );
+
+        // A 3-byte char straddling the cap: it must be dropped whole, never split.
+        let straddle = format!("{}\u{20ac}tail", "a".repeat(MAX_STREAM_BYTES - 1));
+        let out = clip_stream(&straddle);
+        assert!(out.starts_with(&"a".repeat(MAX_STREAM_BYTES - 1)));
+        assert!(
+            !out.contains('\u{20ac}'),
+            "the straddling char is dropped whole"
+        );
+        assert!(
+            out.contains(&format!(
+                "{} more bytes",
+                straddle.len() - (MAX_STREAM_BYTES - 1)
+            )),
+            "{out}"
+        );
+        assert_eq!(out.find('\n'), Some(MAX_STREAM_BYTES - 1));
+    }
+
+    #[test]
+    fn the_stream_cap_is_sixteen_kib_and_a_lone_dash_survives_normalisation() {
+        assert_eq!(MAX_STREAM_BYTES, 16_384, "the documented cap");
+        // A lone `-` (stdin) is not a flag cluster and must not be dropped.
+        assert_eq!(normalise_command("cat - x"), "cat - x");
+        assert_eq!(normalise_command("rm  -Rf   x"), "rm -r -f x");
+        assert_eq!(normalise_command("rm --recursive --force x"), "rm -r -f x");
+    }
+
+    #[test]
+    fn a_non_object_questions_value_names_the_type_it_was() {
+        for (v, found) in [
+            (serde_json::json!([1]), "array"),
+            (serde_json::json!("s"), "string"),
+            (serde_json::json!(1), "number"),
+            (serde_json::json!(true), "boolean"),
+        ] {
+            assert_eq!(
+                validate_questions(&v).unwrap_err(),
+                AskFailure::QuestionsNotAnObject { found },
+                "{v}"
+            );
+        }
+    }
+
+    /// Seeded LCG (Knuth MMIX constants). A failure reproduces from the printed seed.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0 >> 33
+        }
+        fn below(&mut self, n: usize) -> usize {
+            usize::try_from(self.next()).unwrap_or(0) % n.max(1)
+        }
+    }
+
+    #[test]
+    fn destructive_signals_survive_respelling() {
+        const SEED: u64 = 0x13AC_0001;
+        // (command, a respelling it must still be caught under)
+        let seeds = [
+            "rm -rf build",
+            "rm -r build",
+            "rm -f build",
+            "git reset --hard HEAD",
+            "dd if=/dev/zero of=/dev/sda",
+            "git push --force origin main",
+        ];
+        let mut rng = Lcg(SEED);
+        for case in 0..512_u32 {
+            let base = seeds[rng.below(seeds.len())];
+            let mut cmd = base.to_string();
+            // Insert extra spaces at word boundaries.
+            if rng.below(2) == 0 {
+                cmd = cmd.replace(' ', &" ".repeat(2 + rng.below(3)));
+            }
+            // Recombine / split short flags and flip -r <-> -R, for the rm family.
+            if cmd.starts_with("rm ") && rng.below(2) == 0 {
+                cmd = match rng.below(3) {
+                    0 => cmd.replace("-rf", "-r -f"),
+                    1 => cmd.replace("-rf", "-fr"),
+                    _ => cmd.replace("-r", "-R"),
+                };
+            }
+            if cmd.starts_with("rm ") && rng.below(4) == 0 {
+                cmd = cmd.replace("-rf", "--recursive --force");
+            }
+            assert!(
+                !destructive_signals(&cmd).is_empty(),
+                "signal lost: seed {SEED:#x}, case {case}, from `{base}` to `{cmd}`"
+            );
+        }
+    }
+
+    #[test]
+    fn an_allowlisted_command_with_a_metacharacter_is_never_allowed() {
+        const SEED: u64 = 0x13AC_0002;
+        let allow: Vec<String> = ["git status", "ls", "cargo test"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let policy = Policy {
+            gate_allow: allow.clone(),
+            ..Policy::default()
+        };
+        let confident_yes = ModelVerdict::yes(0.99);
+        let suffixes = ["", " x", " --flag", " && echo hi", " foo bar baz", "é"];
+        let mut rng = Lcg(SEED);
+        for case in 0..512_u32 {
+            let entry = &allow[rng.below(allow.len())];
+            // CONTROL: the clean command, same entry, same model, IS allowed — so a `Deny`/`Ask`
+            // below is the metacharacter's doing and not the fixture's.
+            let clean = format!("{entry}{}", suffixes[rng.below(2)]);
+            let v = gate_verdict(&clean, Some(confident_yes), false, &policy);
+            assert_eq!(
+                v.decision,
+                GateDecision::Allow,
+                "control failed on `{clean}`"
+            );
+
+            let meta = SHELL_METACHARACTERS[rng.below(SHELL_METACHARACTERS.len())];
+            let suffix = suffixes[rng.below(suffixes.len())];
+            let cmd = match rng.below(3) {
+                0 => format!("{entry}{meta}{suffix}"),
+                1 => format!("{entry} {meta}{suffix}"),
+                _ => format!("{entry}{suffix}{meta}"),
+            };
+            let v = gate_verdict(&cmd, Some(confident_yes), false, &policy);
+            assert_ne!(
+                v.decision,
+                GateDecision::Allow,
+                "metacharacter allowed: seed {SEED:#x}, case {case}, `{cmd:?}`"
+            );
         }
     }
 

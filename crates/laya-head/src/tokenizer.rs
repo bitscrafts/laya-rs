@@ -1539,3 +1539,114 @@ fn python_number(number: &serde_json::Number) -> String {
         number.to_string()
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+mod property_tests {
+    use super::*;
+
+    /// A small but real byte-level BPE `tokenizer.json`, built in the test so the property
+    /// runs offline: all 256 byte characters, three merges, and the five special tokens in
+    /// both the vocabulary and `added_tokens`.
+    fn tiny_tokenizer() -> Tokenizer {
+        let chars = byte_to_unicode();
+        let mut vocab = Map::new();
+        for (i, c) in chars.iter().enumerate() {
+            vocab.insert(c.to_string(), serde_json::json!(i));
+        }
+        let space = chars[usize::from(b' ')].to_string();
+        for (id, text) in [
+            (256, "he".to_string()),
+            (257, "hel".to_string()),
+            (258, format!("{space}t")),
+        ] {
+            vocab.insert(text, serde_json::json!(id));
+        }
+        let specials = ["[CLS]", "[SEP]", "[MASK]", "[PAD]", "[UNK]"];
+        let mut added = Vec::new();
+        for (i, name) in specials.iter().enumerate() {
+            let id = 259 + i;
+            vocab.insert((*name).to_string(), serde_json::json!(id));
+            added.push(serde_json::json!({"id": id, "content": name, "special": true}));
+        }
+        let doc = serde_json::json!({
+            "normalizer": {"type": "NFC"},
+            "pre_tokenizer": {"type": "ByteLevel", "add_prefix_space": false, "use_regex": true},
+            "model": {"type": "BPE", "vocab": vocab,
+                      "merges": [["h", "e"], ["he", "l"], [space, "t"]]},
+            "added_tokens": added,
+        });
+        Tokenizer::from_json(&doc.to_string()).expect("the tiny tokenizer must load")
+    }
+
+    /// Seeded LCG (Knuth MMIX constants). A failure reproduces from the printed seed.
+    struct Lcg(u64);
+    impl Lcg {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(self.0 >> 33).unwrap_or(0) % n.max(1)
+        }
+    }
+
+    #[test]
+    fn tokenizer_never_panics_and_ids_are_in_vocab() {
+        const SEED: u64 = 0x1370_0001;
+        let tok = tiny_tokenizer();
+        let vocab = u32::try_from(tok.vocab_len()).expect("vocab fits u32");
+        // Pools for the mixed-script strings: Latin, Cyrillic, CJK, emoji, combining marks,
+        // an added-token literal, and whitespace/control characters.
+        let pool: Vec<&str> = vec![
+            "a", "h", "e", "l", "t", " ", "  ", "\n", "\t", "\u{0}", "ж", "я", "漢", "字", "😀",
+            "e\u{301}", "ﬁ", "[MASK]", "[CLS]", "[UNK]", "hel", " t",
+        ];
+        let mut rng = Lcg(SEED);
+        let mut saw_empty_ok = false;
+        let mut saw_nonempty = false;
+        for case in 0..512_u32 {
+            let text: String = match case % 3 {
+                0 => (0..rng.below(40))
+                    .map(|_| char::from(u8::try_from(32 + rng.below(95)).unwrap_or(b' ')))
+                    .collect(),
+                1 => (0..rng.below(20))
+                    .map(|_| pool[rng.below(pool.len())])
+                    .collect(),
+                _ => {
+                    let bytes: Vec<u8> = (0..rng.below(64))
+                        .map(|_| u8::try_from(rng.below(256)).unwrap_or(0))
+                        .collect();
+                    String::from_utf8_lossy(&bytes).into_owned()
+                }
+            };
+            let ids = std::panic::catch_unwind(|| tok.encode(&text)).unwrap_or_else(|_| {
+                panic!("encode panicked: seed {SEED:#x}, case {case}, {text:?}")
+            });
+            assert!(
+                ids.iter().all(|&i| i < vocab),
+                "id out of vocab: seed {SEED:#x}, case {case}, {text:?} -> {ids:?}"
+            );
+            assert_eq!(
+                ids,
+                tok.encode(&text),
+                "not deterministic: seed {SEED:#x}, case {case}"
+            );
+            saw_empty_ok |= text.is_empty() && ids.is_empty();
+            saw_nonempty |= !text.is_empty() && !ids.is_empty();
+        }
+        // CONTROL: real text really produced ids (not an always-empty encoder), and the empty
+        // string really produced none.
+        assert!(
+            saw_nonempty && saw_empty_ok,
+            "nonempty={saw_nonempty} empty={saw_empty_ok}"
+        );
+        // And the merges are live: "hel" is ONE token, not three.
+        assert_eq!(tok.encode("hel"), vec![257]);
+    }
+}

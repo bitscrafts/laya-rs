@@ -603,6 +603,73 @@ pub fn to_result(outcome: ToolOutcome) -> Result<CallToolResult, McpError> {
     }
 }
 
+/// JSON type name as a caller would say it, for an error that names what was received.
+const fn json_type_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Parse a tool call's arguments, naming the first argument whose JSON type is wrong.
+///
+/// Deserialising straight into [`RawArgs`] and defaulting on failure turned a wrongly-typed
+/// argument into an absent one, so a call that supplied `path` was told "requires `path`" —
+/// an error naming the wrong problem, which sends the caller to fix an argument that was
+/// never broken. A wrong type is reported as a wrong type, naming the field and the type
+/// received. `null` is treated as absent, as `Option` does.
+///
+/// # Errors
+/// A message naming the offending argument and the type it arrived as.
+pub fn parse_args(value: serde_json::Value) -> Result<RawArgs, String> {
+    let Some(obj) = value.as_object() else {
+        return Err(format!(
+            "laya-mcp: arguments must be an object, got {}",
+            json_type_name(&value)
+        ));
+    };
+    let strings = [
+        "state",
+        "action",
+        "path",
+        "question",
+        "command",
+        "turns_summary",
+        "op",
+        "run_id",
+        "node_id",
+    ];
+    for (name, v) in obj {
+        if v.is_null() {
+            continue;
+        }
+        let expected = if strings.contains(&name.as_str()) {
+            (!v.is_string()).then_some("a string")
+        } else {
+            match name.as_str() {
+                "irreversible" => (!v.is_boolean()).then_some("a boolean"),
+                "context_tokens" => (!v.is_u64()).then_some("a non-negative integer"),
+                "paths" => (!v
+                    .as_array()
+                    .is_some_and(|a| a.iter().all(serde_json::Value::is_string)))
+                .then_some("an array of strings"),
+                _ => None,
+            }
+        };
+        if let Some(expected) = expected {
+            return Err(format!(
+                "laya-mcp: argument `{name}` must be {expected}, got {}",
+                json_type_name(v)
+            ));
+        }
+    }
+    serde_json::from_value(value).map_err(|e| format!("laya-mcp: arguments are malformed: {e}"))
+}
+
 /// The `invalid_params` error for a missing required argument, or `None` when all are present.
 ///
 /// Every implemented arm needs the same three lines; keeping them in one place is what stops
@@ -621,6 +688,73 @@ fn require(tool: &str, args: &RawArgs) -> Option<McpError> {
 /// # Errors
 /// Returns an [`McpError`] when the tool is unknown, when an unimplemented tool is
 /// called, or when a non-`gate` tool is called while Laya is down.
+/// The ONE way a tool call's arguments are accepted at runtime.
+///
+/// The whole seam in one function, so a test can drive the real path rather than a
+/// re-enactment of it. This matters more than it looks: the defect R5 fixed was not that
+/// `parse_args` was wrong — it was that **nothing called it**, and the first version of R5's test
+/// called `parse_args` directly, so it stayed green with the permissive parse wired back into the
+/// dispatcher (measured: the whole lib suite passed with the fix removed). Extracting the seam
+/// means the wiring test drives exactly what production drives.
+///
+/// # Errors
+/// [`McpError::invalid_params`] naming the argument and the type received, for any argument the
+/// tool's contract does not accept. It never silently substitutes a default: a wrongly-typed
+/// argument that becomes `RawArgs::default()` surfaces later as "requires X", which blames the
+/// wrong argument and gives the caller nothing to fix.
+pub fn accepted_args(args_value: serde_json::Value) -> Result<RawArgs, McpError> {
+    parse_args(args_value).map_err(|e| McpError::invalid_params(e, None))
+}
+
+/// **The live seam** — everything a tool call goes through before the tool runs.
+///
+/// It is argument acceptance first, then the readiness verdict.
+///
+/// One function, so a test can drive the real path. That matters more than it looks. The defect
+/// R5 fixed was not that `parse_args` was wrong — it was that **nothing checked**, and two
+/// successive test versions failed the control for the same reason: they called the parser
+/// directly, so reverting the dispatcher's own call left them green (measured twice: the whole
+/// lib suite passed with the permissive parse restored). A test that does not go through
+/// `dispatch_shim`'s own code cannot fail when `dispatch_shim` changes.
+///
+/// The ORDER is the contract: an argument that cannot be accepted is refused **before** the
+/// layer is probed, because probing costs a network round trip and a call that was never going
+/// to be accepted has no business making one.
+///
+/// # Errors
+/// [`McpError::invalid_params`] naming the argument and the type received, for any argument the
+/// tool's contract does not accept. It never silently substitutes a default: a wrongly-typed
+/// argument that becomes `RawArgs::default()` surfaces later as "requires X", which blames the
+/// wrong argument and gives the caller nothing to fix.
+pub fn accept(
+    tool: &str,
+    args_value: serde_json::Value,
+    state: &ServerState,
+) -> Result<(RawArgs, Readiness), McpError> {
+    let args = accepted_args(args_value)?;
+
+    // Readiness AFTER acceptance, and every call. A fresh cached verdict is reused; otherwise
+    // the caller must re-probe, and an absent verdict is treated as NOT ready — the fail-closed
+    // direction. Not probing here was the bug the end-to-end test caught: a cache miss was
+    // treated as "down", so a healthy Laya answered every call through the fail-closed path.
+    let now_ms = clock::now_ms();
+    let readiness = state.fresh_readiness(now_ms).unwrap_or_else(|| {
+        let verdict = probe(&state.endpoint);
+        state.record_readiness(verdict.clone(), now_ms);
+        verdict
+    });
+    let _ = tool;
+    Ok((args, readiness))
+}
+
+/// The dynamic tool dispatcher's body, minus the rmcp context.
+///
+/// Readiness first, then the tool. Split from [`dispatch_shim`] so the tool surface is drivable
+/// from a test without constructing an MCP server, and so the ORDER — readiness before any work
+/// — is stated in one place.
+///
+/// # Errors
+/// [`McpError`] for an unknown tool, a not-ready layer, or any failure the tool itself reports.
 pub fn handle(
     tool: &str,
     readiness: &Readiness,
@@ -2071,20 +2205,7 @@ fn dispatch_shim(
     let state = Arc::clone(&ctx.service.state);
 
     Box::pin(async move {
-        let args: RawArgs = serde_json::from_value(args_value).unwrap_or_default();
-
-        // Readiness FIRST, every call. A fresh cached verdict is reused; otherwise the
-        // caller must re-probe, and an absent verdict is treated as NOT ready — the
-        // fail-closed direction.
-        // A fresh cached verdict is reused; otherwise we PROBE. Not probing here was
-        // the bug the end-to-end test caught: a cache miss was treated as "down", so a
-        // healthy Laya answered every call through the fail-closed path.
-        let now_ms = clock::now_ms();
-        let readiness = state.fresh_readiness(now_ms).unwrap_or_else(|| {
-            let verdict = probe(&state.endpoint);
-            state.record_readiness(verdict.clone(), now_ms);
-            verdict
-        });
+        let (args, readiness) = accept(&name, args_value, &state)?;
 
         // NO QUEUE HERE, deliberately — and the reason is architectural.
         //
@@ -2191,6 +2312,154 @@ mod tests {
 
     fn ready() -> Readiness {
         Readiness::Ready
+    }
+
+    /// The wiring test: drives the live seam, not the parser in isolation.
+    #[test]
+    fn a_wrongly_typed_argument_is_named_at_the_live_seam() {
+        // The control found this missing. With the old permissive parse wired back into
+        // `dispatch_shim` (`serde_json::from_value(args_value).unwrap_or_default()`), the test
+        // above still PASSES: it calls `parse_args` directly, so it tests the function and not
+        // the wiring. Measured: the whole lib suite stayed green with the fix removed.
+        //
+        // So this one drives `handle`, the entry point production uses. It must fail if
+        // `dispatch_shim` ever goes back to swallowing a wrongly-typed argument, because the
+        // defect was never "parse_args is wrong" -- it was "nothing called it".
+        let err = accept("gate", json!({"action": 123}), &test_state())
+            .expect_err("a numeric `action` must be refused, not defaulted away");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("`action`"),
+            "the refusal must name the argument that is wrong: {msg}"
+        );
+        assert!(
+            msg.contains("number") && msg.contains("string"),
+            "and must name what was received and what is required: {msg}"
+        );
+        // The measured precedent: `path` supplied and valid, `question` an object. The old
+        // code surfaced "requires `question`" -- blaming the wrong argument.
+        let err = accept(
+            "ask_file",
+            json!({"path": "/etc/hostname", "question": {"type": "noul"}}),
+            &test_state(),
+        )
+        .expect_err("an object `question` must be refused");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("`question`") && !msg.contains("requires `path`"),
+            "the refusal must name the argument at fault, not the valid one beside it: {msg}"
+        );
+    }
+
+    /// The parser in isolation. Kept, and clearly NOT the wiring test: this one stays green
+    /// when the dispatcher's call is reverted, which is why the seam test above exists.
+    #[test]
+    fn a_wrongly_typed_argument_is_named_not_swallowed() {
+        let e = parse_args(json!({"action": 123})).expect_err("a number is not a string");
+        assert!(e.contains("`action`") && e.contains("number"), "{e}");
+
+        // The measured precedent: `path` is supplied and valid, `question` is an object. The
+        // error must name `question` and `object`, and must NOT blame `path`.
+        let e = parse_args(json!({"path": "/etc/hostname", "question": {"type": "noul"}}))
+            .expect_err("an object is not a string");
+        assert!(e.contains("`question`") && e.contains("object"), "{e}");
+        assert!(
+            !e.contains("`path`"),
+            "must not blame the argument that was fine: {e}"
+        );
+
+        // And end to end through the validation `handle` reaches: a non-string `paths` element.
+        let e = parse_args(json!({"paths": ["a", 7]})).expect_err("7 is not a string");
+        assert!(
+            e.contains("`paths`") && e.contains("array of strings"),
+            "{e}"
+        );
+        let e =
+            parse_args(json!(["not", "an", "object"])).expect_err("arguments must be an object");
+        assert!(e.contains("array"), "{e}");
+
+        // CONTROL: well-typed arguments, `null` (absent) and unknown keys still parse.
+        let a = parse_args(json!({
+            "action": "ls", "irreversible": false, "context_tokens": 5,
+            "paths": ["a"], "question": null, "extra": {"anything": 1}
+        }))
+        .expect("well-typed arguments must parse");
+        assert_eq!(a.action.as_deref(), Some("ls"));
+        assert_eq!(a.question, None);
+        assert_eq!(a.context_tokens, Some(5));
+    }
+
+    /// Seeded LCG (Knuth MMIX constants). Deterministic: a failure reproduces from `SEED`.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0 >> 33
+        }
+        fn below(&mut self, n: usize) -> usize {
+            usize::try_from(self.next()).unwrap_or(0) % n.max(1)
+        }
+    }
+
+    /// R4: seeded byte mutation of real JSON argument objects, through parse + `handle`.
+    /// `ask` is left out of the seeds because a mutated allowlisted command would really run.
+    #[test]
+    fn mutated_arguments_are_refused_or_handled_never_panic() {
+        const SEED: u64 = 0x130A_5EED;
+        let seeds = [
+            r#"{"state":"the build is green","options":["a","b"]}"#,
+            r#"{"action":"git push --force origin main","irreversible":true}"#,
+            r#"{"path":"/etc/hostname","question":"what is this?"}"#,
+            r#"{"question":"q","paths":["/etc/hostname","*.md"]}"#,
+            r#"{"turns_summary":"did things","context_tokens":1234}"#,
+            r#"{"state":"x","run_id":"r1","node_id":"n1"}"#,
+        ];
+        let tools = ["decide", "gate", "ask_file", "ask_files", "should_compact"];
+        let st = test_state();
+        let mut rng = Lcg(SEED);
+        let (mut parsed, mut refused) = (0_u32, 0_u32);
+        for case in 0..2_000_u32 {
+            let mut bytes = seeds[rng.below(seeds.len())].as_bytes().to_vec();
+            for _ in 0..=rng.below(4) {
+                let at = rng.below(bytes.len());
+                match rng.below(4) {
+                    0 => bytes[at] = u8::try_from(rng.next() & 0xff).unwrap_or(0),
+                    // Structural bytes are what change a value's TYPE, which random bytes rarely do.
+                    3 => bytes[at] = b"0t[{\"n"[rng.below(6)],
+                    1 => {
+                        bytes.remove(at);
+                    }
+                    _ => bytes.insert(at, bytes[at]),
+                }
+                if bytes.is_empty() {
+                    bytes.push(b'{');
+                }
+            }
+            let text = String::from_utf8_lossy(&bytes);
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                continue;
+            };
+            let tool = tools[rng.below(tools.len())];
+            match parse_args(value) {
+                Ok(args) => {
+                    parsed += 1;
+                    // Ok or Err are both fine; a panic fails the test and prints the seed.
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        handle(tool, &ready(), &args, &st)
+                    }))
+                    .unwrap_or_else(|_| panic!("handle panicked: seed {SEED:#x}, case {case}, tool {tool}, input {text}"));
+                }
+                Err(_) => refused += 1,
+            }
+        }
+        // CONTROL: the mutator must produce BOTH outcomes, or it is exercising only one path.
+        assert!(
+            parsed > 100 && refused > 0,
+            "parsed {parsed}, refused {refused}"
+        );
     }
 
     fn down() -> Readiness {

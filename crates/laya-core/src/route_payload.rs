@@ -164,28 +164,18 @@ fn margin_of(answer: &Answer, policy: &Policy) -> f64 {
             (p - policy.noul_threshold).abs()
         }
         QuestionType::Choice => {
-            let mut top = answer
+            let mut finite: Vec<f64> = answer
                 .probabilities
                 .iter()
                 .copied()
-                .filter(|v| v.is_finite());
-            let Some(first) = top.next() else {
-                return 0.0;
-            };
-            let mut sorted = [first, f64::NEG_INFINITY];
-            for v in top {
-                if v > sorted[0] {
-                    sorted[1] = sorted[0];
-                    sorted[0] = v;
-                } else if v > sorted[1] {
-                    sorted[1] = v;
-                }
-            }
-            if sorted[1].is_finite() {
-                sorted[0] - sorted[1]
-            } else {
+                .filter(|v| v.is_finite())
+                .collect();
+            finite.sort_by(|a, b| b.total_cmp(a));
+            match (finite.first(), finite.get(1)) {
+                (Some(first), Some(second)) => first - second,
                 // One option only: no runner-up, so no tie is possible.
-                sorted[0]
+                (Some(first), None) => *first,
+                (None, _) => 0.0,
             }
         }
         QuestionType::Score => {
@@ -386,6 +376,7 @@ mod near_tie_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use laya_abi::QuestionType;
@@ -406,6 +397,144 @@ mod tests {
             confidence,
             latency_ms: Some(12.5),
         }
+    }
+
+    /// Seeded LCG (Knuth MMIX constants): deterministic, offline, reproducible from the seed.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0 >> 11
+        }
+        #[allow(clippy::cast_precision_loss)]
+        fn unit(&mut self) -> f64 {
+            (self.next() as f64) / ((1_u64 << 53) as f64)
+        }
+    }
+
+    #[test]
+    fn payload_invariants_hold_for_random_distributions() {
+        const SEED: u64 = 0x133E_ED01;
+        let policy = Policy::default();
+        let mut rng = Lcg(SEED);
+        let (mut ties, mut non_ties) = (0_u32, 0_u32);
+        for case in 0..512_u32 {
+            let k = 2 + usize::try_from(rng.next() % 12).unwrap_or(0);
+            // Every third case is quantised to 3 levels so exact and near ties actually occur.
+            let quantise = case % 3 == 0;
+            let raw: Vec<f64> = (0..k)
+                .map(|_| {
+                    let u = rng.unit();
+                    if quantise {
+                        (u * 3.0).floor() + 1.0
+                    } else {
+                        u + 1e-3
+                    }
+                })
+                .collect();
+            let total: f64 = raw.iter().sum();
+            let probs: Vec<f64> = raw.iter().map(|v| v / total).collect();
+            let options: Vec<String> = (0..k).map(|i| format!("opt{i}")).collect();
+            let top = probs
+                .iter()
+                .enumerate()
+                .fold((0, f64::MIN), |b, (i, &v)| if v > b.1 { (i, v) } else { b });
+            let mut a = answer(&options[top.0], top.1, probs.clone());
+            a.options = options.clone();
+            let p = DecisionPayload::from_answer(&a, &policy);
+
+            let mut sorted = probs.clone();
+            sorted.sort_by(|x, y| y.total_cmp(x));
+            let expected = sorted[0] - sorted[1];
+            let ctx = format!("seed {SEED:#x}, case {case}, probs {probs:?}");
+            assert!(p.margin >= 0.0, "margin negative: {ctx}");
+            assert!(
+                (p.margin - expected).abs() < 1e-12,
+                "margin {} != top1-top2 {expected}: {ctx}",
+                p.margin
+            );
+            assert!(p.options.contains(&p.label), "label not in options: {ctx}");
+            assert_eq!(
+                p.near_tie,
+                p.margin <= policy.near_tie_margin,
+                "near_tie disagrees with margin: {ctx}"
+            );
+            if p.near_tie {
+                ties += 1;
+            } else {
+                non_ties += 1;
+            }
+        }
+        // CONTROL: both sides of the near_tie biconditional must have been exercised.
+        assert!(
+            ties > 10 && non_ties > 10,
+            "ties {ties}, non-ties {non_ties}"
+        );
+    }
+
+    #[test]
+    fn margin_has_its_value_for_every_question_kind() {
+        let policy = Policy::default(); // noul_threshold is read, not assumed
+        // Choice: top1 - top2, order-independent, ties are zero, one option is its own margin.
+        let m = |probs: Vec<f64>| {
+            DecisionPayload::from_answer(&answer("bug_in_code", 0.9, probs), &policy).margin
+        };
+        assert!((m(vec![0.2, 0.5, 0.3]) - 0.2).abs() < 1e-12);
+        assert!((m(vec![0.5, 0.5, 0.0])).abs() < 1e-12);
+        assert!((m(vec![0.7, 0.2, 0.7]) - 0.0).abs() < 1e-12);
+        assert!((m(vec![0.6]) - 0.6).abs() < 1e-12);
+        assert!((m(vec![]) - 0.0).abs() < 1e-12);
+        assert!(
+            (m(vec![0.4, f64::NAN, 0.1]) - 0.3).abs() < 1e-12,
+            "non-finite is ignored"
+        );
+
+        // Noul: |p - threshold|, symmetric about it.
+        let t = policy.noul_threshold;
+        for p in [t + 0.2, t - 0.2] {
+            let mut a = answer("yes", 0.9, vec![]);
+            a.kind = QuestionType::Noul;
+            a.p = Some(p);
+            let got = DecisionPayload::from_answer(&a, &policy).margin;
+            assert!((got - 0.2).abs() < 1e-12, "p={p}: {got}");
+        }
+
+        // Noul with no `p`: the belief falls back to `1 - confidence`.
+        let mut a = answer("yes", 0.9, vec![]);
+        a.kind = QuestionType::Noul;
+        a.p = None;
+        let got = DecisionPayload::from_answer(&a, &policy).margin;
+        assert!((got - ((1.0 - 0.9) - t).abs()).abs() < 1e-12, "{got}");
+
+        // Score: distance to the nearer integer level.
+        for (s, want) in [(2.25, 0.25), (2.75, 0.25), (3.0, 0.0), (2.5, 0.5)] {
+            let mut a = answer("3", 0.9, vec![]);
+            a.kind = QuestionType::Score;
+            a.score = Some(s);
+            let got = DecisionPayload::from_answer(&a, &policy).margin;
+            assert!((got - want).abs() < 1e-12, "score {s}: {got} != {want}");
+        }
+    }
+
+    #[test]
+    fn band_enum_round_trips_every_band() {
+        for (text, band) in [("low", Band::Low), ("mid", Band::Mid), ("high", Band::High)] {
+            let mut p = DecisionPayload::from_answer(
+                &answer("bug_in_code", 0.9, vec![0.9, 0.05, 0.05]),
+                &Policy::default(),
+            );
+            p.band = text.to_string();
+            assert_eq!(p.band_enum(), Some(band));
+        }
+        let mut p = DecisionPayload::from_answer(
+            &answer("bug_in_code", 0.9, vec![0.9, 0.05, 0.05]),
+            &Policy::default(),
+        );
+        p.band = "bogus".to_string();
+        assert_eq!(p.band_enum(), None);
     }
 
     #[test]

@@ -158,10 +158,95 @@ fn detect_cycle(flow: &Flow) -> Result<(), FlowError> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )]
 
     use super::*;
     use crate::flow::Retry;
+
+    /// Seeded LCG (Knuth MMIX constants). A failure reproduces from the printed seed.
+    struct Lcg(u64);
+    impl Lcg {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(self.0 >> 33).unwrap_or(0) % n.max(1)
+        }
+    }
+
+    /// R4: seeded byte mutation of the real fixtures through parse -> validate -> lower.
+    /// The property is "a typed error or Ok, never a panic" — a panic names its seed.
+    #[test]
+    fn mutated_flows_are_refused_or_accepted_never_panic() {
+        const SEED: u64 = 0x13F1_0001;
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let mut seeds: Vec<(String, Vec<u8>)> = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("fixtures dir") {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|e| e == "json") {
+                seeds.push((
+                    path.display().to_string(),
+                    std::fs::read(&path).expect("read fixture"),
+                ));
+            }
+        }
+        seeds.sort();
+        assert!(seeds.len() >= 2, "the fixtures must be found: {seeds:?}");
+
+        let run_one = |text: &str| -> Result<bool, FlowError> {
+            let flow = Flow::parse(text)?;
+            validate(&flow)?;
+            crate::lower(&flow)?;
+            Ok(true)
+        };
+        // CONTROL: the unmutated fixtures take the full Ok path, so "refused" below means a
+        // mutation did it, not that the pipeline refuses everything.
+        for (name, bytes) in &seeds {
+            let text = String::from_utf8(bytes.clone()).expect("utf-8 fixture");
+            assert!(run_one(&text).is_ok(), "the real fixture {name} must pass");
+        }
+
+        let mut rng = Lcg(SEED);
+        let (mut accepted, mut refused) = (0_u32, 0_u32);
+        for case in 0..2_000_u32 {
+            let (name, base) = &seeds[rng.below(seeds.len())];
+            let mut bytes = base.clone();
+            for _ in 0..=rng.below(4) {
+                let at = rng.below(bytes.len());
+                match rng.below(4) {
+                    0 => bytes[at] = u8::try_from(rng.below(256)).unwrap_or(0),
+                    1 => {
+                        bytes.remove(at);
+                    }
+                    2 => bytes.insert(at, bytes[at]),
+                    // Structural bytes change shapes and types, which random bytes rarely do.
+                    _ => bytes[at] = b"0t[{\"n,:"[rng.below(8)],
+                }
+                if bytes.is_empty() {
+                    bytes.push(b'{');
+                }
+            }
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            let outcome = std::panic::catch_unwind(|| run_one(&text)).unwrap_or_else(|_| {
+                panic!("panicked: seed {SEED:#x}, case {case}, from {name}, input:\n{text}")
+            });
+            if outcome.is_ok() {
+                accepted += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(
+            accepted > 20 && refused > 20,
+            "accepted {accepted}, refused {refused}"
+        );
+    }
 
     fn shell(id: &str, depends_on: &[&str]) -> Node {
         Node {

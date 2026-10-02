@@ -709,6 +709,72 @@ mod tests {
         out
     }
 
+    /// Seeded LCG (Knuth MMIX constants). A failure reproduces from the printed seed.
+    struct Lcg(u64);
+    impl Lcg {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(self.0 >> 33).unwrap_or(0) % n.max(1)
+        }
+    }
+
+    /// R4: seeded byte mutation of a small valid file. `from_bytes` must return a typed error or
+    /// `Ok`, and an `Ok` file's tensor table must then be walkable without panicking.
+    #[test]
+    fn mutated_safetensors_are_refused_never_panic() {
+        const SEED: u64 = 0x135A_FE01;
+        let valid = one_tensor_file(
+            r#","__metadata__":{"a":"b"}"#,
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        );
+        // CONTROL: the unmutated file parses and reads, so refusal below is the mutation's doing.
+        let f = SafetensorsFile::from_bytes(Path::new("x"), &valid).expect("valid file");
+        assert_eq!(f.tensor("w").expect("tensor w").name, "w");
+
+        let mut rng = Lcg(SEED);
+        let (mut accepted, mut refused) = (0_u32, 0_u32);
+        for case in 0..2_000_u32 {
+            let mut bytes = valid.clone();
+            for _ in 0..=rng.below(4) {
+                let at = rng.below(bytes.len());
+                match rng.below(5) {
+                    0 => bytes[at] = u8::try_from(rng.below(256)).unwrap_or(0),
+                    1 => {
+                        bytes.remove(at);
+                    }
+                    2 => bytes.insert(at, bytes[at]),
+                    // Hit the 8-byte header-length prefix, where the dangerous bounds live.
+                    3 => {
+                        let at = rng.below(bytes.len().min(8));
+                        bytes[at] = u8::try_from(rng.below(256)).unwrap_or(0xff);
+                    }
+                    _ => bytes.truncate(rng.below(bytes.len() + 1)),
+                }
+                if bytes.is_empty() {
+                    bytes.push(0);
+                }
+            }
+            let outcome = std::panic::catch_unwind(|| {
+                SafetensorsFile::from_bytes(Path::new("x"), &bytes).map(|f| {
+                    let _ = f.tensors().iter().map(|t| t.name.len()).sum::<usize>();
+                })
+            })
+            .unwrap_or_else(|_| panic!("panicked: seed {SEED:#x}, case {case}, bytes {bytes:?}"));
+            if outcome.is_ok() {
+                accepted += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(
+            accepted > 20 && refused > 200,
+            "accepted {accepted}, refused {refused}"
+        );
+    }
+
     // ---- the real checkpoint: the oracle that matters ------------------------
 
     #[test]

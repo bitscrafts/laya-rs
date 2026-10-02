@@ -150,9 +150,17 @@ if ! curl -sf -m 5 http://10.10.10.217:8083/health > /dev/null 2>&1; then
   UNMEASURED+=("graph acceptance: backbone :8083 unreachable")
   echo "  UNMEASURED: the backbone at :8083 is not reachable, so R-ACC cannot run."
   echo "  This is NOT a pass — run it when the backbone is up:"
-  echo "    cargo test -p laya-graph --test acceptance"
+  echo "    cargo test -p laya-graph --test acceptance -- --include-ignored"
 else
-  chk "graph acceptance (R-ACC, laya-mcp live)" cargo test -p laya-graph --test acceptance
+  chk "graph acceptance (R-ACC, laya-mcp live)" cargo test -p laya-graph --test acceptance -- --include-ignored
+fi
+echo
+
+echo "########## 7d. THE MUTATION GATE (opt-in: --with-mutants; takes minutes; spec 13 R2) ##########"
+if [ "${1:-}" = "--with-mutants" ]; then
+  chk "mutation gate (zero missed mutants)" bash scripts/mutants-gate.sh
+else
+  echo "  skipped: pass --with-mutants to run it (this is NOT a pass, it was not run)"
 fi
 echo
 
