@@ -347,3 +347,101 @@ The usage script is deliberately **outside** this repository: it reads the agent
 and laya must not know the agent exists. It reads that store **read-only** and reports both ledger
 locations, because reporting only one is how the "7 rows on disk, `stats` says 0" state went
 unnoticed — a review that counted only segments or only the store would call either case healthy.
+
+## Mandatory usage, and the seeing log (2026-10-02)
+
+The measured state this answers: **3 calls to `mcp__laya__gate` out of 63,886 tool calls ever.**
+A decision layer registered, enabled, and never called is indistinguishable from one that is
+broken — so usage was made mandatory where it can be, at the operator's explicit direction.
+
+### The mechanism is a `pre_tool_call` hook
+
+`~/.hermes/hooks/laya-gate.sh`, registered with **`fail_closed: true`** — the only combination
+Hermes enforces. (Verified: `_BLOCKING_EVENTS = frozenset({'pre_tool_call'})`; `fail_closed` is
+silently ignored on every other event. Same finding as the agent-memory gate.)
+
+It fires on the four tools that can change state — `terminal`, `write_file`, `patch`,
+`execute_code` — and asks the deployed `laya-mcp` one question first.
+
+**What it enforces:**
+
+| condition | result |
+|---|---|
+| laya unreachable (no binary, no socket) | **BLOCK** — an unavailable gate must never mean permission |
+| the head is down (`reason: sidecar-unavailable`) | **BLOCK** — laya is up but cannot judge, which is the "stop if not running" case |
+| verdict `deny` | **BLOCK** |
+| verdict `allow` / `ask` | pass, and the call was recorded |
+
+**What it deliberately does NOT enforce, and this matters more than the table above:**
+
+- **`ask` does not block.** `ask` is the gate doing its job, not a refusal. Blocking on it would
+  refuse routine work — and an agent made to beg permission for `cargo build` stops calling the
+  gate entirely, which is precisely how usage died the first time. This hook exists to make the
+  gate *used*, not to make it a wall.
+- **Destructive signals do not block.** That list contains `"mv "`, `"find "` and `"rm -f"` —
+  routine here, and this project's own hard rule is to `mv` rather than delete. Blocking on
+  signals would block the safe path while the unsafe one passed. Signals are *recorded*, not
+  enforced.
+
+### The seeing log
+
+`~/.hermes/logs/laya.log` — one line per gated call, written by the hook, and mirrored to stderr
+so it also reaches the agent's own log:
+
+```
+2026-10-02T03:31:44Z laya[1110417] PASS [allow] tool=terminal signals=0 cmd=pwd
+2026-10-02T03:31:49Z laya[1110548] PASS [allow] tool=terminal signals=0 cmd=ls -1 crates
+2026-10-02T03:28:58Z laya[1109534] SKIP (same command within 5s) tool=terminal cmd=git log -1
+2026-10-02T03:28:58Z laya[1109563] BLOCK (laya unreachable) tool=terminal cmd=cargo build
+```
+
+and, in `agent.log`, through the stderr channel:
+
+```
+INFO agent.shell_hooks: shell hook stderr (command=/root/.hermes/hooks/laya-gate.sh):
+     laya-gate: PASS [allow] tool=terminal signals=0 cmd=pwd
+```
+
+**Two deliberate design points.** The hook rate-limits the *same* command in the *same* session
+within 5 seconds — that is the same decision, and without it a build loop would spend a gate call
+and a ledger row per repetition. And it writes the log file **directly** rather than relying on
+the logger, because a hook's stderr is emitted by Hermes at `debug` while the gateway runs at
+`WARNING` (measured: `agent.log` held **0 DEBUG lines**), so a line printed by a hook would not
+have appeared anywhere. That level was also inconsistent with blocking hooks, which already log
+at `INFO`; it is now `INFO`, with `HERMES_HOOK_STDERR_DEBUG=1` to demote it for a chatty hook.
+
+### Cost, measured
+
+```
+gate rows in the ledger      30
+gate latency  min/p50/p95/max   0 / 174.5 / 231 / 268 ms
+verdicts answered           {allow: 16, ask: 13, yes: 1}
+
+provider tokens per gated call     0
+model context tokens added         0
+```
+
+**Zero tokens, and that is structural rather than lucky:** the gate runs a local Rust head over a
+Unix socket. No provider API is called and nothing is added to the model's context window, so the
+marginal token cost of gating every state-changing tool call is zero. What is actually spent is
+~175 ms of wall clock (median) and one ledger row of ~330 bytes. The `yes: 1` is a pre-fix row,
+written before the gate recorded its own verdict instead of the model's label.
+
+### Reviewing it
+
+Three commands, each answering a different question:
+
+| question | command |
+|---|---|
+| is the ledger recording, and what did it cost? | `laya ledger stats` |
+| is laya being **used**, by whom, when? | `~/.hermes/scripts/laya-usage.py` |
+| what does the mandatory gate **cost**, in tokens and time? | `~/.hermes/scripts/laya-token-economy.py` |
+
+All three are read-only. The two review scripts live on the agent side of the boundary, never in
+this repository: laya must not know the agent exists.
+
+**One caution the scripts now handle explicitly.** The MCP tool counter in the session store only
+sees calls the *model* makes through the tool surface. The hook calls the gate as a *subprocess*,
+which never appears there — measured: **3 MCP calls against 30 gate rows**. A review reporting
+only the MCP number would say "laya is unused" while the hook was gating every state-changing call
+on the box. Both counters are therefore reported.
