@@ -1,0 +1,76 @@
+{
+  "flow": "wc-classify-chained-control",
+  "version": 1,
+  "description": "CONTROL for wc-classify-chained: the IDENTICAL graph shape over a 412-word document, which must reach a DIFFERENT terminal branch (LONG -> class_long) than its pairing (13 words -> class_short). A single flow proves nothing -- a graph stuck on one branch would pass it too -- and this control is the reason the FIRST wc example was thrown away: its two flows both landed MEDIUM. Same two measured facts as its pairing: the count is a LITERAL in the prompt because there is no shell->route interpolation (crates/laya-graph/src/lower.rs:104), and the decides are 2-option choices on the wire because LiveMcpCaller rebuilds every flow decide that way (crates/laya-cli/src/mcp_client.rs:106-120). On the measured boundary, this document's executed gate (412 > 300) bands mid (conf 0.632) so the classification completes rather than escalating; the break-the-control check exists because if both flows ever reach the same branch, the pair certifies nothing. See also the low-band probe under /projects/_tmp/wc-example/ which shows the escalation ports firing on a state the head bands low.",
+  "nodes": [
+    {
+      "id": "count_words",
+      "kind": "shell",
+      "run": "wc -w /projects/_tmp/wc-example/long-note.txt",
+      "timeout": 30
+    },
+    {
+      "id": "gt300_gate",
+      "kind": "decide",
+      "depends_on": ["count_words"],
+      "on": "band",
+      "prompt": "The word count in the file is 412 words.",
+      "question": "Is the word count greater than 300 words?",
+      "options": ["yes", "no"],
+      "ports": {
+        "mid": "gt300_ask",
+        "high": "gt300_ask",
+        "low": "escalate_gt300",
+        "_": "escalate_gt300"
+      }
+    },
+    {
+      "id": "gt300_ask",
+      "kind": "decide",
+      "depends_on": ["gt300_gate"],
+      "on": "label",
+      "prompt": "The word count in the file is 412 words.",
+      "question": "Is the word count greater than 300 words?",
+      "options": ["yes", "no"],
+      "ports": {
+        "yes": "class_long",
+        "no": "gt100_gate",
+        "_": "escalate_gt300"
+      }
+    },
+    {
+      "id": "gt100_gate",
+      "kind": "decide",
+      "depends_on": ["gt300_ask"],
+      "on": "band",
+      "prompt": "The word count in the file is 412 words.",
+      "question": "Is the word count greater than 100 words?",
+      "options": ["yes", "no"],
+      "ports": {
+        "mid": "gt100_ask",
+        "high": "gt100_ask",
+        "low": "escalate_gt100",
+        "_": "escalate_gt100"
+      }
+    },
+    {
+      "id": "gt100_ask",
+      "kind": "decide",
+      "depends_on": ["gt100_gate"],
+      "on": "label",
+      "prompt": "The word count in the file is 412 words.",
+      "question": "Is the word count greater than 100 words?",
+      "options": ["yes", "no"],
+      "ports": {
+        "yes": "class_medium",
+        "no": "class_short",
+        "_": "escalate_gt100"
+      }
+    },
+    { "id": "class_short", "kind": "shell", "run": "echo 'CLASSIFIED: SHORT (not more than 100 words)'" },
+    { "id": "class_medium", "kind": "shell", "run": "echo 'CLASSIFIED: MEDIUM (more than 100, not more than 300 words)'" },
+    { "id": "class_long", "kind": "shell", "run": "echo 'CLASSIFIED: LONG (more than 300 words)'" },
+    { "id": "escalate_gt300", "kind": "shell", "run": "echo 'ESCALATED at the >300 gates: the head reported band=low -- a human decides'" },
+    { "id": "escalate_gt100", "kind": "shell", "run": "echo 'ESCALATED at the >100 gates: the head reported band=low -- a human decides'" }
+  ]
+}

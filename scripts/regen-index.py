@@ -57,6 +57,12 @@ DOCS = {
         "Measured state of observability in the deployment: the ledger that was silently off, the "
         "operating configuration, the measured cost per call, and the questions still unanswerable.",
     ),
+    "04-development/HEAD-QUESTION-SHAPE-LIMITS.md": (
+        "The head's question-shape limits — measured",
+        "A 3-option choice does not track a number while a noul threshold does (15/15, incl. the "
+        "boundary); and a bare noul on a subjective question returns a confident CONSTANT (no at "
+        "1.0 for both positive and negative text). Why the correct handling is bounding one signal."
+    ),
     "05-operations/README.md": ("Operations", "Running the server, the ledger, budgets."),
     "05-operations/TOOL-COVERAGE.md": (
         "Tool coverage — what has actually been exercised",

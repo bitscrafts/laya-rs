@@ -38,6 +38,7 @@ in exactly one place; this index points at it, never restates it.
 - [Design amendments — what the adversarial review changed](04-development/DESIGN-AMENDMENTS-2026-09-29.md) — MANDATORY corrections to the design, with the five blockers and their resolutions.
 - [P1 status — and the measurements that shaped it](04-development/P1-STATUS.md) — What was measured before designing (Laya concurrency, the redb collision), and what P1 delivered.
 - [The ten levels, mapped to our tools](04-development/TEN-LEVELS-MAPPING.md) — IndyDevDan's ten levels, and the documented failures we inherit as requirements.
+- [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md) — A 3-option choice does not track a number while a noul threshold does (15/15, incl. the boundary); and a bare noul on a subjective question returns a confident CONSTANT (no at 1.0 for both positive and negative text). Why the correct handling is bounding one signal.
 - [Development](04-development/README.md) — Design decisions and implementation notes.
 
 ### 05-operations
