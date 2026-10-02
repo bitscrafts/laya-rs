@@ -43,17 +43,30 @@ pub struct Executed {
     pub timed_out: bool,
 }
 
+/// Which run and node a tool call belongs to (spec 11, R1).
+///
+/// Carried to the tool server so the decision it records can be joined back to the
+/// [`crate::run::RunReport`] on `(run_id, node_id)`. Defined here, in `laya-graph`, because the
+/// graph is the one that knows both ids and must not depend on the crate that records them (N1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallContext {
+    /// The run this call is made within.
+    pub run_id: String,
+    /// The node making the call.
+    pub node_id: String,
+}
+
 /// Call an `mcp` tool by name.
 ///
 /// Injected so `laya-graph` never depends on `laya-mcp`: the real
 /// implementation lives wherever both crates meet.
 pub trait McpCaller: Send + Sync {
-    /// Call `tool` with `arguments`.
+    /// Call `tool` with `arguments`, on behalf of the run and node in `ctx`.
     ///
     /// # Errors
     /// Any `Err` is a tool error — a failure, not data to interpret later
     /// (R12).
-    fn call(&self, tool: &str, arguments: &Value) -> Result<String, String>;
+    fn call(&self, tool: &str, arguments: &Value, ctx: &CallContext) -> Result<String, String>;
 }
 
 /// Run a shell command under an optional deadline (R1, R2).
@@ -195,9 +208,14 @@ pub const fn failed(error: String, duration_ms: u64, timed_out: bool) -> Execute
 /// Call `tool` through `caller`. A tool error is a failure, never success
 /// (R12); the error text is kept, not swallowed.
 #[must_use]
-pub fn execute_mcp(caller: &dyn McpCaller, tool: &str, arguments: &Value) -> Executed {
+pub fn execute_mcp(
+    caller: &dyn McpCaller,
+    tool: &str,
+    arguments: &Value,
+    ctx: &CallContext,
+) -> Executed {
     let start = Instant::now();
-    let outcome = caller.call(tool, arguments);
+    let outcome = caller.call(tool, arguments, ctx);
     let duration_ms = elapsed_ms(start);
 
     match outcome {
@@ -249,30 +267,47 @@ mod tests {
 
     // ---- R12: mcp ---------------------------------------------------------
 
+    fn ctx() -> CallContext {
+        CallContext {
+            run_id: "r".to_string(),
+            node_id: "n".to_string(),
+        }
+    }
+
     struct OkCaller;
     impl McpCaller for OkCaller {
-        fn call(&self, tool: &str, _arguments: &Value) -> Result<String, String> {
+        fn call(
+            &self,
+            tool: &str,
+            _arguments: &Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             Ok(format!("{tool}: ok"))
         }
     }
 
     struct ErrCaller;
     impl McpCaller for ErrCaller {
-        fn call(&self, _tool: &str, _arguments: &Value) -> Result<String, String> {
+        fn call(
+            &self,
+            _tool: &str,
+            _arguments: &Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             Err("tool blew up".to_string())
         }
     }
 
     #[test]
     fn an_mcp_node_error_is_not_success() {
-        let executed = execute_mcp(&ErrCaller, "decide", &Value::Null);
+        let executed = execute_mcp(&ErrCaller, "decide", &Value::Null, &ctx());
         assert!(!executed.success);
         assert_eq!(executed.error.as_deref(), Some("tool blew up"));
     }
 
     #[test]
     fn the_control_an_mcp_node_ok_result_succeeds() {
-        let executed = execute_mcp(&OkCaller, "decide", &Value::Null);
+        let executed = execute_mcp(&OkCaller, "decide", &Value::Null, &ctx());
         assert!(executed.success);
         assert!(executed.output.contains("ok"));
     }

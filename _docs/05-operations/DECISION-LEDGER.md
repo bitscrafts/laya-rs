@@ -84,22 +84,33 @@ One JSON object per decision. Field names are the contract.
 | `ts_nanos` | monotonic nanoseconds **from the writing process's start**. Recorded, but **not** an ordering key: two processes measure from their own start |
 | `wall_nanos` | **epoch nanoseconds — the ordering key.** Added 2026-10-02 after the live store showed server rows at `65..171` against CLI outcome rows near `1.79e18`; a ~10^16 gap put every outcome after every decision whatever the real time |
 | `run_id`, `node_id` | the **join key to the caller's own run and node**. Threaded from the tool call (2026-10-02); every row before that carried `None`, so no decision could be joined to its run |
-| `question_id`, `question_type` | which question, and which of the three types |
-| `label` | the answer as a routing label |
+| `question_id`, `question_type` | which question, and which of the three types. For a `refused`/`error` row the `question_id` is the reason, with any command text replaced by `<command>` |
+| `label` | the answer as a routing label. A call that produced **no answer** is a row too (spec 11 R2): `refused` (the caller asked for something the layer will not do — an out-of-scope file, a command the gate did not allow) or `error` (the layer could not answer — the head is down). These are the rows an incident review reaches for first |
 | `confidence` | Laya's calibrated confidence — **`Option<f64>`**. It was `unwrap_or(0.0)`, so a missing value recorded as `0.0`: indistinguishable from "maximally unsure", and it poisons any calibration built on the column |
 | `band` | `low` / `mid` / `high`, computed by us (B5) |
 | `margin` | **top1 − top2 gap** — added by blocker B1, because a near-tie is where a port can flip |
 | `near_tie` | whether `margin` fell under the policy floor. **Added 2026-09-30** — it was a payload field while this table omitted it, and with `escalate_on_near_tie` it is what demotes a band, so a recorded decision without it cannot be re-explained |
 | `probabilities` | the full distribution, so saturation can be re-derived |
 | `saturated` | whether one option held > `saturation_threshold` |
-| ~~`p` / `score`~~ | **not fields of the row.** This table listed them and `DecisionRow` never had them; a `score` question's value lives in `label`. The payload (`DecisionPayload`) does carry `p` and `score` — the row simply does not copy them, so a `noul`'s raw probability is not recoverable from the ledger |
+| `p`, `score` | for a `noul` question the raw belief, for a `score` question the rubric position. **Annotated 2026-10-02 (spec 11 R9):** this table first listed them and `DecisionRow` did not have them — a reader auditing the ledger hunted for columns that were never built — and an interim edit struck them through as "not fields". Spec 11 R9 chose the other resolution: `DecisionPayload` already carried both and the recorder simply did not copy them, so it now does, and a `noul`'s raw probability is recoverable from the row. Rows written before this carry neither |
+| `gate_decision`, `model_decision`, `destructive_signals` | **added 2026-10-02 (spec 11 R2)** for `gate` and `ask` rows: the final `allow`/`ask`/`deny`, what the model alone said (`yes`/`no`/`unknown`), and how many destructive-command signals the guardrail found. An `ask` row's `label` is the model's answer to one of the caller's questions, so the verdict needs a field of its own. Absent on rows from tools with no verdict |
+| `command_sha256` | **added 2026-10-02 (spec 11 R2/N3)**: hash of the command a `gate` or `ask` row judged. **Never the command** — a command can carry a token, and the test greps the whole segment for the plaintext |
 | `latency_ms` | measured, wall-clock, on the **real** path (review M2: three different paths were conflated) |
 | `laya_version` | the pinned Laya version |
 | `head_sha256`, `backbone_sha256` | **provenance** — a mismatched artifact must fail loudly, not silently produce different decisions (B1/M9) |
 | `bucket_clamped` | whether the head's temperature clamp fired (B2); confidence from such a bucket is **uncalibrated**. Now `Option<bool>` — it used to be copied from `saturated`, a different fact, so an unknown clamp state was recorded as a known `false` |
-| `executed` | whether the action judged was **carried out**. For a `gate` row this separates "allowed" from "allowed and then run" — a permission and an event are different things, and the ledger needs to tell them apart |
+| `executed` | `Option<bool>` since 2026-10-02 (spec 11 R2) — `None` for a tool with no such notion and for every older row, so "not applicable" is not recorded as "did not run". Whether the action judged was **carried out**. For a `gate` row this separates "allowed" from "allowed and then run" — a permission and an event are different things, and the ledger needs to tell them apart |
 | `state_sha256` | hash of the state, **never the state itself** — see the secrets rule |
 | `tool` | which tool produced it (`decide`, `ask_file`, …) |
+
+### Row identity (changed 2026-10-02)
+
+A row's identity — what makes `compact` idempotent — now includes `wall_nanos`. It was
+`(ts_nanos, tool, question_id, label)`, and `ts_nanos` is process-relative, so two servers answering
+the same question with the same label at the same offset into their own lives (a gate verdict at
+`ts_nanos` 65 is entirely ordinary) produced the same identity and the second row was dropped as a
+"duplicate" of a different decision. Measured by a test that fails on the old identity. Old rows
+carry `wall_nanos` 0, so their identities are unchanged in effect.
 
 ### What is deliberately absent
 

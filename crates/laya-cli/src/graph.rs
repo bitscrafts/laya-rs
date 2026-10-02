@@ -197,6 +197,7 @@ fn run_id_token() -> String {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+    use laya_graph::CallContext;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
@@ -206,7 +207,12 @@ mod tests {
     /// ignored (same pattern `laya-graph`'s own scheduler tests use).
     struct UnusedCaller;
     impl McpCaller for UnusedCaller {
-        fn call(&self, tool: &str, _arguments: &Value) -> Result<String, String> {
+        fn call(
+            &self,
+            tool: &str,
+            _arguments: &Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             Err(format!(
                 "unexpected mcp call to `{tool}` in a shell-only fixture"
             ))

@@ -24,7 +24,7 @@ use tokio::task::{JoinHandle, JoinSet};
 
 use crate::error::RunError;
 use crate::graph::{Graph, GraphNode, NodeBody};
-use crate::node::{Executed, McpCaller, execute_mcp, execute_shell, failed};
+use crate::node::{CallContext, Executed, McpCaller, execute_mcp, execute_shell, failed};
 use crate::run::{NodeRecord, RunReport};
 
 /// The deterministic topological order of `graph`'s nodes (R8).
@@ -123,6 +123,21 @@ pub struct RunOptions {
 /// bug, never a node's own reported failure (that lives in the returned
 /// `RunReport`, not here; see R11, R12).
 pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError> {
+    run_from(graph, opts, Instant::now()).await
+}
+
+/// [`run`], measuring every `started_at_ms` and `wall_ms` from `origin`.
+///
+/// A caller that ran part of the flow before handing the rest here ([`crate::route_exec`]) passes
+/// the instant the WHOLE run began, so the timeline of the tail is not reset to zero.
+///
+/// # Errors
+/// As [`run`].
+pub async fn run_from(
+    graph: &Graph,
+    opts: RunOptions,
+    origin: Instant,
+) -> Result<RunReport, RunError> {
     if opts.limit == 0 {
         return Err(RunError::BadLimit { limit: opts.limit });
     }
@@ -160,7 +175,7 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
     let mut failed_node: Option<String> = None;
     let mut stop_scheduling = false;
 
-    spawn_ready(graph, &mut ready, &mut joins, &opts, &gates);
+    spawn_ready(graph, &mut ready, &mut joins, &opts, &gates, origin);
 
     while let Some(outcome) = joins.join_next().await {
         let record = match outcome {
@@ -200,7 +215,7 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
                     }
                 }
             }
-            spawn_ready(graph, &mut ready, &mut joins, &opts, &gates);
+            spawn_ready(graph, &mut ready, &mut joins, &opts, &gates, origin);
         }
 
         records.push(record);
@@ -215,6 +230,7 @@ pub async fn run(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunError>
         worker_limit: opts.limit,
         records,
         not_started,
+        wall_ms: elapsed_ms(origin),
     })
 }
 
@@ -277,6 +293,7 @@ fn spawn_ready(
     joins: &mut JoinSet<Outcome>,
     opts: &RunOptions,
     gates: &Gates,
+    origin: Instant,
 ) {
     while let Some(id) = pop_first(ready) {
         // Unreachable once `run` has validated every edge's endpoints exist,
@@ -290,7 +307,7 @@ fn spawn_ready(
         let write_lock = Arc::clone(&gates.write_lock);
         let halt = Arc::clone(&gates.halt);
         let mcp = Arc::clone(&opts.mcp);
-        joins.spawn(run_one(node, run_id, fanout, write_lock, halt, mcp));
+        joins.spawn(run_one(node, run_id, fanout, write_lock, halt, mcp, origin));
     }
 }
 
@@ -305,7 +322,9 @@ async fn run_one(
     write_lock: Arc<Semaphore>,
     halt: Arc<AtomicBool>,
     mcp: Arc<dyn McpCaller>,
+    origin: Instant,
 ) -> Outcome {
+    let spawned = Instant::now();
     let Ok(_fanout_permit) = fanout.acquire_owned().await else {
         return Outcome::Ran(failed_record(
             run_id,
@@ -334,11 +353,19 @@ async fn run_one(
         return Outcome::Halted;
     }
 
+    // Both clocks are read at the moment the work is about to begin: the wait ends here.
+    let queued_ms = elapsed_ms(spawned);
+    let started_at_ms = elapsed_ms(origin);
+
     let allow_failure = node.allow_failure;
     let timeout = node.timeout;
+    let ctx = CallContext {
+        run_id: run_id.clone(),
+        node_id: node.id.clone(),
+    };
     let executed = match node.body {
         NodeBody::Shell { run } => execute_shell(&run, timeout).await,
-        NodeBody::Mcp { tool, arguments } => run_mcp(mcp, tool, arguments, timeout).await,
+        NodeBody::Mcp { tool, arguments } => run_mcp(mcp, tool, arguments, ctx, timeout).await,
         // A lowered `route` node picks a port; it has no work of its own to
         // run here. Threading a payload through it is the CLI's concern
         // (a later part) — out of scope for R12, which covers `shell`/`mcp`.
@@ -368,6 +395,8 @@ async fn run_one(
         error: executed.error,
         duration_ms: executed.duration_ms,
         timed_out: executed.timed_out,
+        queued_ms,
+        started_at_ms,
     })
 }
 
@@ -380,10 +409,12 @@ async fn run_mcp(
     mcp: Arc<dyn McpCaller>,
     tool: String,
     arguments: serde_json::Value,
+    ctx: CallContext,
     timeout: Option<Duration>,
 ) -> Executed {
     let start = Instant::now();
-    let work = tokio::task::spawn_blocking(move || execute_mcp(mcp.as_ref(), &tool, &arguments));
+    let work =
+        tokio::task::spawn_blocking(move || execute_mcp(mcp.as_ref(), &tool, &arguments, &ctx));
     let Some(limit) = timeout else {
         return join_executed(work).await;
     };
@@ -411,6 +442,10 @@ async fn join_executed(handle: JoinHandle<Executed>) -> Executed {
     }
 }
 
+fn elapsed_ms(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 fn failed_record(run_id: String, node_id: String, reason: &str) -> NodeRecord {
     NodeRecord {
         run_id,
@@ -421,6 +456,8 @@ fn failed_record(run_id: String, node_id: String, reason: &str) -> NodeRecord {
         error: Some(reason.to_string()),
         duration_ms: 0,
         timed_out: false,
+        queued_ms: 0,
+        started_at_ms: 0,
     }
 }
 
@@ -475,7 +512,12 @@ mod tests {
     /// unexpected `mcp` call is a loud failure rather than silently ignored.
     struct NoopCaller;
     impl McpCaller for NoopCaller {
-        fn call(&self, tool: &str, _arguments: &serde_json::Value) -> Result<String, String> {
+        fn call(
+            &self,
+            tool: &str,
+            _arguments: &serde_json::Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             Err(format!(
                 "unexpected mcp call to `{tool}` in a shell-only test"
             ))
@@ -493,7 +535,12 @@ mod tests {
     }
 
     impl McpCaller for CountingCaller {
-        fn call(&self, tool: &str, _arguments: &serde_json::Value) -> Result<String, String> {
+        fn call(
+            &self,
+            tool: &str,
+            _arguments: &serde_json::Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             self.peak.fetch_max(now, Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(self.hold_ms));
@@ -511,7 +558,12 @@ mod tests {
     /// record's own `node_id` field.
     struct TaggingCaller;
     impl McpCaller for TaggingCaller {
-        fn call(&self, tool: &str, _arguments: &serde_json::Value) -> Result<String, String> {
+        fn call(
+            &self,
+            tool: &str,
+            _arguments: &serde_json::Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             std::thread::sleep(Duration::from_millis(20));
             Ok(format!("ran:{tool}"))
         }
@@ -634,7 +686,12 @@ mod tests {
     }
 
     impl McpCaller for RecordingCaller {
-        fn call(&self, tool: &str, _arguments: &serde_json::Value) -> Result<String, String> {
+        fn call(
+            &self,
+            tool: &str,
+            _arguments: &serde_json::Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             let is_writer = self.writers.iter().any(|w| w == tool);
             let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             self.peak.fetch_max(now, Ordering::SeqCst);
@@ -1470,7 +1527,12 @@ mod tests {
 
     struct SlowCaller(u64);
     impl McpCaller for SlowCaller {
-        fn call(&self, _tool: &str, _arguments: &serde_json::Value) -> Result<String, String> {
+        fn call(
+            &self,
+            _tool: &str,
+            _arguments: &serde_json::Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             std::thread::sleep(Duration::from_millis(self.0));
             Ok("done".to_string())
         }
@@ -1500,5 +1562,83 @@ mod tests {
         let report = run_bounded(&graph, o).await.expect("run");
         let record = &report.records[0];
         assert!(record.success && !record.timed_out, "{record:?}");
+    }
+
+    // ---- spec 11: the timeline and the run context --------------------------------
+
+    #[tokio::test]
+    async fn a_record_separates_queue_wait_from_execution() {
+        // R5. With `limit: 1` the second node cannot start until the first releases its permit,
+        // so it WAITS ~300 ms and then WORKS ~300 ms. `duration_ms` alone cannot tell a starved
+        // run from a slow one: it starts only after the permit is held.
+        let graph = Graph {
+            nodes: vec![shell("a", "sleep 0.3"), shell("b", "sleep 0.3")],
+            edges: vec![],
+        };
+        let report = run_bounded(&graph, opts("r5-limit1", 1))
+            .await
+            .expect("run");
+        let a = report.records.iter().find(|r| r.node_id == "a").expect("a");
+        let b = report.records.iter().find(|r| r.node_id == "b").expect("b");
+        assert!(a.queued_ms < 100, "the first node never waits: {a:?}");
+        assert!(b.queued_ms >= 250, "the second node waited for a: {b:?}");
+        assert!(b.duration_ms >= 250, "and then did its own work: {b:?}");
+        assert!(
+            b.started_at_ms >= 250,
+            "its work began after a's finished: {b:?}"
+        );
+        assert!(
+            report.wall_ms >= 550,
+            "wall_ms spans the whole run: {report:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_control_a_run_with_room_does_not_queue() {
+        // The near-miss: `limit: 2` runs both at once, so NEITHER waits. Without this a
+        // `queued_ms` that always reported the node's own duration would pass the test above.
+        let graph = Graph {
+            nodes: vec![shell("a", "sleep 0.3"), shell("b", "sleep 0.3")],
+            edges: vec![],
+        };
+        let report = run_bounded(&graph, opts("r5-limit2", 2))
+            .await
+            .expect("run");
+        for r in &report.records {
+            assert!(r.queued_ms < 100, "no node waits when there is room: {r:?}");
+            assert!(r.started_at_ms < 100, "both start at once: {r:?}");
+            assert!(r.duration_ms >= 250, "{r:?}");
+        }
+    }
+
+    struct ContextCaller(std::sync::Mutex<Vec<(String, String)>>);
+    impl McpCaller for ContextCaller {
+        fn call(
+            &self,
+            _tool: &str,
+            _arguments: &serde_json::Value,
+            ctx: &CallContext,
+        ) -> Result<String, String> {
+            self.0
+                .lock()
+                .expect("lock")
+                .push((ctx.run_id.clone(), ctx.node_id.clone()));
+            Ok("ok".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_mcp_node_hands_its_run_and_node_id_to_the_caller() {
+        // R1 at the scheduler seam: the ids must come from the run, not be invented downstream.
+        let graph = Graph {
+            nodes: vec![mcp("classify", "decide")],
+            edges: vec![],
+        };
+        let caller = Arc::new(ContextCaller(std::sync::Mutex::new(Vec::new())));
+        let mut o = opts("run-ctx", 2);
+        o.mcp = Arc::clone(&caller) as Arc<dyn McpCaller>;
+        let _ = run_bounded(&graph, o).await.expect("run");
+        let seen = caller.0.lock().expect("lock").clone();
+        assert_eq!(seen, vec![("run-ctx".to_string(), "classify".to_string())]);
     }
 }

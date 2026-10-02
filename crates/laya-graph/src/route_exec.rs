@@ -23,12 +23,13 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::Value;
 
 use crate::error::RunError;
 use crate::graph::{Edge, Graph, GraphNode, NodeBody};
-use crate::node::execute_mcp;
+use crate::node::{CallContext, execute_mcp};
 use crate::run::{NodeRecord, RunReport};
 use crate::sched::{self, RunOptions};
 
@@ -56,6 +57,9 @@ pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunE
         return Err(RunError::BadLimit { limit: opts.limit });
     }
 
+    // The instant the WHOLE run began: the route decisions below and the tail both measure their
+    // `started_at_ms` from it, so the timeline is one timeline and not two that each start at 0.
+    let origin = Instant::now();
     let mut nodes = graph.nodes.clone();
     let mut edges = graph.edges.clone();
     let mut records: Vec<NodeRecord> = Vec::new();
@@ -71,7 +75,7 @@ pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunE
         };
 
         let upstream_record =
-            call_upstream(&opts, upstream_node.id.clone(), tool, arguments).await?;
+            call_upstream(&opts, upstream_node.id.clone(), tool, arguments, origin).await?;
         let upstream_failed = !upstream_record.success;
         records.push(upstream_record.clone());
 
@@ -79,17 +83,23 @@ pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunE
         remove_node(&mut nodes, &mut edges, &route_node.id);
 
         if upstream_failed && !upstream_node.allow_failure {
-            return Ok(stopped_report(opts, upstream_node.id, records, &nodes));
+            return Ok(stopped_report(
+                opts,
+                upstream_node.id,
+                records,
+                &nodes,
+                origin,
+            ));
         }
 
         let (route_record, unselected) =
-            resolve_route(&opts.run_id, &route_node, &upstream_record.output)?;
+            resolve_route(&opts.run_id, &route_node, &upstream_record.output, origin)?;
         if !route_record.success {
             // A wrong-typed route value is an upstream fault, reported as
             // data exactly like a failing upstream call (R4).
             let failed = route_record.node_id.clone();
             records.push(route_record);
-            return Ok(stopped_report(opts, failed, records, &nodes));
+            return Ok(stopped_report(opts, failed, records, &nodes, origin));
         }
         records.push(route_record);
         prune_unreached(&mut nodes, &mut edges, unselected);
@@ -101,7 +111,7 @@ pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunE
         limit: opts.limit,
         mcp: Arc::clone(&opts.mcp),
     };
-    let mut tail = sched::run(&pruned, tail_opts).await?;
+    let mut tail = sched::run_from(&pruned, tail_opts, origin).await?;
     records.append(&mut tail.records);
 
     Ok(RunReport {
@@ -111,6 +121,7 @@ pub async fn run_flow(graph: &Graph, opts: RunOptions) -> Result<RunReport, RunE
         worker_limit: tail.worker_limit,
         records,
         not_started: tail.not_started,
+        wall_ms: elapsed_ms(origin),
     })
 }
 
@@ -121,6 +132,7 @@ fn stopped_report(
     failed_node: String,
     records: Vec<NodeRecord>,
     remaining: &[GraphNode],
+    origin: Instant,
 ) -> RunReport {
     let mut not_started: Vec<String> = remaining.iter().map(|n| n.id.clone()).collect();
     not_started.sort();
@@ -131,6 +143,7 @@ fn stopped_report(
         worker_limit: opts.limit,
         records,
         not_started,
+        wall_ms: elapsed_ms(origin),
     }
 }
 
@@ -174,10 +187,17 @@ async fn call_upstream(
     node_id: String,
     tool: String,
     arguments: Value,
+    origin: Instant,
 ) -> Result<NodeRecord, RunError> {
     let caller = Arc::clone(&opts.mcp);
+    let ctx = CallContext {
+        run_id: opts.run_id.clone(),
+        node_id: node_id.clone(),
+    };
+    // No permit is taken for a route's upstream call, so it never queues.
+    let started_at_ms = elapsed_ms(origin);
     let executed =
-        tokio::task::spawn_blocking(move || execute_mcp(caller.as_ref(), &tool, &arguments))
+        tokio::task::spawn_blocking(move || execute_mcp(caller.as_ref(), &tool, &arguments, &ctx))
             .await
             .map_err(|e| RunError::NodeTaskFailed {
                 reason: e.to_string(),
@@ -191,6 +211,8 @@ async fn call_upstream(
         error: executed.error,
         duration_ms: executed.duration_ms,
         timed_out: executed.timed_out,
+        queued_ms: 0,
+        started_at_ms,
     })
 }
 
@@ -202,6 +224,7 @@ fn resolve_route(
     run_id: &str,
     route_node: &GraphNode,
     upstream_output: &str,
+    origin: Instant,
 ) -> Result<(NodeRecord, BTreeSet<String>), RunError> {
     let NodeBody::Route { on, rules } = route_node.body.clone() else {
         return Err(RunError::UnknownNode {
@@ -220,6 +243,8 @@ fn resolve_route(
                 error: Some(format!("route `{}`: {reason}", route_node.id)),
                 duration_ms: 0,
                 timed_out: false,
+                queued_ms: 0,
+                started_at_ms: elapsed_ms(origin),
             };
             return Ok((record, BTreeSet::new()));
         }
@@ -249,11 +274,17 @@ fn resolve_route(
         error: None,
         duration_ms: 0,
         timed_out: false,
+        queued_ms: 0,
+        started_at_ms: elapsed_ms(origin),
     };
 
     let mut unselected: BTreeSet<String> = rules.iter().map(|r| r.port.clone()).collect();
     unselected.remove(&target);
     Ok((record, unselected))
+}
+
+fn elapsed_ms(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// Remove `id` and every edge touching it.
@@ -334,7 +365,7 @@ mod tests {
     use super::*;
     use crate::flow::{Flow, Kind, Node};
     use crate::lower::lower;
-    use crate::node::McpCaller;
+    use crate::node::{CallContext, McpCaller};
 
     /// Every test here runs through this: a hang becomes a failure the test
     /// reports itself (R5). The run goes on its own thread under a watchdog,
@@ -369,7 +400,7 @@ mod tests {
 
     struct NoLabel;
     impl McpCaller for NoLabel {
-        fn call(&self, _t: &str, _a: &Value) -> Result<String, String> {
+        fn call(&self, _t: &str, _a: &Value, _c: &CallContext) -> Result<String, String> {
             Ok(r#"{"payload":{}}"#.to_string())
         }
     }
@@ -379,7 +410,12 @@ mod tests {
         label: Value,
     }
     impl McpCaller for RawLabelCaller {
-        fn call(&self, _tool: &str, _arguments: &Value) -> Result<String, String> {
+        fn call(
+            &self,
+            _tool: &str,
+            _arguments: &Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             Ok(serde_json::json!({"payload": {"label": self.label}}).to_string())
         }
     }
@@ -392,7 +428,12 @@ mod tests {
         label: &'static str,
     }
     impl McpCaller for FixedLabelCaller {
-        fn call(&self, tool: &str, _arguments: &Value) -> Result<String, String> {
+        fn call(
+            &self,
+            tool: &str,
+            _arguments: &Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             assert_eq!(tool, "decide", "this test flow has only one mcp node");
             Ok(serde_json::json!({
                 "payload": {"label": self.label, "band": "high"}
@@ -403,7 +444,12 @@ mod tests {
 
     struct FailingCaller;
     impl McpCaller for FailingCaller {
-        fn call(&self, _tool: &str, _arguments: &Value) -> Result<String, String> {
+        fn call(
+            &self,
+            _tool: &str,
+            _arguments: &Value,
+            _ctx: &CallContext,
+        ) -> Result<String, String> {
             Err("sidecar down".to_string())
         }
     }

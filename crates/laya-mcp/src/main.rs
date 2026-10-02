@@ -65,6 +65,9 @@ fn main() -> ExitCode {
     // recording it at 0 (the original code) made it always stale, which made the
     // server behave as though Laya were down. Found by the end-to-end test.
     state.record_readiness(verdict, clock::now_ms());
+    // Announced either way, and LOUDLY when off: the deployment ran for its whole life with the
+    // ledger silently unset, and silence is how "off" came to look the same as "broken".
+    state.announce_ledger();
     let server = LayaMcpServer::new(Arc::clone(&state));
     eprintln!("laya-mcp: Laya is ready at {endpoint}; serving MCP over stdio");
 

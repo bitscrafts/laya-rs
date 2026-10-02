@@ -160,8 +160,33 @@ pub struct DecisionRow {
     /// Whether the action this row judged was actually carried out. For a `gate` row this
     /// separates "allowed" from "allowed and then executed", which is the difference between a
     /// permission and an event.
-    #[serde(default)]
-    pub executed: bool,
+    ///
+    /// `None` for a tool that has no such notion (`decide`) and for every row written before the
+    /// field existed, so "not applicable" is not recorded as "did not run".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executed: Option<bool>,
+    /// The final `allow` / `ask` / `deny` of a `gate` or `ask` row (spec 11, R2). The row's
+    /// `label` carries the same word for a gate row, but an `ask` row's labels are its model
+    /// answers, so the verdict needs a field of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_decision: Option<String>,
+    /// What the model alone said (`yes` / `no` / `unknown`), before the guardrails downgraded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_decision: Option<String>,
+    /// How many destructive-command signals the guardrail found in the judged command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destructive_signals: Option<u32>,
+    /// Hash of the command a `gate` or `ask` row judged. **Never the command itself** (rule 8):
+    /// a command can carry a token, and a ledger is read by people who must not see one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_sha256: Option<String>,
+    /// For a `noul` question, the raw belief. Copied from the payload so a noul's probability is
+    /// recoverable from the row (the ledger doc used to promise this field and the row lacked it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p: Option<f64>,
+    /// For a `score` question, the position on the rubric.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
 }
 
 /// An outcome for an earlier decision.
@@ -217,11 +242,18 @@ impl Record {
     #[must_use]
     pub fn identity(&self) -> String {
         match self {
+            // `wall_nanos` is part of the identity because `ts_nanos` is process-relative: two
+            // servers each answering the same question at the same offset into their own lives
+            // would otherwise produce the SAME identity, and the second row would be dropped as
+            // a "duplicate" of a decision that was in fact a different one.
             Self::Decision(d) => format!(
-                "d\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
-                d.ts_nanos, d.tool, d.question_id, d.label
+                "d\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                d.ts_nanos, d.wall_nanos, d.tool, d.question_id, d.label
             ),
-            Self::Outcome(o) => format!("o\u{1f}{}\u{1f}{}", o.ts_nanos, o.decision),
+            Self::Outcome(o) => format!(
+                "o\u{1f}{}\u{1f}{}\u{1f}{}",
+                o.ts_nanos, o.wall_nanos, o.decision
+            ),
         }
     }
 
@@ -578,6 +610,30 @@ impl Ledger {
         }
     }
 
+    /// [`Ledger::read_only`], retrying for up to `wait` while a writer holds the store.
+    ///
+    /// **MEASURED 2026-10-02: redb's read-only handle cannot coexist with a writer** — opening one
+    /// while `compact` holds the store fails with [`StoreError::AlreadyOpen`], exactly as a second
+    /// writer does. So "read-only" does not by itself let an operator ask for numbers during a
+    /// compaction. What it does buy is that a reader never WRITES; the lock window is the writer's
+    /// short transaction, and a bounded retry rides it out. A writer that never lets go still ends
+    /// in `AlreadyOpen` after `wait`, so a stuck compaction is reported instead of waited on.
+    ///
+    /// # Errors
+    /// [`StoreError::AlreadyOpen`] when the store is still held after `wait`; otherwise as
+    /// [`Ledger::read_only`].
+    pub fn read_only_waiting(path: &Path, wait: std::time::Duration) -> Result<LedgerReader> {
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            match Self::read_only(path) {
+                Err(StoreError::AlreadyOpen { .. }) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                other => return other,
+            }
+        }
+    }
+
     /// The path this handle was opened on.
     #[must_use]
     pub fn path(&self) -> &Path {
@@ -857,8 +913,11 @@ fn summarise(records: &[Record]) -> Stats {
             let mut executed = 0_usize;
             for d in &rows {
                 if d.tool == "gate" || d.tool == "ask" {
-                    *verdicts.entry(d.label.clone()).or_insert(0_usize) += 1;
-                    if d.label == "allow" && d.executed {
+                    // The verdict is `gate_decision` when the row has one, else its label (a
+                    // gate row's label IS the verdict; rows from before the field are such).
+                    let verdict = d.gate_decision.clone().unwrap_or_else(|| d.label.clone());
+                    *verdicts.entry(verdict).or_insert(0_usize) += 1;
+                    if d.executed == Some(true) {
                         executed += 1;
                     }
                 }
@@ -869,6 +928,7 @@ fn summarise(records: &[Record]) -> Stats {
                     decisions: rows.len(),
                     latency_p50_ms: percentile(&lats, 50),
                     latency_p95_ms: percentile(&lats, 95),
+                    latency_p99_ms: percentile(&lats, 99),
                     latency_max_ms: lats.last().copied(),
                     verdicts,
                     executed,
@@ -925,6 +985,8 @@ pub struct ToolStats {
     pub latency_p50_ms: Option<u64>,
     /// 95th percentile latency for this tool.
     pub latency_p95_ms: Option<u64>,
+    /// 99th percentile latency for this tool.
+    pub latency_p99_ms: Option<u64>,
     /// Worst latency for this tool.
     pub latency_max_ms: Option<u64>,
     /// For `gate`/`ask`: how many times the gate allowed, asked, denied, or was unparseable.
@@ -1092,7 +1154,13 @@ mod tests {
             backbone_sha256: None,
             bucket_clamped: Some(false),
             latency_ms: 240,
-            executed: false,
+            executed: None,
+            gate_decision: None,
+            model_decision: None,
+            destructive_signals: None,
+            command_sha256: None,
+            p: None,
+            score: None,
         })
     }
 
@@ -1408,7 +1476,7 @@ mod tests {
             "an unknown clamp state is not `false`"
         );
         assert_eq!(missing.wall_nanos, 0, "an old row has no wall clock");
-        assert!(!missing.executed);
+        assert_eq!(missing.executed, None, "not applicable is not `false`");
     }
 
     #[test]
@@ -1473,7 +1541,9 @@ mod tests {
             "label": "yes", "confidence": 0.5, "band": "low", "margin": 0.1, "near_tie": false,
             "probabilities": {"yes": 0.5, "no": 0.5}, "saturated": false, "laya_version": "0.3.5",
             "state_sha256": "x", "head_sha256": "h", "backbone_sha256": "b",
-            "bucket_clamped": false, "latency_ms": 1, "executed": true
+            "bucket_clamped": false, "latency_ms": 1, "executed": true,
+            "gate_decision": "allow", "model_decision": "yes", "destructive_signals": 0,
+            "command_sha256": "c", "p": 0.5, "score": 1.0
         });
         let parsed: DecisionRow =
             serde_json::from_value(full).expect("a fully-populated row must deserialise");
@@ -1642,6 +1712,146 @@ mod tests {
             Ledger::open_writer(&store).is_ok(),
             "dropping the reader must release the store"
         );
+    }
+
+    #[test]
+    fn stats_opens_the_store_read_only() {
+        // R7. A read must not take the exclusive write lock. Proven on the TYPE and on the
+        // behaviour: `LedgerReader` has no write method at all, and while a reader is held a
+        // second READER is not refused by it -- but a WRITER is, which is how we know the reader
+        // is really the thing that was opened.
+        let tmp = Tmp::new("ro-stats");
+        let store = tmp.path().join(STORE_FILE);
+        let _ = append_segment(tmp.path(), &row("gate", "allow", 1, 1, 10)).expect("a");
+        let _ = compact(tmp.path(), &store).expect("compact");
+
+        let reader = Ledger::read_only(&store).expect("read-only");
+        assert_eq!(reader.stats().expect("stats").decisions, 1);
+        // The control: it IS a reader, so it excludes a writer (measured, see
+        // `a_held_reader_blocks_a_writer_so_a_server_must_not_hold_one`).
+        assert!(matches!(
+            Ledger::open_writer(&store),
+            Err(StoreError::AlreadyOpen { .. })
+        ));
+    }
+
+    #[test]
+    fn a_reader_waits_out_a_short_compaction_instead_of_failing_on_the_lock() {
+        // R7's operator story. A `compact` holds the writer for a moment; `stats` arriving in
+        // that moment must get numbers, not `AlreadyOpen`.
+        let tmp = Tmp::new("ro-wait");
+        let store = tmp.path().join(STORE_FILE);
+        let _ = append_segment(tmp.path(), &row("gate", "allow", 1, 1, 10)).expect("a");
+        let _ = compact(tmp.path(), &store).expect("compact");
+
+        let writer = Ledger::open_writer(&store).expect("the compactor's handle");
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(writer);
+        });
+        let started = std::time::Instant::now();
+        let reader = Ledger::read_only_waiting(&store, std::time::Duration::from_secs(5))
+            .expect("a reader must outlast a short compaction");
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(250),
+            "it really did have to wait: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(reader.stats().expect("stats").decisions, 1);
+        release.join().expect("join");
+    }
+
+    #[test]
+    fn the_control_a_writer_that_never_lets_go_is_reported_not_waited_on() {
+        // The near miss for the test above: a retry that never gave up would hang `stats` behind
+        // a stuck compaction. After the bound it must say so, as the typed error.
+        let tmp = Tmp::new("ro-stuck");
+        let store = tmp.path().join(STORE_FILE);
+        let _held = Ledger::open_writer(&store).expect("writer");
+        let started = std::time::Instant::now();
+        let r = Ledger::read_only_waiting(&store, std::time::Duration::from_millis(200));
+        assert!(
+            matches!(r, Err(StoreError::AlreadyOpen { .. })),
+            "{:?}",
+            r.map(|_| ())
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    fn an_old_segment_without_the_new_fields_still_compacts() {
+        // N2. A segment line as today's schema writes it: none of `gate_decision`,
+        // `model_decision`, `destructive_signals`, `command_sha256`, `p`, `score`, no `wall_nanos`,
+        // and `executed` as a plain bool.
+        let tmp = Tmp::new("n2");
+        let line = r#"{"kind":"decision","ts":"epoch+1","ts_nanos":65,"tool":"gate","question_id":"q","question_type":"noul","label":"allow","confidence":0.5,"band":"mid","near_tie":false,"saturated":false,"laya_version":"0.3.5","state_sha256":"x","bucket_clamped":false,"latency_ms":3,"executed":true}"#;
+        std::fs::write(tmp.path().join("ledger-1.jsonl"), format!("{line}\n")).expect("write");
+        let store = tmp.path().join(STORE_FILE);
+        let report = compact(tmp.path(), &store).expect("an old segment must compact");
+        assert_eq!(report.records_inserted, 1);
+        let rows = Ledger::open_writer(&store)
+            .expect("reopen")
+            .records()
+            .expect("records");
+        let Record::Decision(d) = &rows[0] else {
+            panic!("a decision")
+        };
+        assert_eq!(d.executed, Some(true), "an old bool reads as `Some`");
+        assert_eq!(d.gate_decision, None);
+        assert_eq!(d.model_decision, None);
+        assert_eq!(d.destructive_signals, None);
+        assert_eq!(d.command_sha256, None);
+        assert_eq!((d.p, d.score), (None, None));
+    }
+
+    #[test]
+    fn two_servers_answering_at_the_same_process_offset_are_both_kept() {
+        // R8's hazard in the identity, not only the sort. `ts_nanos` is process-relative, so two
+        // servers can each answer the same question with the same label 65 ns into their lives.
+        // On the old identity the second was dropped as a "duplicate"; it is a different decision.
+        let tmp = Tmp::new("ident");
+        let _ = append_segment_for(tmp.path(), 1, &row("gate", "allow", 65, 1_000, 1)).expect("a");
+        let _ = append_segment_for(tmp.path(), 2, &row("gate", "allow", 65, 2_000, 1)).expect("b");
+        let store = tmp.path().join(STORE_FILE);
+        let report = compact(tmp.path(), &store).expect("compact");
+        assert_eq!(report.records_inserted, 2, "{report:?}");
+        // The control: the SAME row twice is still a duplicate, so idempotence is intact.
+        let _ = append_segment_for(tmp.path(), 3, &row("gate", "allow", 65, 2_000, 1)).expect("c");
+        let again = compact(tmp.path(), &store).expect("recompact");
+        assert_eq!(again.records_inserted, 0, "{again:?}");
+        assert_eq!(again.records_duplicate, 1, "{again:?}");
+    }
+
+    #[test]
+    fn stats_counts_executed_and_reports_p99_per_tool() {
+        // R7: the executed count and p99, on rows shaped as the server now writes them.
+        let tmp = Tmp::new("exec");
+        for (i, (verdict, ran)) in [("allow", true), ("allow", false), ("deny", false)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut r = row("ask", "yes", i as u64, i as u64, 10 * (i as u64 + 1));
+            if let Record::Decision(d) = &mut r {
+                d.gate_decision = Some(verdict.to_string());
+                d.executed = Some(ran);
+            }
+            let _ = append_segment(tmp.path(), &r).expect("append");
+        }
+        let store = tmp.path().join(STORE_FILE);
+        let _ = compact(tmp.path(), &store).expect("compact");
+        let stats = Ledger::read_only(&store)
+            .expect("ro")
+            .stats()
+            .expect("stats");
+        let ask = stats.by_tool.get("ask").expect("ask");
+        assert_eq!(
+            ask.verdicts.get("allow"),
+            Some(&2),
+            "the verdict is gate_decision"
+        );
+        assert_eq!(ask.verdicts.get("yes"), None, "not the model's label");
+        assert_eq!(ask.executed, 1, "only the row that actually ran");
+        assert_eq!(ask.latency_p99_ms, Some(30));
     }
 
     #[test]

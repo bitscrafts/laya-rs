@@ -103,6 +103,7 @@ fn doctor(endpoint: &str) -> ExitCode {
                  head      : ok (sidecar at {})",
                 socket.display()
             );
+            doctor_ledger();
             ExitCode::SUCCESS
         }
         Readiness::NotReady(f) => {
@@ -113,6 +114,17 @@ fn doctor(endpoint: &str) -> ExitCode {
             eprintln!("\nlaya: NOT READY (exit 1)");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The ledger line of `doctor`: a warning when off or missing, never a failure.
+fn doctor_ledger() {
+    let (line, warning) =
+        laya_cli::ledger::doctor_ledger_line(std::env::var(LEDGER_DIR_ENV).ok().as_deref());
+    if warning {
+        eprintln!("laya: warning: {line}");
+    } else {
+        println!("  {line}");
     }
 }
 
@@ -275,48 +287,11 @@ fn ledger_compact(dir: &std::path::Path, store: &std::path::Path) -> ExitCode {
 /// `laya ledger stats` — and it says plainly when there is nothing to calibrate.
 fn ledger_stats(dir: &std::path::Path, store: &std::path::Path, no_compact: bool) -> ExitCode {
     ingest_before_reading(dir, store, no_compact);
-    // READ-ONLY. This used to open_writer, so asking for numbers while a `compact` ran got a
-    // lock error instead of an answer -- a read demanding exclusivity it does not need.
-    match laya_store::Ledger::read_only(store).and_then(|l| l.stats()) {
+    // READ-ONLY, through the library function the test also calls. This used to open_writer, so
+    // asking for numbers while a `compact` ran got a lock error instead of an answer.
+    match laya_cli::ledger::read_stats(store, laya_cli::ledger::READ_WAIT) {
         Ok(s) => {
-            println!("decisions:      {}", s.decisions);
-            println!("outcomes:       {}", s.outcomes);
-            println!("saturated:      {}", s.saturated);
-            println!("near ties:      {}", s.near_ties);
-            for (band, n) in &s.by_band {
-                println!("band {band:<10} {n}");
-            }
-            println!("latency p50:    {} ms", show_ms(s.latency_p50_ms));
-            println!("latency p95:    {} ms", show_ms(s.latency_p95_ms));
-            println!("latency max:    {} ms", show_ms(s.latency_max_ms));
-            // Per tool, because a single blended percentile answers nothing: `decide` and
-            // `gate` are different costs, and the average moves only when the mix changes.
-            if !s.by_tool.is_empty() {
-                println!("\nper tool:");
-                for (tool, ts) in &s.by_tool {
-                    println!(
-                        "  {tool:<16} {:<5} p50 {} ms  p95 {} ms  max {} ms",
-                        ts.decisions,
-                        show_ms(ts.latency_p50_ms),
-                        show_ms(ts.latency_p95_ms),
-                        show_ms(ts.latency_max_ms)
-                    );
-                    for (verdict, n) in &ts.verdicts {
-                        println!("    {verdict:<12} {n}");
-                    }
-                    if !ts.verdicts.is_empty() {
-                        println!("    {:<12} {}", "executed", ts.executed);
-                    }
-                }
-            }
-            if s.outcomes == 0 {
-                // Stated plainly, because the alternative is a reader assuming a calibration
-                // exists. ECE needs (confidence, correct) pairs and there are none.
-                println!(
-                    "\nNO OUTCOMES RECORDED — nothing here can be calibrated yet. Record one \
-                     with:\n  laya ledger outcome <id> --correct --source test"
-                );
-            }
+            print!("{}", laya_cli::ledger::render_stats(&s));
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -370,7 +345,9 @@ fn ledger_tail(
         .get(1)
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(10);
-    match laya_store::Ledger::read_only(store).and_then(|l| l.tail(n)) {
+    match laya_store::Ledger::read_only_waiting(store, laya_cli::ledger::READ_WAIT)
+        .and_then(|l| l.tail(n))
+    {
         Ok(records) => {
             for r in records {
                 println!("{}", serde_json::to_string(&r).unwrap_or_default());
@@ -444,11 +421,6 @@ pub fn option_value(args: &[String], name: &str) -> Option<String> {
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1))
         .cloned()
-}
-
-/// Render a latency, or say it is unknown rather than printing a zero we never measured.
-fn show_ms(value: Option<u64>) -> String {
-    value.map_or_else(|| "unknown".to_string(), |v| v.to_string())
 }
 
 fn main() -> ExitCode {
@@ -585,7 +557,13 @@ mod tests {
             backbone_sha256: None,
             bucket_clamped: None,
             latency_ms: 7,
-            executed: false,
+            executed: None,
+            gate_decision: None,
+            model_decision: None,
+            destructive_signals: None,
+            command_sha256: None,
+            p: None,
+            score: None,
         })
     }
 

@@ -38,6 +38,14 @@ pub struct NodeRecord {
     /// report can say a node expired, not only that it failed (R5).
     #[serde(default)]
     pub timed_out: bool,
+    /// Milliseconds from the node being spawned to its permits being granted — the time spent
+    /// WAITING, as opposed to working (spec 11, R5). `duration_ms` starts only after the permits
+    /// are held, so without this a run starved by `limit` reads the same as a run of slow nodes.
+    #[serde(default)]
+    pub queued_ms: u64,
+    /// Milliseconds from the start of the run to this node's work beginning (spec 11, R5).
+    #[serde(default)]
+    pub started_at_ms: u64,
 }
 
 /// What a run produced, in full — never reported as a completed run when it
@@ -71,4 +79,7 @@ pub struct RunReport {
     /// equals the graph's node count.
     #[serde(default)]
     pub not_started: Vec<String>,
+    /// Wall-clock milliseconds the whole run took (spec 11, R5).
+    #[serde(default)]
+    pub wall_ms: u64,
 }

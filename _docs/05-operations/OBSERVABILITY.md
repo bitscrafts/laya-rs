@@ -2,7 +2,7 @@
 
 **Status**: MEASURED 2026-10-02. This document records the observability state of the
 **deployed** system, measured against it rather than read from the design. The design for its
-improvement is [`specs/11-observability-one-run-id-end-to-end.md`](../../specs/11-observability-one-run-id-end-to-end.md) — **specified, not yet implemented**.
+improvement is [`specs/11-observability-one-run-id-end-to-end.md`](../../specs/11-observability-one-run-id-end-to-end.md) — **specified, not yet implemented** when this was measured; **R1–R9 were implemented 2026-10-02** and the operator's view is in the final section, "Spec 11: what an operator can ask now". Everything above that section describes the system as it was measured, and is kept as the record.
 
 **Why this document exists.** The same question was asked three times in different words — *"can you
 check usage?", "token economy?", "is it usable on everyday tasks?"* — and each time the answer required
@@ -490,3 +490,57 @@ survived in the rolled file and the new line went to a fresh log.
 queue linearly — 0.17 s, 0.31, 0.48, 0.64, 0.81, 0.98, 1.15, 1.32 s — and all eight were answered
 `allow`. Load does not make the gate fail closed; the queue simply lengthens, and the hook's 10 s
 timeout is far above what this work generates.
+
+---
+
+## Spec 11: what an operator can ask now (2026-10-02)
+
+**Is the ledger on?** The server writes one line to stderr at startup, whichever way it is configured:
+
+```json
+{"ts":…,"event":"ledger","level":"info","enabled":true,"dir":"/var/lib/laya-ledger","dir_exists":true}
+{"ts":…,"event":"ledger","level":"warn","enabled":false,"dir":null,"message":"ledger is OFF: LAYA_LEDGER_DIR is unset, …"}
+```
+
+The OFF line is a `warn` and names the variable. `laya doctor` adds `ledger: …` as a *warning* line — never a
+failure — but it can only see **its own** shell's `LAYA_LEDGER_DIR`, not the server's; the server's own
+view is the startup event. The two are complementary. `scripts/check-observability.py` reads the variable
+from the host's MCP entry, requires the startup event to say `enabled: true`, and exits **1** when it does not
+(control: `LAYA_OBS_SIMULATE_OFF=1`).
+
+**What did call N do, and for which run?** One line per tool call, same stream:
+
+```json
+{"ts":…,"event":"tool_call","seq":7,"tool":"gate","run_id":"run-42","node_id":"triage","latency_ms":252,"outcome":"ok","decision":"ask"}
+```
+
+`seq` is a per-process counter (the request id). `ts` is epoch **milliseconds**. `run_id`/`node_id` are `null`
+for a call that supplied none. `decision` appears for `gate`. The ids are the point: `laya graph run` now
+passes the run and node id as tool arguments, so a ledger row joins its `RunReport` on `(run_id, node_id)`.
+
+**What did the gate let through, and what did it stop?** `laya ledger stats` prints per tool: count, p50 / p95 /
+p99 / max latency, and for `gate` and `ask` the `allow` / `ask` / `deny` counts (from `gate_decision`), the
+`refused` count, and how many actually `executed`. Refusals and errors are rows (`label` `refused` / `error`),
+so "what did the gate deny" is a count, not an absence.
+
+**Where did the time go in a run?** `NodeRecord` carries `queued_ms` (spawn → permit: waiting) and
+`started_at_ms` (offset from run start); `RunReport` carries `wall_ms`. A run starved by `limit` now reads
+differently from a run of slow nodes.
+
+### Two things measured while building this, both contrary to the spec
+
+* **`stats` cannot answer *during* a compact by being read-only.** redb's read-only handle also takes the
+  file lock: opening one while a writer holds the store fails `AlreadyOpen`, exactly as a second writer does
+  (readers coexist with readers, not with a writer). So `stats` now opens read-only **and waits** up to 5 s for
+  the writer to finish, and reports `AlreadyOpen` after that. `stats`/`tail` still ingest pending segments
+  first, which does take the write lock briefly; `--no-compact` is the pure read.
+* **The identity of a row ignored the clock that distinguishes processes.** See `DECISION-LEDGER.md`,
+  "Row identity".
+
+### Still not answerable
+
+* **Which head produced a decision.** `head_sha256` / `backbone_sha256` are still always `None`; no requirement
+  in spec 11 fills them, and nothing here does either.
+* **"What did the gate allow in the last hour?"** `stats` is all-time and `tail` is newest-first over the whole
+  store; there is no `--since`.
+* **Per-file latency for `ask_files`.** Its rows carry the whole call's latency.

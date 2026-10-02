@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use laya_graph::{Library, McpCaller, expand, lower, run_flow, validate};
+use laya_graph::{CallContext, Library, McpCaller, expand, lower, run_flow, validate};
 use laya_graph::{RunOptions, RunReport};
 
 /// The backbone this workspace's live checks all point at (same address
@@ -146,8 +146,19 @@ fn read_message(rx: &mpsc::Receiver<std::io::Result<String>>) -> Result<Value, S
 
 /// Spawn `laya-mcp`, do the full handshake, call `tool`, and return its raw
 /// text result (the `TextContent` block the real tool returned).
-fn call_real_mcp(bin: &Path, tool: &str, arguments: &Value) -> Result<String, String> {
-    let mut child: Child = Command::new(bin)
+fn call_real_mcp(
+    bin: &Path,
+    tool: &str,
+    arguments: &Value,
+    ledger_dir: Option<&Path>,
+) -> Result<String, String> {
+    let mut command = Command::new(bin);
+    // Set on the CHILD, never on this process: `set_var` is `unsafe`, and a test that mutated
+    // its own environment would leak the directory into every other test in the binary.
+    if let Some(dir) = ledger_dir {
+        command.env("LAYA_LEDGER_DIR", dir);
+    }
+    let mut child: Child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -255,18 +266,35 @@ fn write_line(stdin: &mut std::process::ChildStdin, value: &Value) -> Result<(),
     stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())
 }
 
+/// `arguments` plus the run and node id (spec 11, R1) — what the production caller sends.
+fn with_context(arguments: &Value, ctx: &CallContext) -> Value {
+    let mut out = arguments.clone();
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("run_id".to_string(), json!(ctx.run_id));
+        obj.insert("node_id".to_string(), json!(ctx.node_id));
+    }
+    out
+}
+
 /// The `McpCaller` this test injects into `run_flow` — the ONE piece that is
 /// real rather than reused from a unit test (Key decision, spec 07 part 4):
 /// it spawns the actual `laya-mcp` binary a user runs, and the determinism
 /// comes from controlling the INPUT (`state`), not from faking the model.
 struct LiveMcpCaller {
     bin: PathBuf,
+    /// Where the server appends its ledger segments, or `None` for a ledger-less server.
+    ledger_dir: Option<PathBuf>,
 }
 
 impl McpCaller for LiveMcpCaller {
-    fn call(&self, tool: &str, arguments: &Value) -> Result<String, String> {
+    fn call(&self, tool: &str, arguments: &Value, ctx: &CallContext) -> Result<String, String> {
         if tool != "decide" {
-            return call_real_mcp(&self.bin, tool, arguments);
+            return call_real_mcp(
+                &self.bin,
+                tool,
+                &with_context(arguments, ctx),
+                self.ledger_dir.as_deref(),
+            );
         }
 
         // THE TRANSLATION BOUNDARY (Verified Premise: "the live `decide` has
@@ -301,18 +329,21 @@ impl McpCaller for LiveMcpCaller {
 
         let criteria: serde_json::Map<String, Value> =
             options.iter().map(|o| (o.clone(), json!(o))).collect();
-        let call_args = json!({
-            "state": state,
-            "questions": {
-                "answer": {
-                    "type": "choice",
-                    "instructions": question,
-                    "criteria": criteria,
+        let call_args = with_context(
+            &json!({
+                "state": state,
+                "questions": {
+                    "answer": {
+                        "type": "choice",
+                        "instructions": question,
+                        "criteria": criteria,
+                    }
                 }
-            }
-        });
+            }),
+            ctx,
+        );
 
-        let raw = call_real_mcp(&self.bin, "decide", &call_args)?;
+        let raw = call_real_mcp(&self.bin, "decide", &call_args, self.ledger_dir.as_deref())?;
         let parsed: Value = serde_json::from_str(&raw)
             .map_err(|e| format!("decide response was not JSON: {e}: {raw}"))?;
         let payload = parsed
@@ -330,6 +361,15 @@ impl McpCaller for LiveMcpCaller {
 // ---------------------------------------------------------------------------
 
 async fn run_fixture(path: &str, bin: &Path, run_id: &str) -> RunReport {
+    run_fixture_with_ledger(path, bin, run_id, None).await
+}
+
+async fn run_fixture_with_ledger(
+    path: &str,
+    bin: &Path,
+    run_id: &str,
+    ledger_dir: Option<PathBuf>,
+) -> RunReport {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
     let raw: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("parsing {path}: {e}"));
     let flow = expand(&raw, &Library::new()).unwrap_or_else(|e| panic!("expanding {path}: {e}"));
@@ -341,6 +381,7 @@ async fn run_fixture(path: &str, bin: &Path, run_id: &str) -> RunReport {
         limit: 4,
         mcp: Arc::new(LiveMcpCaller {
             bin: bin.to_path_buf(),
+            ledger_dir,
         }),
     };
     run_flow(&graph, opts)
@@ -385,6 +426,69 @@ async fn a_real_flow_routes_a_decision_through_the_live_backbone() {
         "the model's label did not route this run to branch_positive: {ran:?}, \
          route record: {}",
         route_record.output
+    );
+}
+
+/// Spec 11, R1 end to end: the ledger row a live `decide` wrote joins to the run report.
+///
+/// The join is the point of the whole spec, so this asserts the JOIN and not the presence of a
+/// row: exactly one row carries this run's id, it names the node that asked, and its label is the
+/// value the route record says it routed on. A row with `run_id: None` — the old behaviour —
+/// finds nothing here and fails.
+#[ignore = "live: needs the backbone and the sidecar; run with --include-ignored"]
+#[tokio::test]
+async fn the_ledger_row_joins_the_run_report() {
+    require_backbone_or_fail();
+    let bin = resolve_mcp_binary();
+    let dir = std::env::temp_dir().join(format!("laya-join-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a scratch ledger directory");
+
+    let report = run_fixture_with_ledger(
+        "tests/fixtures/sentiment-positive.json",
+        &bin,
+        "join-run",
+        Some(dir.clone()),
+    )
+    .await;
+    assert!(!report.stopped_early, "the run must complete: {report:?}");
+
+    // Read the segments as plain JSON lines: `laya-graph` must not depend on `laya-store`
+    // (N1), not even as a dev-dependency, and the segment format is a documented interface.
+    let mut mine: Vec<Value> = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("the ledger directory") {
+        let path = entry.expect("entry").path();
+        let named = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if !named.starts_with("ledger-")
+            || path.extension().and_then(|e| e.to_str()) != Some("jsonl")
+        {
+            continue;
+        }
+        for line in std::fs::read_to_string(&path).expect("segment").lines() {
+            let row: Value = serde_json::from_str(line).expect("a segment line is JSON");
+            if row.get("kind") == Some(&json!("decision"))
+                && row.get("run_id") == Some(&json!(report.run_id))
+            {
+                mine.push(row);
+            }
+        }
+    }
+    assert_eq!(mine.len(), 1, "exactly one row for this run: {mine:?}");
+    let row = mine.first().unwrap_or_else(|| panic!("no row"));
+    assert_eq!(row.get("node_id"), Some(&json!("classify")), "{row}");
+
+    let route_record = report
+        .records
+        .iter()
+        .find(|r| r.node_id == "classify/route")
+        .unwrap_or_else(|| panic!("the route node must have a record: {report:?}"));
+    let routed: Value = serde_json::from_str(&route_record.output).expect("route output is JSON");
+    assert_eq!(
+        routed.get("value"),
+        row.get("label"),
+        "the ledger's label must be the value the run routed on"
     );
 }
 

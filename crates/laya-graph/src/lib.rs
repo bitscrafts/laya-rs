@@ -48,7 +48,7 @@ pub use expand::{Library, expand};
 pub use flow::{Flow, Kind, Node, Retry};
 pub use graph::{Edge, Graph, GraphNode, NodeBody, RouteRule};
 pub use lower::lower;
-pub use node::{Executed, McpCaller, execute_mcp, execute_shell};
+pub use node::{CallContext, Executed, McpCaller, execute_mcp, execute_shell};
 pub use on_expr::PayloadField;
 pub use render::{MermaidRender, render};
 pub use route_exec::run_flow;

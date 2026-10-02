@@ -17,6 +17,7 @@
 pub mod decide;
 pub mod embedder;
 pub mod graph;
+pub mod ledger;
 pub mod mcp_client;
 
 pub use decide::{DecideArgs, DecideOutput, decide};

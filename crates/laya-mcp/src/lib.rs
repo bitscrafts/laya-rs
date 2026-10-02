@@ -38,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 use std::future::Future;
+use std::io::Write as _;
 use std::sync::Arc;
 
 use laya_core::readiness::{ProbeOutcome, Readiness, ReadinessCache, WhenNotReady};
@@ -187,6 +188,11 @@ pub struct ServerState {
     /// Where this process appends its decision records. A DIRECTORY, not a store handle:
     /// F8 says a server never writes the shared store, and a directory cannot be opened as one.
     pub ledger_dir: Option<std::path::PathBuf>,
+    /// Where the structured events (R4, R6) are written: stderr in production, a buffer in a test.
+    /// Behind a mutex because `handle` takes `&ServerState`.
+    events: std::sync::Mutex<Box<dyn std::io::Write + Send>>,
+    /// Per-process call counter: the request id the `tool_call` event carries.
+    seq: std::sync::atomic::AtomicU64,
 }
 
 impl ServerState {
@@ -208,7 +214,37 @@ impl ServerState {
             sidecar: socket,
             read_scope: laya_core::ask_file::Scope::new(Vec::new()),
             ledger_dir: resolve_ledger_dir(std::env::var(LEDGER_DIR_ENV).ok().as_deref()),
+            events: std::sync::Mutex::new(Box::new(std::io::stderr())),
+            seq: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// Send the structured events somewhere other than stderr (tests, embedding).
+    #[must_use]
+    pub fn with_event_sink(mut self, sink: Box<dyn std::io::Write + Send>) -> Self {
+        self.events = std::sync::Mutex::new(sink);
+        self
+    }
+
+    /// Write one event as one JSON line. A sink that cannot be written to is ignored: telemetry
+    /// must never fail the call it describes (the same rule as a ledger write, G3).
+    pub fn emit_event(&self, event: &serde_json::Value) {
+        if let Ok(mut sink) = self.events.lock() {
+            let _ = writeln!(sink, "{event}");
+            let _ = sink.flush();
+        }
+    }
+
+    /// Announce whether the ledger is on, and where (spec 11, R4).
+    ///
+    /// **The off state is announced, not merely absent.** The live deployment ran for its whole
+    /// life with `LAYA_LEDGER_DIR` unset: every call skipped recording and nothing said so, so
+    /// "off" and "broken" looked identical. A startup event that fired only when the ledger was ON
+    /// would repeat that — silence would mean either. So both states write one line, and the off
+    /// one is a `warn`.
+    pub fn announce_ledger(&self) {
+        let event = ledger_event(self.ledger_dir.as_deref());
+        self.emit_event(&event);
     }
 
     /// Set the read scope (`ask_file`/`ask_files`).
@@ -761,6 +797,132 @@ pub fn handle(
     args: &RawArgs,
     state: &ServerState,
 ) -> Result<CallToolResult, McpError> {
+    let started = std::time::Instant::now();
+    let result = handle_inner(tool, readiness, args, state, started);
+    emit_tool_call(state, tool, args, &result, started);
+    result
+}
+
+/// One structured line per tool call, on the event sink (spec 11, R6).
+///
+/// `seq` is a per-process counter and serves as the request id. **`run_id` and `node_id` are the
+/// requirement, not the JSON shape**: an event without them cannot be joined to the run that made
+/// the call, which is the only thing it exists for. They are `null` for a call that supplied none.
+/// The event names are chosen so a later move to `tracing` is a mechanical swap (N4).
+fn emit_tool_call(
+    state: &ServerState,
+    tool: &str,
+    args: &RawArgs,
+    result: &Result<CallToolResult, McpError>,
+    started: std::time::Instant,
+) {
+    let seq = state.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    // The gate's verdict is the one thing worth lifting out of the response: it is the answer an
+    // operator watching the stream wants. Parsed, not substring-matched.
+    let decision = result.as_ref().ok().and_then(|r| {
+        r.content.iter().find_map(|c| match c {
+            ContentBlock::Text(t) if tool == "gate" => {
+                serde_json::from_str::<serde_json::Value>(&t.text)
+                    .ok()?
+                    .get("decision")?
+                    .as_str()
+                    .map(str::to_string)
+            }
+            _ => None,
+        })
+    });
+    let mut event = json!({
+        "ts": now_wall_nanos() / 1_000_000,
+        "event": "tool_call",
+        "seq": seq,
+        "tool": tool,
+        "run_id": args.run_id,
+        "node_id": args.node_id,
+        "latency_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "outcome": if result.is_ok() { "ok" } else { "error" },
+    });
+    if let (Some(obj), Some(decision)) = (event.as_object_mut(), decision) {
+        obj.insert("decision".into(), json!(decision));
+    }
+    state.emit_event(&event);
+}
+
+/// Run `call`, and if it fails record the failure as a row before returning it.
+///
+/// Wraps every tool that judges, so a refusal or an error is a ledger row for ALL of them and not
+/// only for the ones that remembered to (spec 11, R2).
+fn recorded(
+    tool: &str,
+    args: &RawArgs,
+    state: &ServerState,
+    started: std::time::Instant,
+    call: impl FnOnce() -> Result<CallToolResult, McpError>,
+) -> Result<CallToolResult, McpError> {
+    let result = call();
+    if let Err(e) = &result {
+        let _ = record_nonanswer(state, args, tool, started, e, &Trace::default());
+    }
+    result
+}
+
+/// What `handle` answers when Laya is not ready: the gate's fail-closed `ask`, or a protocol
+/// error for every other tool. Both are recorded, because both are a refusal to answer.
+fn not_ready_answer(
+    tool: &str,
+    readiness: &Readiness,
+    args: &RawArgs,
+    state: &ServerState,
+    started: std::time::Instant,
+) -> Result<CallToolResult, McpError> {
+    match laya_core::readiness::when_not_ready(tool) {
+        WhenNotReady::GateAsks => {
+            // The gate answered `ask` because it could not ask anyone: a verdict, and a
+            // refusal to grant, so it is a row like any other.
+            let payload = json!({
+                "decision": laya_core::readiness::gate_when_down(),
+                "reason": "laya-unavailable",
+                "note": "the gate could not ask, so it must not allow"
+            });
+            let _ = record_decision_for(
+                state,
+                &payload,
+                timing_since(started),
+                &state_sha256(&json!(args.action)),
+                &RowSpec {
+                    tool,
+                    question_id: "laya-unavailable",
+                    question_type: "noul",
+                    run_id: args.run_id.as_deref(),
+                    node_id: args.node_id.as_deref(),
+                    executed: Some(false),
+                    command: args.action.as_deref(),
+                    label_override: payload.get("decision").and_then(serde_json::Value::as_str),
+                    ..RowSpec::default()
+                },
+            );
+            to_result(ToolOutcome::Ok(payload.to_string()))
+        }
+        WhenNotReady::ProtocolError => {
+            let e = McpError::internal_error(
+                format!(
+                    "laya-mcp: Laya is not ready, so `{tool}` cannot answer.\n{}",
+                    readiness_reason(readiness)
+                ),
+                None,
+            );
+            let _ = record_nonanswer(state, args, tool, started, &e, &Trace::default());
+            Err(e)
+        }
+    }
+}
+
+fn handle_inner(
+    tool: &str,
+    readiness: &Readiness,
+    args: &RawArgs,
+    state: &ServerState,
+    started: std::time::Instant,
+) -> Result<CallToolResult, McpError> {
     if !is_known_tool(tool) {
         return Err(McpError::invalid_params(
             format!("unknown tool '{tool}'"),
@@ -772,23 +934,7 @@ pub fn handle(
     // decision rather than an error, because a hook calling a gate must get a safe
     // answer, not a crash — and a safe answer is `ask`, never `allow`.
     if !readiness.is_ready() {
-        return match laya_core::readiness::when_not_ready(tool) {
-            WhenNotReady::GateAsks => to_result(ToolOutcome::Ok(
-                json!({
-                    "decision": laya_core::readiness::gate_when_down(),
-                    "reason": "laya-unavailable",
-                    "note": "the gate could not ask, so it must not allow"
-                })
-                .to_string(),
-            )),
-            WhenNotReady::ProtocolError => Err(McpError::internal_error(
-                format!(
-                    "laya-mcp: Laya is not ready, so `{tool}` cannot answer.\n{}",
-                    readiness_reason(readiness)
-                ),
-                None,
-            )),
-        };
+        return not_ready_answer(tool, readiness, args, state, started);
     }
 
     // Ready. Every remaining tool needs the decision path, which is spec 03/04 work.
@@ -819,19 +965,25 @@ pub fn handle(
             if let Some(err) = require(tool, args) {
                 return Err(err);
             }
-            decide_via_sidecar(args, state)
+            recorded("decide", args, state, started, || {
+                decide_via_sidecar(args, state)
+            })
         }
         "ask_file" => {
             if let Some(err) = require(tool, args) {
                 return Err(err);
             }
-            ask_file_via_sidecar(args, state)
+            recorded("ask_file", args, state, started, || {
+                ask_file_via_sidecar(args, state)
+            })
         }
         "ask_files" => {
             if let Some(err) = require(tool, args) {
                 return Err(err);
             }
-            ask_files_via_sidecar(args, state)
+            recorded("ask_files", args, state, started, || {
+                ask_files_via_sidecar(args, state)
+            })
         }
         "ask" => {
             if let Some(err) = require(tool, args) {
@@ -849,7 +1001,9 @@ pub fn handle(
             if let Some(err) = require(tool, args) {
                 return Err(err);
             }
-            should_compact_via_sidecar(args, state)
+            recorded("should_compact", args, state, started, || {
+                should_compact_via_sidecar(args, state)
+            })
         }
         // Still honestly unimplemented: these need the file-reading and compaction
         // work the spec assigns to P2/P3. No argument contract is advertised.
@@ -898,7 +1052,15 @@ pub fn gate_payload(args: &RawArgs, state: &ServerState) -> Result<GateOutcome, 
     let started = std::time::Instant::now();
     let action = args.action.clone().unwrap_or_default();
     let irreversible = args.irreversible.unwrap_or(false);
-    let payload = judge_command(&action, irreversible, state)?;
+    let payload = match judge_command(&action, irreversible, state) {
+        Ok(p) => p,
+        Err(e) => {
+            // The head answered but its answer could not be read. That is a gate that could not
+            // decide, and the row is written before the error is returned.
+            let _ = record_nonanswer(state, args, "gate", started, &e, &Trace::default());
+            return Err(e);
+        }
+    };
     let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     // The GATE'S DECISION is the row's label -- `allow` / `ask` / `deny`.
@@ -921,8 +1083,11 @@ pub fn gate_payload(args: &RawArgs, state: &ServerState) -> Result<GateOutcome, 
         run_id: args.run_id.as_deref(),
         node_id: args.node_id.as_deref(),
         // A verdict is a permission, not an event: this call answered, it did not execute.
-        executed: false,
+        executed: Some(false),
+        // Only the HASH of the command is recorded (N3).
+        command: Some(&action),
         label_override: Some(&verdict_label),
+        ..RowSpec::default()
     };
     let ledger_note = record_decision_for(
         state,
@@ -1013,6 +1178,12 @@ fn judge_command(
                     |_| json!({}),
                     |mut v| {
                         if let Some(o) = v.as_object_mut() {
+                            // `answer_from_laya` defaults a missing confidence to 0.0. Reporting
+                            // that would be inventing "maximally unsure", so the key is removed
+                            // when the model gave none (spec 11, R3).
+                            if entry.get("confidence").is_none() {
+                                o.remove("confidence");
+                            }
                             o.insert("decision".into(), json!(verdict.decision));
                             o.insert("model_decision".into(), json!(verdict.model_decision));
                             o.insert(
@@ -1051,6 +1222,36 @@ fn judge_command(
     )
 }
 
+/// The `ledger` startup event for a configured directory, or the warning for none.
+#[must_use]
+pub fn ledger_event(dir: Option<&std::path::Path>) -> serde_json::Value {
+    dir.map_or_else(
+        || {
+            json!({
+                "ts": now_wall_nanos() / 1_000_000,
+                "event": "ledger",
+                "level": "warn",
+                "enabled": false,
+                "dir": null,
+                "message": format!(
+                    "ledger is OFF: {LEDGER_DIR_ENV} is unset, so no decision, refusal or verdict \
+                     will be recorded. Set it to turn recording on."
+                ),
+            })
+        },
+        |dir| {
+            json!({
+                "ts": now_wall_nanos() / 1_000_000,
+                "event": "ledger",
+                "level": "info",
+                "enabled": true,
+                "dir": dir.display().to_string(),
+                "dir_exists": dir.is_dir(),
+            })
+        },
+    )
+}
+
 /// The ledger directory this server appends to, from the environment.
 ///
 /// **Unset means NO ledgering**, and that is deliberate. A decision layer whose bookkeeping
@@ -1060,36 +1261,6 @@ fn judge_command(
 pub fn resolve_ledger_dir(raw: Option<&str>) -> Option<std::path::PathBuf> {
     let raw = raw.map(str::trim).filter(|s| !s.is_empty())?;
     Some(std::path::PathBuf::from(raw))
-}
-
-/// Append one ledger row for a decision, and never fail the decision because of it.
-///
-/// Returns a short note when the record could not be written, so the caller can surface it. The
-/// DECISION is not affected: a decision layer that refused to decide because its bookkeeping was
-/// broken would trade the whole function for the log. But it is reported rather than swallowed,
-/// because a ledger that has silently stopped recording is worse than one that never did —
-/// every "the latency budget is fine" claim would keep reading as measured.
-fn record_decision(
-    state: &ServerState,
-    tool: &str,
-    question_id: &str,
-    question_type: &str,
-    payload: &serde_json::Value,
-    timing: Timing,
-    state_sha256: &str,
-) -> Option<String> {
-    record_decision_for(
-        state,
-        payload,
-        timing,
-        state_sha256,
-        &RowSpec {
-            tool,
-            question_id,
-            question_type,
-            ..RowSpec::default()
-        },
-    )
 }
 
 /// The three clocks a row records, grouped because they are always taken together.
@@ -1121,7 +1292,22 @@ struct RowSpec<'a> {
     /// The consumer's own node id, when it supplied one.
     node_id: Option<&'a str>,
     /// Whether the action judged had actually been carried out at the moment of recording.
-    executed: bool,
+    /// `None` for a tool with no such notion, so "not applicable" is not recorded as "did not run".
+    executed: Option<bool>,
+    /// The command judged. Only its HASH is recorded (rule 8 / N3) — a command can carry a token.
+    command: Option<&'a str>,
+    /// The final `allow|ask|deny`, when the payload does not already carry it as `decision`.
+    gate_decision: Option<&'a str>,
+    /// What the model alone said, when the payload does not carry it as `model_decision`.
+    model_decision: Option<&'a str>,
+    /// How many destructive signals were found, when the payload does not list them.
+    destructive_signals: Option<u32>,
+    /// The model's own answer entry for this question, before it was shaped into a payload.
+    ///
+    /// The source of `confidence` and `bucket_clamped` when present: the payload's `confidence`
+    /// is a plain `f64` that was defaulted to 0.0 on the way in, so reading it would record an
+    /// invented number for an answer that carried none.
+    answer_entry: Option<&'a serde_json::Value>,
     /// The label to record, when the payload does not carry one.
     ///
     /// Two callers need this. A refusal has no model label, so the refusal itself is the label —
@@ -1131,12 +1317,18 @@ struct RowSpec<'a> {
     label_override: Option<&'a str>,
 }
 
-/// The real recorder. [`record_decision`] is the short form that carries no ids.
+/// Append one ledger row, and never fail the call because of it.
+///
+/// Returns a short note when the record could not be written, so the caller can surface it. The
+/// DECISION is not affected: a decision layer that refused to decide because its bookkeeping was
+/// broken would trade the whole function for the log. But it is reported rather than swallowed,
+/// because a ledger that has silently stopped recording is worse than one that never did —
+/// every "the latency budget is fine" claim would keep reading as measured.
 fn record_decision_for(
     state: &ServerState,
     payload: &serde_json::Value,
     timing: Timing,
-    state_sha256: &str,
+    state_hash: &str,
     spec: &RowSpec<'_>,
 ) -> Option<String> {
     let dir = state.ledger_dir.as_ref()?;
@@ -1166,8 +1358,12 @@ fn record_decision_for(
             str::to_string,
         ),
         // `None` when absent -- never 0.0, which would read as "maximally unsure" and poison
-        // every calibration metric built on the column.
-        confidence: payload
+        // every calibration metric built on the column. The model's own entry is the source when
+        // there is one: the payload's `confidence` is an `f64` that was defaulted to 0.0 on the
+        // way in.
+        confidence: spec
+            .answer_entry
+            .unwrap_or(payload)
             .get("confidence")
             .and_then(serde_json::Value::as_f64),
         band: band.to_string(),
@@ -1182,21 +1378,195 @@ fn record_decision_for(
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
         laya_version: LAYA_VERSION.to_string(),
-        state_sha256: state_sha256.to_string(),
+        state_sha256: state_hash.to_string(),
         head_sha256: None,
         backbone_sha256: None,
-        // NO LONGER copied from `saturated`: that is a different fact, and copying it made an
-        // unknown clamp state look known. `None` until a source that actually knows supplies it.
-        bucket_clamped: payload
-            .get("bucket_clamped")
+        // NOT copied from `saturated`: that is a different fact, and copying it made an unknown
+        // clamp state look known. Only a source that actually KNOWS the clamp state supplies it:
+        // the model's own entry, or a payload that carries the field. Otherwise `None`.
+        bucket_clamped: spec
+            .answer_entry
+            .and_then(|e| e.get("bucket_clamped"))
+            .or_else(|| payload.get("bucket_clamped"))
             .and_then(serde_json::Value::as_bool),
         latency_ms: timing.latency_ms,
         executed: spec.executed,
+        gate_decision: spec.gate_decision.map(str::to_string).or_else(|| {
+            payload
+                .get("decision")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        }),
+        model_decision: spec.model_decision.map(str::to_string).or_else(|| {
+            payload
+                .get("model_decision")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        }),
+        destructive_signals: spec.destructive_signals.or_else(|| {
+            payload
+                .get("destructive_signals")
+                .and_then(serde_json::Value::as_array)
+                .map(|signals| u32::try_from(signals.len()).unwrap_or(u32::MAX))
+        }),
+        command_sha256: spec.command.map(|c| state_sha256(&json!(c))),
+        p: payload.get("p").and_then(serde_json::Value::as_f64),
+        score: payload.get("score").and_then(serde_json::Value::as_f64),
     };
     match laya_store::append_segment(dir, &laya_store::Record::Decision(row)) {
         Ok(_) => None,
         Err(e) => Some(format!("the decision was not recorded: {e}")),
     }
+}
+
+/// The clocks for a row whose call began at `started`.
+fn timing_since(started: std::time::Instant) -> Timing {
+    Timing {
+        latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        ts_nanos: now_nanos(),
+        wall_nanos: now_wall_nanos(),
+    }
+}
+
+/// One question the model answered, shaped for recording.
+struct Answered {
+    id: String,
+    question_type: String,
+    /// The route-shaped payload — what [`laya_core::DecisionPayload`] makes of the answer.
+    payload: serde_json::Value,
+    /// The model's own entry, before shaping. See [`RowSpec::answer_entry`].
+    entry: serde_json::Value,
+}
+
+/// Turn the model's `answers` into one [`Answered`] per question it answered.
+///
+/// An answer that cannot be read as a typed answer is skipped, exactly as `decide` has always
+/// skipped it from its `payloads`: there is no label to record for it.
+fn answered_questions(answers: &serde_json::Value, questions: &serde_json::Value) -> Vec<Answered> {
+    let policy = laya_core::Policy::default();
+    let mut out = Vec::new();
+    let Some(map) = answers.as_object() else {
+        return out;
+    };
+    for (id, entry) in map {
+        let declared: Vec<String> = questions
+            .get(id)
+            .and_then(|q| q.get("criteria"))
+            .and_then(serde_json::Value::as_object)
+            .map(|c| c.keys().cloned().collect())
+            .unwrap_or_default();
+        let Ok(answer) = answer_from_laya(&policy, id, entry, &declared) else {
+            continue;
+        };
+        let dp = laya_core::DecisionPayload::from_answer(&answer, &policy);
+        let Ok(payload) = serde_json::to_value(&dp) else {
+            continue;
+        };
+        out.push(Answered {
+            id: id.clone(),
+            question_type: questions
+                .get(id)
+                .and_then(|q| q.get("type"))
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| entry.get("type").and_then(serde_json::Value::as_str))
+                .unwrap_or("noul")
+                .to_string(),
+            payload,
+            entry: entry.clone(),
+        });
+    }
+    out
+}
+
+/// Record one row per answered question. Returns the last failure note, if any.
+fn record_answers(
+    state: &ServerState,
+    answered: &[Answered],
+    state_hash: &str,
+    timing: Timing,
+    base: &RowSpec<'_>,
+) -> Option<String> {
+    let mut note = None;
+    for a in answered {
+        let spec = RowSpec {
+            question_id: &a.id,
+            question_type: &a.question_type,
+            answer_entry: Some(&a.entry),
+            ..base.clone()
+        };
+        if let Some(n) = record_decision_for(state, &a.payload, timing, state_hash, &spec) {
+            note = Some(n);
+        }
+    }
+    note
+}
+
+/// What a call learned before it failed, so the failure row can still say what was judged.
+#[derive(Debug, Default)]
+struct Trace {
+    gate_decision: Option<String>,
+    model_decision: Option<String>,
+    destructive_signals: Option<u32>,
+    /// Set once the command has actually run: a failure after that point is not "did not run".
+    executed: Option<bool>,
+}
+
+/// Record a call that produced NO answer — a refusal, or an error — and say which.
+///
+/// The row is written before the error is returned. A ledger that holds only successes cannot
+/// answer "what did you refuse", which is the question that matters after an incident, and a
+/// rule that only some tools followed would leave exactly the rest of them dark.
+///
+/// `invalid_params` is a refusal (the caller asked for something the layer will not do); anything
+/// else is an `error` (the layer could not answer). They are different rows because an operator
+/// reading "refused: 40" and "error: 40" is looking at two different problems.
+fn record_nonanswer(
+    state: &ServerState,
+    args: &RawArgs,
+    tool: &str,
+    started: std::time::Instant,
+    err: &McpError,
+    trace: &Trace,
+) -> Option<String> {
+    let label = if err.code == rmcp::model::ErrorCode::INVALID_PARAMS {
+        "refused"
+    } else {
+        "error"
+    };
+    // The reason is the question id, as the first version of this recorded it. It must not carry
+    // the command it refused to run.
+    let mut why = err.message.to_string();
+    if let Some(cmd) = args.command.as_deref().filter(|c| !c.is_empty()) {
+        why = why.replace(cmd, "<command>");
+    }
+    if let Some(act) = args.action.as_deref().filter(|c| !c.is_empty()) {
+        why = why.replace(act, "<command>");
+    }
+    let spec = RowSpec {
+        tool,
+        question_id: &why,
+        question_type: "noul",
+        run_id: args.run_id.as_deref(),
+        node_id: args.node_id.as_deref(),
+        executed: if tool == "ask" || tool == "gate" {
+            Some(trace.executed.unwrap_or(false))
+        } else {
+            None
+        },
+        command: args.command.as_deref().or(args.action.as_deref()),
+        gate_decision: trace.gate_decision.as_deref(),
+        model_decision: trace.model_decision.as_deref(),
+        destructive_signals: trace.destructive_signals,
+        label_override: Some(label),
+        ..RowSpec::default()
+    };
+    record_decision_for(
+        state,
+        &json!({}),
+        timing_since(started),
+        &state_sha256(&json!(why)),
+        &spec,
+    )
 }
 
 /// The pinned Laya version, recorded in every row for provenance.
@@ -1296,39 +1666,29 @@ pub fn now_rfc3339() -> String {
 /// state, a file outside the read scope, or a command the gate did not allow.
 fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
     let started = std::time::Instant::now();
-    // A refusal is recorded BEFORE the error is returned. A ledger that only holds successes
-    // cannot answer "what did you refuse", which is the question that matters after an incident.
-    let refuse = |why: &str| -> Option<String> {
-        record_decision_for(
-            state,
-            &json!({}),
-            Timing {
-                latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-                ts_nanos: now_nanos(),
-                wall_nanos: now_wall_nanos(),
-            },
-            &state_sha256(&json!(why)),
-            &RowSpec {
-                tool: "ask",
-                question_id: why,
-                question_type: "noul",
-                run_id: args.run_id.as_deref(),
-                node_id: args.node_id.as_deref(),
-                executed: false,
-                label_override: Some("refused"),
-            },
-        )
-    };
+    let mut trace = Trace::default();
+    let result = ask_inner(args, state, started, &mut trace);
+    // A refusal is recorded BEFORE the error is returned, and EVERY way out of `ask` is covered
+    // here -- a malformed question, an unreadable file, a command the gate did not allow, a head
+    // that is down. Recording at each early return left the gate's own refusal (the one that
+    // matters most) unrecorded, because it comes back through `?` from `ask_execute`.
+    if let Err(e) = &result {
+        let _ = record_nonanswer(state, args, "ask", started, e, &trace);
+    }
+    result
+}
 
-    let questions = match laya_core::agentic::validate_questions(
+/// The body of [`ask_via_sidecar`]; `trace` carries what was learned if it fails part-way.
+fn ask_inner(
+    args: &RawArgs,
+    state: &ServerState,
+    started: std::time::Instant,
+    trace: &mut Trace,
+) -> Result<CallToolResult, McpError> {
+    let questions = laya_core::agentic::validate_questions(
         args.questions.as_ref().unwrap_or(&serde_json::Value::Null),
-    ) {
-        Ok(q) => q,
-        Err(e) => {
-            let _ = refuse(&format!("invalid questions: {e}"));
-            return Err(McpError::invalid_params(format!("laya-mcp: {e}"), None));
-        }
-    };
+    )
+    .map_err(|e| McpError::invalid_params(format!("laya-mcp: {e}"), None))?;
 
     let scope = &state.read_scope;
     let mut files: Vec<laya_core::agentic::StateFile> = Vec::new();
@@ -1341,10 +1701,7 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
                 path: file.path,
                 content: file.content,
             }),
-            Err(e) => {
-                let _ = refuse(&format!("read refused: {e}"));
-                return Err(McpError::invalid_params(e.to_string(), None));
-            }
+            Err(e) => return Err(McpError::invalid_params(e.to_string(), None)),
         }
     }
 
@@ -1355,6 +1712,20 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
     let gate_decision = match command {
         Some(cmd) => {
             let verdict = judge_command(cmd, false, state)?;
+            // What the guardrail said is kept in the trace at once, so a refusal further down
+            // still records WHICH verdict stopped it.
+            trace.gate_decision = verdict
+                .get("decision")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            trace.model_decision = verdict
+                .get("model_decision")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            trace.destructive_signals = verdict
+                .get("destructive_signals")
+                .and_then(serde_json::Value::as_array)
+                .map(|s| u32::try_from(s.len()).unwrap_or(u32::MAX));
             verdict
                 .get("decision")
                 .and_then(|d| serde_json::from_value::<laya_core::GateDecision>(d.clone()).ok())
@@ -1372,6 +1743,9 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
         gate_decision,
         policy.ask_deadline_secs,
     )?;
+    // Past this line the command has run (or there was none). A failure from here on is not
+    // "did not run", and the row must not say it was.
+    trace.executed = Some(command.is_some());
 
     let composed = laya_core::agentic::compose_state(summary, &files, Some(&stdout), Some(&stderr))
         .map_err(|e| McpError::invalid_params(format!("laya-mcp: {e}"), None))?;
@@ -1391,7 +1765,28 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
     // NOT the files or the output. `content_in_context: false` states it so a caller does not
     // have to infer it from what is absent. `timed_out` is DATA, not a JSON-RPC error: the
     // caller needs to know the command started even though it did not finish.
-    let body = json!({
+    // One row per question answered. `executed` is whether the command RAN, which is the
+    // difference between a permission and an event.
+    let spec = RowSpec {
+        tool: "ask",
+        run_id: args.run_id.as_deref(),
+        node_id: args.node_id.as_deref(),
+        executed: Some(command.is_some()),
+        command,
+        gate_decision: trace.gate_decision.as_deref(),
+        model_decision: trace.model_decision.as_deref(),
+        destructive_signals: trace.destructive_signals,
+        ..RowSpec::default()
+    };
+    let ledger_note = record_answers(
+        state,
+        &answered_questions(&answers, questions),
+        &state_sha256(&json!(composed)),
+        timing_since(started),
+        &spec,
+    );
+
+    let mut body = json!({
         "answers": answers,
         "state_bytes": state_bytes,
         "files_read": files.len(),
@@ -1400,6 +1795,9 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
         "content_in_context": false,
         "questions_asked": questions.as_object().map_or(0, serde_json::Map::len),
     });
+    if let (Some(obj), Some(note)) = (body.as_object_mut(), ledger_note) {
+        obj.insert("ledger".into(), json!(note));
+    }
     to_result(ToolOutcome::Ok(body.to_string()))
 }
 
@@ -1529,13 +1927,8 @@ fn run_with_deadline(cmd: &str, deadline_secs: u64) -> Result<(String, String, b
 ///
 /// The model supplies judgements. This function owns the arithmetic, the veto, and the four
 /// words the agent hears.
-fn should_compact_via_sidecar(
-    args: &RawArgs,
-    state: &ServerState,
-) -> Result<CallToolResult, McpError> {
-    let summary = args.turns_summary.as_deref().unwrap_or_default();
-    let context_tokens = args.context_tokens.unwrap_or(0);
-
+/// The four questions `should_compact` asks about the recent turns.
+fn compact_questions() -> serde_json::Value {
     let questions = [
         (
             "switched_gears",
@@ -1583,19 +1976,40 @@ fn should_compact_via_sidecar(
             }
         }),
     );
+    serde_json::Value::Object(qmap)
+}
 
+fn should_compact_via_sidecar(
+    args: &RawArgs,
+    state: &ServerState,
+) -> Result<CallToolResult, McpError> {
+    let started = std::time::Instant::now();
+    let summary = args.turns_summary.as_deref().unwrap_or_default();
+    let context_tokens = args.context_tokens.unwrap_or(0);
+
+    let qmap = compact_questions();
     let answers = state
         .sidecar
-        .predict(
-            &json!({"turn_summary": summary}),
-            &serde_json::Value::Object(qmap),
-        )
+        .predict(&json!({"turn_summary": summary}), &qmap)
         .map_err(|e| {
             McpError::internal_error(
                 format!("laya-mcp: the decision head is unavailable: {e}"),
                 None,
             )
         })?;
+    // One row per question answered. The summary is hashed, never stored.
+    let ledger_note = record_answers(
+        state,
+        &answered_questions(&answers, &qmap),
+        &state_sha256(&json!({"turn_summary": summary})),
+        timing_since(started),
+        &RowSpec {
+            tool: "should_compact",
+            run_id: args.run_id.as_deref(),
+            node_id: args.node_id.as_deref(),
+            ..RowSpec::default()
+        },
+    );
 
     // Read the three nouls. A MISSING answer is treated as the conservative value, not as
     // `false`-by-default: an absent `mid_edit` must not read as "not editing", or a failed
@@ -1630,7 +2044,7 @@ fn should_compact_via_sidecar(
     let thresholds = laya_core::CompactThresholds::default();
     let advice = laya_core::CompactAdvice::decide(&input, &thresholds);
 
-    let body = json!({
+    let mut body = json!({
         // The four words the agent may act on.
         "urgency": advice.urgency.as_str(),
         "compact_now": advice.compact_now,
@@ -1650,6 +2064,9 @@ fn should_compact_via_sidecar(
         },
         "answers": answers,
     });
+    if let (Some(obj), Some(note)) = (body.as_object_mut(), ledger_note) {
+        obj.insert("ledger".into(), json!(note));
+    }
     to_result(ToolOutcome::Ok(body.to_string()))
 }
 
@@ -1667,6 +2084,7 @@ fn should_compact_via_sidecar(
 ///   4. the content is placed under `data` as UNTRUSTED (spec 04 F9)
 ///   5. only then is the head asked
 fn ask_file_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let started = std::time::Instant::now();
     let path = args.path.as_deref().unwrap_or_default();
     let question = args.question.as_deref().unwrap_or_default();
 
@@ -1686,6 +2104,20 @@ fn ask_file_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolR
             )
         })?;
 
+    // The file's content is hashed, never stored (N3).
+    let ledger_note = record_answers(
+        state,
+        &answered_questions(&answers, &laya_core::ask_file::FileState::question_spec()),
+        &state_sha256(&file.to_state()),
+        timing_since(started),
+        &RowSpec {
+            tool: "ask_file",
+            run_id: args.run_id.as_deref(),
+            node_id: args.node_id.as_deref(),
+            ..RowSpec::default()
+        },
+    );
+
     // Reported with the path it came from so a caller cannot confuse which file a verdict
     // belongs to — and `content_in_context: false` states the property explicitly rather
     // than leaving the caller to infer it.
@@ -1693,6 +2125,9 @@ fn ask_file_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolR
     let mut out = json!({ "path": file.path, "bytes": bytes, "answers": answers });
     if let Some(obj) = out.as_object_mut() {
         obj.insert("content_in_context".into(), json!(false));
+        if let Some(note) = ledger_note {
+            obj.insert("ledger".into(), json!(note));
+        }
         // MEASURED 2026-09-30: the head reads a PREFIX of the state. A leading signal scored
         // exactly 0.788 at 3,975 / 15,943 / 63,951 and 199,951 bytes — invariant across 50x,
         // which is only possible if the tail is not read. A signal at the end was seen at
@@ -1720,6 +2155,7 @@ fn ask_file_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolR
 /// does not exist is the defect class this project keeps removing. The BACKBONE is 5.8x
 /// parallel — the single-process head is not.
 fn ask_files_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let started = std::time::Instant::now();
     let question = args.question.as_deref().unwrap_or_default();
     let patterns = args.paths.clone().unwrap_or_default();
 
@@ -1739,13 +2175,62 @@ fn ask_files_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallTool
         Ok(r)
     });
 
+    // One row per file answered, and one per file NOT answered -- a path outside the read scope
+    // is a refusal, and the refusals are the rows an incident review wants. The latency is the
+    // whole call's: the per-file split is not measured, and a number that looked per-file would
+    // be invented.
+    let timing = timing_since(started);
+    let mut ledger_note = None;
+    for v in &verdicts {
+        let note = match (&v.answers, &v.failure) {
+            (Some(answers), _) => record_answers(
+                state,
+                &answered_questions(answers, &laya_core::ask_file::FileState::question_spec()),
+                &state_sha256(&json!({"path": v.path, "bytes": v.bytes})),
+                timing,
+                &RowSpec {
+                    tool: "ask_files",
+                    run_id: args.run_id.as_deref(),
+                    node_id: args.node_id.as_deref(),
+                    ..RowSpec::default()
+                },
+            ),
+            (None, why) => {
+                let why = why.as_deref().unwrap_or("not judged");
+                let label = if why.contains("outside the configured read scope") {
+                    "refused"
+                } else {
+                    "error"
+                };
+                record_decision_for(
+                    state,
+                    &json!({}),
+                    timing,
+                    &state_sha256(&json!({"path": v.path})),
+                    &RowSpec {
+                        tool: "ask_files",
+                        question_id: why,
+                        question_type: "noul",
+                        run_id: args.run_id.as_deref(),
+                        node_id: args.node_id.as_deref(),
+                        label_override: Some(label),
+                        ..RowSpec::default()
+                    },
+                )
+            }
+        };
+        if note.is_some() {
+            ledger_note = note;
+        }
+    }
+
     let policy = laya_core::Policy::default();
     let hits = laya_core::ask_files::pick(&verdicts, policy.noul_threshold);
 
     // `hits` is the answer a caller wants ("which files answer this, best first"); the full
     // `files` array carries the per-file reasons, so a caller can see WHY a file is absent
     // rather than only that it is.
-    let body = json!({
+    let mut body = json!({
         "question": question,
         "asked": verdicts.len(),
         "hits": hits.iter().map(|(p, noul)| json!({"path": p, "noul": noul})).collect::<Vec<_>>(),
@@ -1754,6 +2239,9 @@ fn ask_files_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallTool
         "parallel": false,
         "content_in_context": false,
     });
+    if let (Some(obj), Some(note)) = (body.as_object_mut(), ledger_note) {
+        obj.insert("ledger".into(), json!(note));
+    }
     to_result(ToolOutcome::Ok(body.to_string()))
 }
 
@@ -1905,62 +2393,33 @@ fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolRes
     // The graph is handed `answers[<id>]` shaped as the payload, keyed by question id, so
     // one response can feed several route nodes. The raw answers are kept alongside, since
     // a caller debugging a decision needs the model's own output.
-    let policy = laya_core::Policy::default();
+    let answered = answered_questions(&answers, &questions);
     let mut payloads = serde_json::Map::new();
-    if let Some(map) = answers.as_object() {
-        for (id, entry) in map {
-            let kind = entry
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("noul");
-            let declared: Vec<String> = questions
-                .get(id)
-                .and_then(|q| q.get("criteria"))
-                .and_then(serde_json::Value::as_object)
-                .map(|c| c.keys().cloned().collect())
-                .unwrap_or_default();
-            if let Ok(answer) = answer_from_laya(&policy, id, entry, &declared) {
-                let dp = laya_core::DecisionPayload::from_answer(&answer, &policy);
-                if let Ok(v) = serde_json::to_value(&dp) {
-                    payloads.insert(id.clone(), v);
-                }
-            }
-            let _ = kind;
-        }
+    for a in &answered {
+        payloads.insert(a.id.clone(), a.payload.clone());
     }
 
-    // Record every payload this call produced. One row per question, so the ledger can be
-    // joined per decision rather than per request.
-    let mut ledger_note: Option<String> = None;
     // THIS CALL's latency, from `call_started` at the top of this handler.
     //
     // The first version used the process-start `Instant` and published `0` — a number that
     // looks measured and is not, which is the exact defect NF3 exists to prevent. `stats`
     // reported `latency p50: 0 ms` for a real model call, and only the end-to-end proof
     // caught it, because the field was present, well-formed and plausible.
-    let elapsed_ms = u64::try_from(call_started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    for (id, payload) in &payloads {
-        let question_type = questions
-            .get(id)
-            .and_then(|q| q.get("type"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("noul");
-        if let Some(note) = record_decision(
-            state,
-            "decide",
-            id,
-            question_type,
-            payload,
-            Timing {
-                latency_ms: elapsed_ms,
-                ts_nanos: now_nanos(),
-                wall_nanos: now_wall_nanos(),
-            },
-            &state_sha256(&state_value),
-        ) {
-            ledger_note = Some(note);
-        }
-    }
+    //
+    // One row per question, so the ledger can be joined per decision rather than per request --
+    // and carrying the CALLER's run and node id, which is what makes it joinable at all.
+    let ledger_note = record_answers(
+        state,
+        &answered,
+        &state_sha256(&state_value),
+        timing_since(call_started),
+        &RowSpec {
+            tool: "decide",
+            run_id: args.run_id.as_deref(),
+            node_id: args.node_id.as_deref(),
+            ..RowSpec::default()
+        },
+    );
 
     let mut body = json!({ "payloads": payloads, "answers": answers });
     if let (Some(obj), Some(note)) = (body.as_object_mut(), ledger_note) {
@@ -2559,7 +3018,11 @@ mod tests {
             "the row must carry the gate's decision, got {:?}",
             row.label
         );
-        assert!(!row.executed, "a verdict is a permission, not an event");
+        assert_eq!(
+            row.executed,
+            Some(false),
+            "a verdict is a permission, not an event"
+        );
         assert_eq!(row.run_id, None, "no caller id was supplied");
     }
 
@@ -2645,6 +3108,547 @@ mod tests {
         };
         let _ = gate_via_sidecar(&args, &state).expect("gate answers");
         assert!(laya_store::segments(&dir).expect("segments").is_empty());
+    }
+
+    // ---- spec 11: one run id end to end, every judgement a row, events ---------
+
+    /// A stand-in decision head on a REAL Unix socket.
+    ///
+    /// The spec's `Judge` trait would have replaced `ServerState::sidecar` with a boxed trait
+    /// object; this does the same job one layer lower and keeps the production path whole -- the
+    /// real `Sidecar` client, its JSON line protocol and every handler run unchanged, and only the
+    /// model on the far end is a fixed answer (AGENTS rule 9: no live model in a unit test). The
+    /// `answer` closure sees each question's `(id, type, criteria keys)` and returns the entry.
+    fn stub_sidecar(
+        tag: &str,
+        answer: impl Fn(&str, &str, &[String]) -> serde_json::Value + Send + 'static,
+    ) -> laya_backbone::Sidecar {
+        use std::io::{BufRead, BufReader};
+        let path = tempdir(&format!("sock-{tag}")).join("head.sock");
+        let listener =
+            std::os::unix::net::UnixListener::bind(&path).unwrap_or_else(|e| panic!("bind: {e}"));
+        std::thread::spawn(move || {
+            for stream in listener.incoming().map_while(Result::ok) {
+                let mut line = String::new();
+                let mut reader = BufReader::new(&stream);
+                if reader.read_line(&mut line).is_err() {
+                    continue;
+                }
+                let req: serde_json::Value = serde_json::from_str(&line).unwrap_or(json!({}));
+                let mut answers = serde_json::Map::new();
+                if let Some(qs) = req.get("questions").and_then(serde_json::Value::as_object) {
+                    for (id, q) in qs {
+                        let kind = q
+                            .get("type")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("");
+                        let keys: Vec<String> = q
+                            .get("criteria")
+                            .and_then(serde_json::Value::as_object)
+                            .map(|c| c.keys().cloned().collect())
+                            .unwrap_or_default();
+                        answers.insert(id.clone(), answer(id, kind, &keys));
+                    }
+                }
+                let mut w = &stream;
+                let _ = writeln!(w, "{}", json!({"ok": true, "answers": answers}));
+            }
+        });
+        laya_backbone::Sidecar::new(path)
+    }
+
+    /// A plausible answer for any question: a confident, un-saturated one.
+    fn plain_answer(_id: &str, kind: &str, keys: &[String]) -> serde_json::Value {
+        match kind {
+            "choice" => {
+                let first = keys.first().cloned().unwrap_or_default();
+                let probs: serde_json::Map<String, serde_json::Value> = keys
+                    .iter()
+                    .map(|k| {
+                        (
+                            k.clone(),
+                            json!(1.0 / f64::from(u32::try_from(keys.len()).unwrap_or(1).max(1))),
+                        )
+                    })
+                    .collect();
+                json!({"type": "choice", "choice": first, "probabilities": probs, "confidence": 0.7})
+            }
+            "score" => {
+                json!({"type": "score", "score": 1.0, "probabilities": {"0": 0.2, "1": 0.6, "2": 0.2}, "confidence": 0.6})
+            }
+            _ => json!({"type": "noul", "noul": 0.9, "confidence": 0.8}),
+        }
+    }
+
+    fn state_with_stub(dir: &std::path::Path, tag: &str) -> ServerState {
+        ServerState::new("http://x:1")
+            .with_sidecar(stub_sidecar(tag, plain_answer))
+            .with_ledger_dir(Some(dir.to_path_buf()))
+    }
+
+    /// A writer the test can read back: the event sink.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("lock").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl Captured {
+        fn lines(&self) -> Vec<serde_json::Value> {
+            String::from_utf8_lossy(&self.0.lock().expect("lock"))
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("not JSON ({e}): {l}")))
+                .collect()
+        }
+    }
+
+    /// Every byte of every segment the server wrote, as text.
+    fn segment_text(dir: &std::path::Path) -> String {
+        let mut all = String::new();
+        for f in laya_store::segments(dir).expect("segments") {
+            all.push_str(&std::fs::read_to_string(f).expect("read"));
+        }
+        all
+    }
+
+    fn decide_args(run: Option<&str>, node: Option<&str>) -> RawArgs {
+        RawArgs {
+            state: Some("the invoice is overdue".to_string()),
+            questions: Some(json!({
+                "paid": {"type": "noul", "instructions": "Is it paid?"}
+            })),
+            run_id: run.map(str::to_string),
+            node_id: node.map(str::to_string),
+            ..RawArgs::default()
+        }
+    }
+
+    #[test]
+    fn a_decide_records_the_callers_run_id_and_node_id() {
+        // R1, through the HANDLER: `decide` used to record `None` unconditionally (it went through
+        // a short-form recorder that carried no ids), so a test of `record_decision_for` alone
+        // would have passed while the tool kept dropping them.
+        let dir = tempdir("r1-ids");
+        let state = state_with_stub(&dir, "r1-ids");
+        let _ = handle(
+            "decide",
+            &ready(),
+            &decide_args(Some("r1"), Some("n1")),
+            &state,
+        )
+        .expect("decide answers");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].run_id.as_deref(), Some("r1"));
+        assert_eq!(rows[0].node_id.as_deref(), Some("n1"));
+    }
+
+    #[test]
+    fn the_control_a_decide_without_context_records_none() {
+        // A human calling `decide` directly has no run. The ids must be ABSENT, not invented.
+        let dir = tempdir("r1-none");
+        let state = state_with_stub(&dir, "r1-none");
+        let _ = handle("decide", &ready(), &decide_args(None, None), &state).expect("answers");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1, "it still records");
+        assert_eq!(rows[0].run_id, None);
+        assert_eq!(rows[0].node_id, None);
+    }
+
+    #[test]
+    fn every_judging_tool_writes_a_ledger_row() {
+        // R2, and its control in the same test: every one of these calls SUCCEEDS, and each must
+        // still write a row. A recorder that wrote only refusals would pass the refusal tests
+        // and fail here.
+        let dir = tempdir("r2-every");
+        let root = tempdir("r2-root");
+        std::fs::write(root.join("a.txt"), "the invoice was paid on friday").expect("write");
+        let state = state_with_stub(&dir, "r2-every").with_read_scope(vec![root.clone()]);
+        let file = root.join("a.txt").display().to_string();
+        let calls: Vec<(&str, RawArgs)> = vec![
+            (
+                "gate",
+                RawArgs {
+                    action: Some("git status".to_string()),
+                    ..RawArgs::default()
+                },
+            ),
+            (
+                "ask",
+                RawArgs {
+                    state: Some("a short summary".to_string()),
+                    questions: Some(json!({"q": {"type": "noul", "instructions": "ok?"}})),
+                    ..RawArgs::default()
+                },
+            ),
+            (
+                "ask_file",
+                RawArgs {
+                    path: Some(file.clone()),
+                    question: Some("was it paid?".to_string()),
+                    ..RawArgs::default()
+                },
+            ),
+            (
+                "ask_files",
+                RawArgs {
+                    paths: Some(vec![file]),
+                    question: Some("was it paid?".to_string()),
+                    ..RawArgs::default()
+                },
+            ),
+            (
+                "should_compact",
+                RawArgs {
+                    turns_summary: Some("we fixed the parser".to_string()),
+                    context_tokens: Some(1000),
+                    ..RawArgs::default()
+                },
+            ),
+        ];
+        for (tool, args) in &calls {
+            let out = handle(tool, &ready(), args, &state);
+            assert!(
+                out.is_ok(),
+                "{tool} must succeed for this to be the control: {out:?}"
+            );
+            let rows: Vec<_> = recorded(&dir)
+                .into_iter()
+                .filter(|r| r.tool == *tool)
+                .collect();
+            assert!(!rows.is_empty(), "{tool} wrote no row");
+            assert!(
+                rows.iter()
+                    .all(|r| r.label != "refused" && r.label != "error"),
+                "{tool}: a successful call is not recorded as a refusal: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_control_the_ledger_tool_writes_no_decision_row() {
+        // The ledger tool QUERIES the ledger; a row for every query would make the ledger grow by
+        // being read.
+        let dir = tempdir("r2-ledger");
+        let state = state_with_stub(&dir, "r2-ledger");
+        let args = RawArgs {
+            op: Some("stats".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = handle("ledger", &ready(), &args, &state);
+        assert!(recorded(&dir).is_empty(), "{:?}", recorded(&dir));
+    }
+
+    #[test]
+    fn a_gate_row_carries_the_decision_and_never_the_command() {
+        // R2 + N3, through the handler. `ls -la /tmp` must appear NOWHERE in the segment: not in
+        // a field, not in a question id, not in a note.
+        let dir = tempdir("r2-gate");
+        let state = state_with_stub(&dir, "r2-gate");
+        let args = RawArgs {
+            action: Some("ls -la /tmp".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = handle("gate", &ready(), &args, &state).expect("gate answers");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert!(
+            ["allow", "ask", "deny"].contains(&row.gate_decision.as_deref().unwrap_or("")),
+            "{row:?}"
+        );
+        assert!(row.model_decision.is_some(), "{row:?}");
+        assert!(row.destructive_signals.is_some(), "{row:?}");
+        assert_eq!(row.executed, Some(false));
+        assert_eq!(
+            row.command_sha256.as_deref(),
+            Some(state_sha256(&json!("ls -la /tmp")).as_str()),
+            "the hash is of the command, so two calls about the same command can be matched"
+        );
+        let text = segment_text(&dir);
+        assert!(
+            !text.contains("ls -la"),
+            "the command leaked into the segment: {text}"
+        );
+        assert!(!text.contains("/tmp"), "{text}");
+    }
+
+    #[test]
+    fn a_refusal_by_ask_is_recorded_without_the_command_and_says_what_stopped_it() {
+        // R2's refusal half for `ask`, through the handler: the gate says no, the error is
+        // returned, and the row exists with the verdict that stopped it. The command is a
+        // distinctive string so a leak cannot hide.
+        let dir = tempdir("r2-askref");
+        let state = state_with_stub(&dir, "r2-askref");
+        let args = RawArgs {
+            state: Some("summary".to_string()),
+            questions: Some(json!({"q": {"type": "noul", "instructions": "ok?"}})),
+            command: Some("rm -rf /srv/SECRET-CANARY-42".to_string()),
+            ..RawArgs::default()
+        };
+        let err = handle("ask", &ready(), &args, &state).expect_err("the gate must refuse this");
+        assert!(err.message.contains("NOT run"), "{}", err.message);
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].tool, "ask");
+        assert_eq!(rows[0].label, "refused");
+        assert_ne!(
+            rows[0].gate_decision.as_deref(),
+            Some("allow"),
+            "{:?}",
+            rows[0]
+        );
+        assert!(
+            rows[0].gate_decision.is_some(),
+            "which verdict stopped it: {:?}",
+            rows[0]
+        );
+        assert_eq!(rows[0].executed, Some(false));
+        assert!(rows[0].command_sha256.is_some());
+        assert!(
+            !segment_text(&dir).contains("SECRET-CANARY-42"),
+            "the refused command leaked into the ledger"
+        );
+    }
+
+    #[test]
+    fn a_refusal_by_ask_file_is_recorded() {
+        // The same defect class in another tool: an out-of-scope read is a denial, and it used to
+        // leave no trace.
+        let dir = tempdir("r2-fileref");
+        let state =
+            state_with_stub(&dir, "r2-fileref").with_read_scope(vec![tempdir("r2-fr-root")]);
+        let args = RawArgs {
+            path: Some("/etc/hostname".to_string()),
+            question: Some("what?".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = handle("ask_file", &ready(), &args, &state).expect_err("out of scope");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(
+            (rows[0].tool.as_str(), rows[0].label.as_str()),
+            ("ask_file", "refused")
+        );
+    }
+
+    #[test]
+    fn a_gate_called_while_laya_is_down_is_recorded() {
+        // The not-ready arm of `handle` answers `ask` without reaching a handler, so it needs its
+        // own row -- it is the gate refusing to grant because it could not ask anyone.
+        let dir = tempdir("r2-down");
+        let state = state_with_ledger(&dir);
+        let args = RawArgs {
+            action: Some("git push".to_string()),
+            run_id: Some("r9".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = handle("gate", &down(), &args, &state).expect("the gate answers ask when down");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].gate_decision.as_deref(), Some("ask"));
+        assert_eq!(rows[0].run_id.as_deref(), Some("r9"));
+    }
+
+    #[test]
+    fn bucket_clamped_is_not_a_copy_of_saturated() {
+        // R3. The head answers with all the mass on one option -- `saturated` is TRUE -- and says
+        // nothing about its temperature clamp. The row must say `saturated: true` (so the test is
+        // not vacuous) and `bucket_clamped: None` (unknown), not `Some(true)`.
+        let dir = tempdir("r3-clamp");
+        let state = ServerState::new("http://x:1")
+            .with_sidecar(stub_sidecar("r3-clamp", |_, _, keys| {
+                let first = keys.first().cloned().unwrap_or_default();
+                let probs: serde_json::Map<String, serde_json::Value> = keys
+                    .iter()
+                    .map(|k| (k.clone(), json!(if *k == first { 1.0 } else { 0.0 })))
+                    .collect();
+                json!({"type": "choice", "choice": first, "probabilities": probs, "confidence": 0.99})
+            }))
+            .with_ledger_dir(Some(dir.clone()));
+        let args = RawArgs {
+            state: Some("s".to_string()),
+            questions: Some(json!({"w": {"type": "choice", "instructions": "which?",
+                "criteria": {"a": "a", "b": "b", "c": "c"}}})),
+            ..RawArgs::default()
+        };
+        let _ = handle("decide", &ready(), &args, &state).expect("answers");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].saturated,
+            "the fixture must be saturated: {:?}",
+            rows[0]
+        );
+        assert_eq!(
+            rows[0].bucket_clamped, None,
+            "saturated is not the clamp: {:?}",
+            rows[0]
+        );
+    }
+
+    #[test]
+    fn the_control_a_clamp_state_the_head_reports_is_recorded_as_reported() {
+        // The near miss: a head that DOES report `bucket_clamped: false` must see `Some(false)` in
+        // the row, not `None`. Without this, "always None" would satisfy the test above.
+        let dir = tempdir("r3-known");
+        let state = ServerState::new("http://x:1")
+            .with_sidecar(stub_sidecar("r3-known", |_, _, _| {
+                json!({"type": "noul", "noul": 0.9, "confidence": 0.8, "bucket_clamped": false})
+            }))
+            .with_ledger_dir(Some(dir.clone()));
+        let _ = handle("decide", &ready(), &decide_args(None, None), &state).expect("answers");
+        assert_eq!(recorded(&dir)[0].bucket_clamped, Some(false));
+    }
+
+    #[test]
+    fn a_missing_confidence_is_recorded_as_absent_not_zero() {
+        // R3's second half, through the handler. The head answers a noul with NO confidence.
+        // `answer_from_laya` defaults that to 0.0 on the way in; the row must not inherit it.
+        let dir = tempdir("r3-conf");
+        let state = ServerState::new("http://x:1")
+            .with_sidecar(stub_sidecar(
+                "r3-conf",
+                |_, _, _| json!({"type": "noul", "noul": 0.9}),
+            ))
+            .with_ledger_dir(Some(dir.clone()));
+        let _ = handle("decide", &ready(), &decide_args(None, None), &state).expect("answers");
+        assert_eq!(recorded(&dir)[0].confidence, None);
+        // And the gate: the same missing confidence must not become 0.0 there either.
+        let args = RawArgs {
+            action: Some("git status".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = handle("gate", &ready(), &args, &state).expect("gate");
+        let gate_rows: Vec<_> = recorded(&dir)
+            .into_iter()
+            .filter(|r| r.tool == "gate")
+            .collect();
+        assert_eq!(gate_rows[0].confidence, None, "{:?}", gate_rows[0]);
+    }
+
+    #[test]
+    fn the_control_a_reported_confidence_is_recorded() {
+        let dir = tempdir("r3-conf-ctl");
+        let state = state_with_stub(&dir, "r3-conf-ctl");
+        let _ = handle("decide", &ready(), &decide_args(None, None), &state).expect("answers");
+        assert_eq!(recorded(&dir)[0].confidence, Some(0.8));
+    }
+
+    #[test]
+    fn a_noul_row_carries_its_p() {
+        // R9: the doc promised `p`; the payload carries it; the row now copies it.
+        let dir = tempdir("r9-p");
+        let state = state_with_stub(&dir, "r9-p");
+        let _ = handle("decide", &ready(), &decide_args(None, None), &state).expect("answers");
+        assert_eq!(recorded(&dir)[0].p, Some(0.9));
+    }
+
+    #[test]
+    fn the_ledger_state_is_announced_at_startup() {
+        // R4. A configured ledger announces ON, with its directory.
+        let dir = tempdir("r4-on");
+        let sink = Captured::default();
+        let state = state_with_ledger(&dir).with_event_sink(Box::new(sink.clone()));
+        state.announce_ledger();
+        let lines = sink.lines();
+        assert_eq!(lines.len(), 1, "exactly one startup event: {lines:?}");
+        assert_eq!(lines[0]["event"], "ledger");
+        assert_eq!(lines[0]["enabled"], true);
+        assert_eq!(lines[0]["dir"], json!(dir.display().to_string()));
+        assert_eq!(lines[0]["level"], "info", "ON is not a warning");
+    }
+
+    #[test]
+    fn the_control_an_unset_ledger_directory_is_announced_as_off() {
+        // R4's control, and the deployment failure this spec answers: with no directory the server
+        // must SAY so, as a warning, rather than say nothing.
+        let sink = Captured::default();
+        let state = test_state().with_event_sink(Box::new(sink.clone()));
+        assert!(state.ledger_dir.is_none());
+        state.announce_ledger();
+        let lines = sink.lines();
+        assert_eq!(lines.len(), 1, "silence is the defect: {lines:?}");
+        assert_eq!(lines[0]["event"], "ledger");
+        assert_eq!(lines[0]["enabled"], false);
+        assert_eq!(lines[0]["dir"], serde_json::Value::Null);
+        assert_eq!(lines[0]["level"], "warn", "off is a warning, not an info");
+        assert!(
+            lines[0]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("LAYA_LEDGER_DIR"),
+            "it names the variable to set: {}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn each_tool_call_emits_one_structured_event() {
+        // R6, through `handle`: one gate call, one line, and a second call gets the next `seq`.
+        let dir = tempdir("r6-one");
+        let sink = Captured::default();
+        let state = state_with_stub(&dir, "r6-one").with_event_sink(Box::new(sink.clone()));
+        let args = RawArgs {
+            action: Some("git status".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = handle("gate", &ready(), &args, &state).expect("gate");
+        let lines = sink.lines();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let e = &lines[0];
+        assert_eq!(e["event"], "tool_call");
+        assert_eq!(e["tool"], "gate");
+        assert_eq!(e["outcome"], "ok");
+        assert_eq!(e["seq"], 1);
+        assert!(e["latency_ms"].is_u64(), "{e}");
+        assert!(e["ts"].is_u64(), "{e}");
+        assert!(
+            ["allow", "ask", "deny"].contains(&e["decision"].as_str().unwrap_or("")),
+            "the gate's verdict is on the event: {e}"
+        );
+        let _ = handle("gate", &ready(), &args, &state).expect("gate");
+        assert_eq!(sink.lines()[1]["seq"], 2, "seq counts calls");
+    }
+
+    #[test]
+    fn a_failed_call_is_an_error_event_not_silence() {
+        // The control for `outcome`: an event that always said "ok" would pass the test above.
+        let sink = Captured::default();
+        let state = test_state().with_event_sink(Box::new(sink.clone()));
+        let _ = handle("decide", &ready(), &decide_args(None, None), &state)
+            .expect_err("the head is unreachable");
+        let lines = sink.lines();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["outcome"], "error");
+        assert_eq!(lines[0]["tool"], "decide");
+    }
+
+    #[test]
+    fn events_carry_the_run_and_node_id() {
+        // R6's real requirement. The ids are what make an event joinable to a run; the JSON shape
+        // is incidental. The control is the same call with none: the fields are null, not absent.
+        let dir = tempdir("r6-ids");
+        let sink = Captured::default();
+        let state = state_with_stub(&dir, "r6-ids").with_event_sink(Box::new(sink.clone()));
+        let _ = handle(
+            "decide",
+            &ready(),
+            &decide_args(Some("run-42"), Some("triage")),
+            &state,
+        )
+        .expect("decide");
+        let _ = handle("decide", &ready(), &decide_args(None, None), &state).expect("decide");
+        let lines = sink.lines();
+        assert_eq!(lines[0]["run_id"], "run-42", "{}", lines[0]);
+        assert_eq!(lines[0]["node_id"], "triage", "{}", lines[0]);
+        assert_eq!(lines[1]["run_id"], serde_json::Value::Null);
+        assert_eq!(lines[1]["node_id"], serde_json::Value::Null);
     }
 
     // ---- the question contract, which three defects disagreed with --------------

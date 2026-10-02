@@ -24,7 +24,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use laya_graph::McpCaller;
+use laya_graph::{CallContext, McpCaller};
 use serde_json::{Value, json};
 
 /// Overrides where `laya-mcp` is found. Unset means "resolve it from `PATH`"
@@ -57,10 +57,29 @@ pub struct LiveMcpCaller {
     pub call_timeout: Duration,
 }
 
+/// `arguments` with the caller's run and node ids added as `run_id` / `node_id` (spec 11, R1).
+///
+/// The tool server records them on the ledger row, which is what makes a decision joinable to the
+/// run that made it. A non-object `arguments` is left alone: there is nowhere to put them, and a
+/// tool that takes a bare value does not record by id.
+fn with_context(arguments: &Value, ctx: &CallContext) -> Value {
+    let mut out = arguments.clone();
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("run_id".to_string(), json!(ctx.run_id));
+        obj.insert("node_id".to_string(), json!(ctx.node_id));
+    }
+    out
+}
+
 impl McpCaller for LiveMcpCaller {
-    fn call(&self, tool: &str, arguments: &Value) -> Result<String, String> {
+    fn call(&self, tool: &str, arguments: &Value, ctx: &CallContext) -> Result<String, String> {
         if tool != "decide" {
-            return call_real_mcp(&self.bin, tool, arguments, self.call_timeout);
+            return call_real_mcp(
+                &self.bin,
+                tool,
+                &with_context(arguments, ctx),
+                self.call_timeout,
+            );
         }
 
         let question = arguments
@@ -86,16 +105,19 @@ impl McpCaller for LiveMcpCaller {
 
         let criteria: serde_json::Map<String, Value> =
             options.iter().map(|o| (o.clone(), json!(o))).collect();
-        let call_args = json!({
-            "state": state,
-            "questions": {
-                "answer": {
-                    "type": "choice",
-                    "instructions": question,
-                    "criteria": criteria,
+        let call_args = with_context(
+            &json!({
+                "state": state,
+                "questions": {
+                    "answer": {
+                        "type": "choice",
+                        "instructions": question,
+                        "criteria": criteria,
+                    }
                 }
-            }
-        });
+            }),
+            ctx,
+        );
 
         let raw = call_real_mcp(&self.bin, "decide", &call_args, self.call_timeout)?;
         let parsed: Value = serde_json::from_str(&raw)
@@ -292,6 +314,13 @@ mod tests {
 
     use super::*;
 
+    fn ctx() -> CallContext {
+        CallContext {
+            run_id: "run-7".to_string(),
+            node_id: "triage".to_string(),
+        }
+    }
+
     /// Write an executable `laya-mcp` stand-in into a fresh temp dir.
     fn fake_server(tag: &str, script: &str) -> (PathBuf, PathBuf) {
         let dir =
@@ -334,7 +363,7 @@ mod tests {
             call_timeout: Duration::from_secs(1),
         };
         let started = Instant::now();
-        let result = within_5s(move || caller.call("anything", &json!({})));
+        let result = within_5s(move || caller.call("anything", &json!({}), &ctx()));
         let err = result.expect_err("a hung server must be an error");
         assert!(err.contains("no response"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -359,7 +388,72 @@ mod tests {
             bin,
             call_timeout: Duration::from_secs(5),
         };
-        let result = within_5s(move || caller.call("anything", &json!({})));
+        let result = within_5s(move || caller.call("anything", &json!({}), &ctx()));
         assert_eq!(result.as_deref(), Ok("pong"));
+    }
+
+    #[test]
+    fn the_run_and_node_id_reach_the_server_as_tool_arguments() {
+        // R1 at the wire: what the server RECEIVES. The stand-in writes the `tools/call` line it
+        // was sent, so the assertion is about the bytes on the pipe and not about a helper.
+        let script = "#!/bin/sh\n\
+            read init; echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'\n\
+            read note; read call\n\
+            echo \"$call\" > {PID}.call\n\
+            echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}'\n";
+        let (bin, pid_file) = fake_server("ctx", script);
+        let caller = LiveMcpCaller {
+            bin,
+            call_timeout: Duration::from_secs(5),
+        };
+        let result = within_5s(move || caller.call("gate", &json!({"action": "ls"}), &ctx()));
+        assert_eq!(result.as_deref(), Ok("ok"));
+
+        let sent = std::fs::read_to_string(format!("{}.call", pid_file.display())).expect("call");
+        let sent: Value = serde_json::from_str(sent.trim()).expect("json");
+        let arg = |k: &str| sent.pointer(&format!("/params/arguments/{k}")).cloned();
+        assert_eq!(arg("run_id"), Some(json!("run-7")), "{sent}");
+        assert_eq!(arg("node_id"), Some(json!("triage")), "{sent}");
+        assert_eq!(
+            arg("action"),
+            Some(json!("ls")),
+            "the caller's own arguments survive: {sent}"
+        );
+    }
+
+    #[test]
+    fn the_decide_translation_also_carries_the_ids() {
+        // `decide` is rebuilt from `{question, options, prompt}`, so it is the path most likely to
+        // drop the ids: the arguments are not the caller's, they are made here.
+        let script = "#!/bin/sh\n\
+            read init; echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'\n\
+            read note; read call\n\
+            echo \"$call\" > {PID}.call\n\
+            echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"payloads\\\":{\\\"answer\\\":{\\\"label\\\":\\\"a\\\"}}}\"}]}}'\n";
+        let (bin, pid_file) = fake_server("ctx-decide", script);
+        let caller = LiveMcpCaller {
+            bin,
+            call_timeout: Duration::from_secs(5),
+        };
+        let result = within_5s(move || {
+            caller.call(
+                "decide",
+                &json!({"question": "q", "options": ["a", "b"], "prompt": "p"}),
+                &ctx(),
+            )
+        });
+        assert!(result.is_ok(), "{result:?}");
+        let sent = std::fs::read_to_string(format!("{}.call", pid_file.display())).expect("call");
+        let sent: Value = serde_json::from_str(sent.trim()).expect("json");
+        assert_eq!(
+            sent.pointer("/params/arguments/run_id"),
+            Some(&json!("run-7")),
+            "{sent}"
+        );
+        assert_eq!(
+            sent.pointer("/params/arguments/node_id"),
+            Some(&json!("triage")),
+            "{sent}"
+        );
     }
 }
