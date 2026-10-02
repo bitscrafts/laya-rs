@@ -74,11 +74,11 @@ by changing the default to `noul` and watching it go red, then restore.**
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_flow_without_question_type_still_asks_a_choice 2>&1 | grep -qE '^test result: ok\. 1 passed'` : default preserved
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_noul_decide_sends_no_criteria 2>&1 | grep -qE '^test result: ok\. 1 passed'` : the new path, asserting on the bytes the server receives
-- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib an_unknown_question_type_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` : refusal
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_noul_decide_needs_port_coverage 2>&1 | grep -qE '^test result: ok\. 1 passed'` : a noul has no `options`, so the coverage check is vacuous unless ports must cover `yes`/`no` or carry `_`
-- [ ] `cd /projects/laya-rs && cargo test --workspace` : no regression
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_flow_without_question_type_still_asks_a_choice 2>&1 | grep -qE '^test result: ok\. 1 passed'` : default preserved
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_noul_decide_sends_no_criteria 2>&1 | grep -qE '^test result: ok\. 1 passed'` : the new path, asserting on the bytes the server receives
+- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib an_unknown_question_type_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` : refusal
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_noul_decide_needs_port_coverage 2>&1 | grep -qE '^test result: ok\. 1 passed'` : a noul has no `options`, so the coverage check is vacuous unless ports must cover `yes`/`no` or carry `_`
+- [x] `cd /projects/laya-rs && cargo test --workspace` : no regression
 
 **CORRECTED 2026-10-02 after review — the four criteria above replace four that were VACUOUS.** They
 named `the_documented_fields_exist_on_the_row`, which lives in **laya-store**
@@ -88,10 +88,10 @@ named `the_documented_fields_exist_on_the_row`, which lives in **laya-store**
 grep at all. **All four passed with nothing implemented.** Every criterion above now uses
 `-p <the crate that owns it>` and `grep -qE '^test result: ok\. 1 passed'` — an `ok\. 0 passed` line
 must not satisfy a criterion.
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [ ] `cd /projects/laya-rs && laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : **the committed example still runs unchanged** (R1's compatibility claim, end to end)
-- [ ] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : **the committed example still runs unchanged** (R1's compatibility claim, end to end)
+- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
 
 ## Guardrails
 - Do NOT commit. Leave the work in the tree.
@@ -102,3 +102,47 @@ must not satisfy a criterion.
   review in `_docs/04-development/GENERIC-GRAPHS-ANALYSIS.md` and are explicitly out of scope here.
 - Do NOT delete anything; `mv` aside and say so.
 - Run the flow, do not only read the code: an exit criterion above requires a real `laya graph run`.
+
+---
+
+## Verification of this spec (run here, 2026-10-02, after the worker finished)
+
+### The point, measured: a `noul` and a `choice` answer the SAME question differently
+
+Both flows below ask *"Is it greater than 300?"* over the identical state
+`"The word count in the file is 412 words."`, and both route on `label`.
+
+```
+question_type: "noul"        label=yes  band=HIGH  confidence=0.9677   -> BIG
+absent (a choice, options)   label=yes  band=low   confidence=0.2389   -> (band-gated)
+```
+
+**Right label and `band: high` versus the same label at `band: low`.** The head knows the answer to the
+`noul` and is merely guessing at the `choice` — which is exactly the difference the review measured
+(0.875–1.0 against 0.35–0.54) and the reason this field exists. A flow could not ask for it before
+today: the question type was hardcoded at `mcp_client.rs:105-115`.
+
+### Everything else
+
+| check | result |
+|---|---|
+| 4 criteria tests, in the crates that own them | **4/4 PASS**, each `ok. 1 passed` |
+| the default preserved | absent `question_type` still asks a **choice** |
+| the port-coverage rule for a `noul` | PASS |
+| `cargo test --workspace` | **595 passed, 0 failed** |
+| clippy `-D warnings` / fmt / doc citations | 0 / clean / 65 docs resolve |
+
+### Two things worth recording
+
+- **My own probe flow was refused by spec 20, correctly.** The first attempt had a port targeting a
+  node that does not exist in the flow; validation named it (`port `_` targets `esc`, which is not a
+  node in this flow — it would run nothing`). That is the check working, and it is the same shape the
+  review measured as silently running *nothing* before spec 20.
+- **The worker followed the brief over my phrasing on the control and said so**: it reported that the
+  first run had to be re-checked, and it left `HANDOFF.md` alone because another process had modified
+  it — correct, that edit was mine.
+
+**The CLI criterion above named `laya` (the PATH binary), which is STALE** — it is not a build of this
+tree and reports refused flows as valid, so the check would have passed without exercising this
+change. Re-pointed at `./target/debug/laya` and verified that way. Third spec in this batch to need
+that correction.

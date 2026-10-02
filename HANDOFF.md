@@ -1,55 +1,37 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (12) · **Status**: YELLOW — **specs 20, 17 and 19 have landed; 18 and 16 are
-written and waiting on quota.** The graph engine's two worst defects are fixed: the flow format is
-now a contract instead of a wish, and which nodes execute is a function of the graph rather than of
-the order of nodes in the JSON file.
+**Date**: 2026-10-02 (13) · **Status**: YELLOW — **specs 20, 17, 19, 18 landed; 16 in flight; 21
+filed.** The graph engine's three worst problems are fixed and its central limitation is closed:
+which nodes run no longer depends on the order of the JSON file, a typo can no longer be silently
+inert, and a shell's output can now inform a decision.
 
 ```
-cargo test --workspace                    578 passed · 0 failed · 5 ignored
+cargo test --workspace                    589 passed · 0 failed
 cargo clippy --workspace --all-targets    0
 cargo fmt --all --check                   clean
-python3 scripts/check-doc-citations.py    63 docs, every citation resolves
+python3 scripts/check-doc-citations.py    65 docs, every citation resolves
+                                         102 links, 3 anchored, 0 broken
 ```
 
 ## ⚠ THE DEPLOYED BINARIES ARE STALE — the one open operational item
 
-`/root/.local/bin/{laya,laya-mcp,laya-gate}` are the **14:27** build. Every commit from 15:00 onward
-is source-only. Measured: the deployed `laya` reports a typo'd-key flow as `is valid`; the fresh build
-refuses it by name. **Anyone using `laya` from `PATH` today gets the old behaviour and none of these
-fixes.**
+`/root/.local/bin/{laya,laya-mcp,laya-gate}` are the **14:27** build. Every commit since 15:00 is
+source-only. Measured: the deployed `laya` calls a typo'd-key flow `is valid` while the fresh build
+refuses it by name. **Anyone using `laya` from `PATH` gets the old behaviour and none of these fixes.**
 
-Do not deploy until 18 and 16 land — one rebuild instead of three. Then:
+Deploy once, after spec 16 lands. The gate must not be replaced while `pgrep -x laya-gate` is
+non-empty — that blocks a live agent mid-turn (learned at 03:41 today).
 
-```sh
-cd /projects/laya-rs && cargo build --release            # 1m 10s
-pgrep -x laya-gate || echo "clear to replace the gate"   # replacing it mid-turn blocks a live agent
-# mv the old binaries aside, copy the new ones (never cp over a live binary), then verify hashes
-cd /projects/laya-rs && for b in laya laya-mcp laya-gate; do
-  echo "$b $(sha256sum /root/.local/bin/$b | cut -c1-16) $(sha256sum target/release/$b | cut -c1-16)"
-done
-```
+## What landed, and the one measurement that carried each
 
-## Spec state
-
-| spec | state | commit |
+| spec | commit | the thing that proves it |
 |---|---|---|
-| **20** — the format is a contract | **DONE, 12/12** | `10fc381` |
-| **17** — routing is a function of the graph | **10/11** (the 11th is the mutation gate, below) | `ac9e94f` |
-| **19** — the doc corrections + fixtures | **DONE, 11/11** | `98d99d3` |
-| 18 — `{{node_id}}` | written, brief ready, **waiting on quota** | — |
-| 16 — `question_type` | written, brief ready, **waiting on quota** | — |
-
-**Quota, 2026-10-02 19:15 UTC:** the five-hour window is 43% free, below the 45% floor the dispatch
-script enforces — it refuses to start a run that would die partway. It resets **21:40 UTC**. The two
-briefs are complete and reviewed; dispatch is one command each when the window reopens.
-
-**Spec 17's open criterion is deliberate.** `bash scripts/mutants-gate.sh` requires `exit 0` and exits
-**3** — *215 mutants, 193 caught, 20 unviable, **2 timeouts, 0 MISSED***. `cargo-mutants` exits 3 for a
-timeout and 2 for a missed mutant, and the two timeouts are replacements of `dependency_tables`
-(`sched.rs:87`) that return a phantom-only map, leaving a node's indegree above zero so the scheduler
-**waits instead of failing**. No mutant survived; the invariant is undefended and the hang is the
-symptom. Recorded in the spec rather than absorbed into a green tick.
+| 20 — the format is a contract | `10fc381` | a typo'd key is refused with a nearest-key hint; removing the guard makes `an_unknown_key_is_refused` fail |
+| 17 — routing is a function of the graph | `ac9e94f` | **both array orders now execute the same set**, and the unselected branch is gone; `B_yes` no longer runs |
+| 19 — docs + fixtures | `98d99d3` | the four corrections are dated; the order fixtures are checked in |
+| 18 — a shell's output can inform a decision | `10b26ef` | **a `wc` whose value drives the branch**: 13 words → short, 412 → long |
+| 16 — `question_type` | *in flight* | the head answers `noul` at 0.875–1.0 against a choice's 0.35–0.54 |
+| 21 — the refusals catch up | *filed* | spec 17 made the `decide` `timeout` live, so spec 20's refusal of it is **stale** |
 
 ## The graph is the active work
 

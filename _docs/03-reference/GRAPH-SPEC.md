@@ -146,6 +146,33 @@ computed by *our* thresholds from the head's confidence. An uncertain answer the
 along an edge that was drawn at author time — no graph change, no new node, and tuning the
 threshold changes a number in our config, never the flow.
 
+### `question_type`: `choice` or `noul` (spec 16)
+
+```json
+{ "id": "gt300", "kind": "decide", "depends_on": ["count"],
+  "prompt": "The word count in the file is {{count}} words.",
+  "question": "Is it greater than 300?", "question_type": "noul",
+  "ports": { "yes": "long", "no": "short" } }
+```
+
+| | |
+|---|---|
+| accepted values | `choice` (the default) and `noul` (a yes/no question) |
+| default | **absent means `choice`.** Every flow written before this field is unchanged. A `noul` must be asked for by name; nothing infers it from the absence of `options` |
+| a `noul` and `options` | a contradiction: **refused** (`NoulWithOptions`). A `noul` takes no `options` |
+| a `noul`'s `ports` | key on `yes` / `no` (or carry `_`). With no `options` to check against, `validate` requires both answers covered or a `_` fallback, and refuses any other key by name — otherwise a typo is a run-time `UnknownNode` |
+| anything else | refused by name (`BadQuestionType`: node id and value); never falls back to `choice` |
+| on the wire | a `noul` sends `{"type":"noul","instructions":…}` and **no `criteria`** (the server refuses one) |
+
+**Why prefer a `noul` for a threshold.** Measured on a numeric threshold, a `noul` is correct at
+every point including the boundary, with confidence 0.875–1.0; a 2-option `choice` is
+correct off-boundary with confidence 0.35–0.54, and at exact boundaries it can fail and report
+`band: low` (which is what makes band-gating work). **The advantage is confidence, not label
+correctness:** a 2-option `choice` is 15/15 under the `The word count is N.` phrasing, so a
+`choice` is not wrong, it is less sure. See
+[`HEAD-QUESTION-SHAPE-LIMITS.md`](../04-development/HEAD-QUESTION-SHAPE-LIMITS.md). This field does
+not make a graph correct; routing and the scheduler do.
+
 ### `{{node_id}}` in a decide's `prompt` (spec 18)
 
 ```json

@@ -94,15 +94,21 @@ fn lower_decide(
     let options = node.options.clone().unwrap_or_default();
     let question = node.question.clone().unwrap_or_default();
 
+    let mut arguments = json!({
+        "question": question,
+        "options": options,
+        "prompt": node.prompt,
+    });
+    // Added only when set, so a flow without `question_type` lowers byte-identically (spec 16).
+    if let (Some(qt), Some(obj)) = (&node.question_type, arguments.as_object_mut()) {
+        obj.insert("question_type".to_string(), json!(qt));
+    }
+
     nodes.push(GraphNode {
         id: node.id.clone(),
         body: NodeBody::Mcp {
             tool: "decide".to_string(),
-            arguments: json!({
-                "question": question,
-                "options": options,
-                "prompt": node.prompt,
-            }),
+            arguments,
         },
         writes: node.writes,
         allow_failure: node.allow_failure,

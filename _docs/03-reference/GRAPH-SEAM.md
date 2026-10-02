@@ -11,6 +11,10 @@ wider question: *what exactly is the seam, and what does this project have again
 > from the seam — a `decide`'s state is a literal, and node array order once changed which nodes
 > ran. They are stated once, in
 > [`GRAPH-SPEC.md`](GRAPH-SPEC.md#hard-rules-for-flow-authors-added-2026-10-02-spec-19); not repeated here.
+>
+> **Question shape (spec 16).** A `decide` can ask a `noul` as well as a `choice`; the field, its
+> default and the measured reason to prefer `noul` are in
+> [`GRAPH-SPEC.md`](GRAPH-SPEC.md#question_type-choice-or-noul-spec-16).
 
 ---
 

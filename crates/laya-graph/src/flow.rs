@@ -221,7 +221,14 @@ pub struct Node {
     /// `decide`: the question to ask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question: Option<String>,
-    /// `decide`: the options Laya may answer.
+    /// `decide`: the question shape — `choice` (the default when absent) or `noul`.
+    ///
+    /// A `noul` is a yes/no question: it takes no `options`, and its answers are `yes` / `no`, so
+    /// its `ports` key on those. A `noul` must be asked for by name; nothing infers it from the
+    /// absence of `options`. Any other value is refused by `validate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_type: Option<String>,
+    /// `decide`: the options Laya may answer (a `choice` only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<String>>,
     /// `decide`: the state to hand Laya. **Literal text** — nothing is
@@ -266,6 +273,7 @@ impl Node {
             tool: None,
             arguments: None,
             question: None,
+            question_type: None,
             options: None,
             prompt: None,
             on: None,

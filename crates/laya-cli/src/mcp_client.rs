@@ -103,18 +103,26 @@ impl McpCaller for LiveMcpCaller {
             .and_then(Value::as_str)
             .unwrap_or_default();
 
-        let criteria: serde_json::Map<String, Value> =
-            options.iter().map(|o| (o.clone(), json!(o))).collect();
+        // Spec 16: absent means `choice`; a `noul` must be asked for by name. `validate` refuses
+        // anything else, so reaching here with another value is an error, not a guess.
+        let answer = match arguments.get("question_type").and_then(Value::as_str) {
+            None | Some("choice") => {
+                let criteria: serde_json::Map<String, Value> =
+                    options.iter().map(|o| (o.clone(), json!(o))).collect();
+                json!({"type": "choice", "instructions": question, "criteria": criteria})
+            }
+            // A `noul` has no options to score: the server refuses `criteria` on one.
+            Some("noul") => json!({"type": "noul", "instructions": question}),
+            Some(other) => {
+                return Err(format!(
+                    "decide: unknown question_type `{other}`; expected `choice` or `noul`"
+                ));
+            }
+        };
         let call_args = with_context(
             &json!({
                 "state": state,
-                "questions": {
-                    "answer": {
-                        "type": "choice",
-                        "instructions": question,
-                        "criteria": criteria,
-                    }
-                }
+                "questions": {"answer": answer}
             }),
             ctx,
         );
@@ -457,6 +465,93 @@ mod tests {
         );
     }
 
+    /// The `tools/call` line a `decide` with these arguments puts on the wire (spec 16).
+    fn decide_wire(tag: &str, args: Value) -> (Result<String, String>, Option<Value>) {
+        let script = "#!/bin/sh\n\
+            read init; echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'\n\
+            read note; read call\n\
+            echo \"$call\" > {PID}.call\n\
+            echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"payloads\\\":{\\\"answer\\\":{\\\"label\\\":\\\"yes\\\"}}}\"}]}}'\n";
+        let (bin, pid_file) = fake_server(tag, script);
+        let caller = LiveMcpCaller {
+            bin,
+            call_timeout: Duration::from_secs(5),
+        };
+        let result = within_5s(move || caller.call("decide", &args, &ctx()));
+        let sent = std::fs::read_to_string(format!("{}.call", pid_file.display()))
+            .ok()
+            .and_then(|s| serde_json::from_str(s.trim()).ok());
+        (result, sent)
+    }
+
+    /// Spec 16, the default: no `question_type` is a `choice` with `criteria` keyed by option.
+    /// Control for the noul row — a change that made everything a `noul` fails here.
+    #[test]
+    fn a_flow_without_question_type_still_asks_a_choice() {
+        let args = json!({"question": "q", "options": ["a", "b"], "prompt": "p"});
+        let (result, sent) = decide_wire("s16-default", args);
+        assert!(result.is_ok(), "{result:?}");
+        let sent = sent.expect("call line");
+        assert_eq!(
+            sent.pointer("/params/arguments/questions/answer"),
+            Some(&json!({"type": "choice", "instructions": "q", "criteria": {"a": "a", "b": "b"}})),
+            "{sent}"
+        );
+    }
+
+    /// Spec 16: the same with `question_type: "choice"` named — criteria present, keyed by option.
+    #[test]
+    fn the_control_a_choice_decide_still_carries_its_options() {
+        let args = json!({"question": "q", "options": ["a", "b"], "prompt": "p",
+            "question_type": "choice"});
+        let (result, sent) = decide_wire("s16-choice", args);
+        assert!(result.is_ok(), "{result:?}");
+        let sent = sent.expect("call line");
+        assert_eq!(
+            sent.pointer("/params/arguments/questions/answer/type"),
+            Some(&json!("choice")),
+            "{sent}"
+        );
+        assert_eq!(
+            sent.pointer("/params/arguments/questions/answer/criteria"),
+            Some(&json!({"a": "a", "b": "b"})),
+            "{sent}"
+        );
+    }
+
+    /// Spec 16 R2: a `noul` goes out as `type=noul` with NO `criteria` key at all.
+    #[test]
+    fn a_noul_decide_sends_no_criteria() {
+        let args = json!({"question": "Is it big?", "options": [], "prompt": "p",
+            "question_type": "noul"});
+        let (result, sent) = decide_wire("s16-noul", args);
+        assert!(result.is_ok(), "{result:?}");
+        let sent = sent.expect("call line");
+        let answer = sent
+            .pointer("/params/arguments/questions/answer")
+            .cloned()
+            .expect("answer question");
+        assert_eq!(answer.get("type"), Some(&json!("noul")), "{sent}");
+        assert_eq!(
+            answer.get("instructions"),
+            Some(&json!("Is it big?")),
+            "{sent}"
+        );
+        assert!(answer.get("criteria").is_none(), "no criteria: {sent}");
+    }
+
+    /// Spec 16 R3/R4: an unknown type that reaches the caller is an error naming it, and
+    /// nothing is sent.
+    #[test]
+    fn an_unknown_question_type_is_refused_by_name() {
+        let args = json!({"question": "q", "options": ["a"], "prompt": "p",
+            "question_type": "yolo"});
+        let (result, sent) = decide_wire("s16-yolo", args);
+        let err = result.expect_err("an unknown question_type must be refused");
+        assert!(err.contains("yolo"), "must name the value: {err}");
+        assert!(sent.is_none(), "nothing may reach the server: {sent:?}");
+    }
+
     /// Spec 20 R4, wire level. Each `decide` field a flow can set is observable in the BYTES the
     /// server receives: two calls differing only in that field must send different values at the
     /// pointer named here. A field the translation dropped would fail its row.
@@ -470,7 +565,7 @@ mod tests {
             v[field] = value;
             v
         };
-        let table: [(&str, Value, Value, &str); 3] = [
+        let table: [(&str, Value, Value, &str); 4] = [
             (
                 "question",
                 with("question", json!("one?")),
@@ -488,6 +583,12 @@ mod tests {
                 with("prompt", json!("state one")),
                 with("prompt", json!("state two")),
                 "/params/arguments/state",
+            ),
+            (
+                "question_type",
+                with("question_type", json!("choice")),
+                with("question_type", json!("noul")),
+                "/params/arguments/questions/answer/type",
             ),
         ];
         let script = "#!/bin/sh\n\

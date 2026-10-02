@@ -224,6 +224,17 @@ const NODE_FIELDS: &[(&str, Effect)] = &[
         },
     ),
     (
+        "question_type",
+        // Spec 16. Differs ONLY in the field (no options either side: a noul takes none, and a
+        // choice with only a `_` port validates); the lowered `decide` arguments the caller
+        // reads carry it, and the scripted caller echoes them.
+        Effect::Observable {
+            with: r#"{"flow":"t","version":1,"nodes":[{"id":"d","kind":"decide","question":"q?","prompt":"p","question_type":"noul","ports":{"_":"x"}},{"id":"x","kind":"shell","run":"echo x"}]}"#,
+            without: r#"{"flow":"t","version":1,"nodes":[{"id":"d","kind":"decide","question":"q?","prompt":"p","question_type":"choice","ports":{"_":"x"}},{"id":"x","kind":"shell","run":"echo x"}]}"#,
+            differs: |w, wo| output(w, "d") != output(wo, "d"),
+        },
+    ),
+    (
         "options",
         Effect::Observable {
             with: decide!("", r#"["low","high"]"#, r#"{"low":"x","high":"y","_":"x"}"#),
@@ -410,6 +421,7 @@ fn fully_populated_node() -> Node {
         tool: Some("t".to_string()),
         arguments: Some(json!({})),
         question: Some("q".to_string()),
+        question_type: Some("choice".to_string()),
         options: Some(vec!["o".to_string()]),
         prompt: Some("p".to_string()),
         on: Some("label".to_string()),

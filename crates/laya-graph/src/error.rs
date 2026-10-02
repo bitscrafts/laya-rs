@@ -91,6 +91,26 @@ pub enum FlowError {
         on: String,
     },
 
+    /// A `decide` node's `question_type` is neither `choice` nor `noul` (spec 16).
+    #[error(
+        "decide node `{id}` has question_type = `{value}`; expected `choice` or `noul` (omit it for choice)"
+    )]
+    BadQuestionType {
+        /// The decide node.
+        id: String,
+        /// The value it gave.
+        value: String,
+    },
+
+    /// A `noul` decide that also declares `options` (spec 16): a yes/no question has none.
+    #[error(
+        "decide node `{id}` is a noul but declares options; a noul answers yes/no and takes no options          (use question_type `choice` for options)"
+    )]
+    NoulWithOptions {
+        /// The decide node.
+        id: String,
+    },
+
     /// A `{{target}}` in a decide's `prompt` names no node in the flow.
     #[error(
         "decide node `{id}` prompt references `{{{{{target}}}}}`, which is not a node in this flow. Name an existing node in `depends_on`; a literal `{{{{` is not allowed in a prompt"

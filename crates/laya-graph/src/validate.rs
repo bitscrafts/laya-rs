@@ -100,6 +100,27 @@ fn validate_required(node: &Node) -> Result<(), FlowError> {
 /// The values `decide.on = band` can produce.
 const BANDS: [&str; 3] = ["low", "mid", "high"];
 
+/// Whether `node` asks a `noul` (spec 16). Absent is a `choice`; a `noul` must be named, and has
+/// no options. Anything else is refused by name, never defaulted.
+fn is_noul(node: &Node) -> Result<bool, FlowError> {
+    let noul = match node.question_type.as_deref() {
+        None | Some("choice") => false,
+        Some("noul") => true,
+        Some(other) => {
+            return Err(FlowError::BadQuestionType {
+                id: node.id.clone(),
+                value: other.to_string(),
+            });
+        }
+    };
+    if noul && node.options.as_ref().is_some_and(|o| !o.is_empty()) {
+        return Err(FlowError::NoulWithOptions {
+            id: node.id.clone(),
+        });
+    }
+    Ok(noul)
+}
+
 fn validate_decide(node: &Node, ids: &HashSet<&str>) -> Result<(), FlowError> {
     if node
         .prompt
@@ -122,14 +143,19 @@ fn validate_decide(node: &Node, ids: &HashSet<&str>) -> Result<(), FlowError> {
         }
     };
 
+    let noul = is_noul(node)?;
+
     let options = node.options.as_deref().unwrap_or_default();
     let ports = node.ports.as_ref();
     let has_fallback = ports.is_some_and(|p| p.contains_key("_"));
 
-    // What a port key may be: the options when routing on `label`, the band
-    // names when routing on `band`.
+    // What a port key may be: the options when routing on `label` (`yes` / `no` for a noul,
+    // which has no options, so completeness would otherwise be vacuous), the band names when
+    // routing on `band`.
     let expected: Vec<String> = if on == "band" {
         BANDS.iter().map(|b| (*b).to_string()).collect()
+    } else if noul {
+        vec!["yes".to_string(), "no".to_string()]
     } else {
         options.to_vec()
     };
@@ -414,6 +440,60 @@ mod tests {
             timeout: None,
             nodes,
         }
+    }
+
+    /// Spec 16 R4: a `noul` has no `options`, so the completeness check would be vacuous; its
+    /// ports must cover `yes` and `no` (or carry `_`), and a typo is refused by name.
+    #[test]
+    fn a_noul_decide_needs_port_coverage() {
+        let noul = |ports: &[(&str, &str)]| Node {
+            question_type: Some("noul".to_string()),
+            ..decide("d", &[], ports)
+        };
+        let check = |ports: &[(&str, &str)]| {
+            validate(&flow(vec![noul(ports), shell("x", &[]), shell("y", &[])]))
+        };
+
+        // Only `yes` covered, no fallback: `no` would be a run-time UnknownNode.
+        let err = check(&[("yes", "x")]).expect_err("`no` is uncovered");
+        assert!(
+            matches!(&err, FlowError::IncompletePorts { missing, .. } if missing == &["no"]),
+            "{err:?}"
+        );
+        // A typo of `yes` is refused by name, with the hint.
+        let err = check(&[("yess", "x"), ("no", "y")]).expect_err("typo");
+        assert!(
+            matches!(&err, FlowError::UnknownPortKey { key, .. } if key == "yess"),
+            "{err:?}"
+        );
+        // The near-miss that must still validate: full coverage, and one answer + fallback.
+        assert!(check(&[("yes", "x"), ("no", "y")]).is_ok());
+        assert!(check(&[("yes", "x"), ("_", "y")]).is_ok());
+    }
+
+    /// Spec 16 R2: an unknown `question_type` is refused naming the node and the value; a
+    /// `noul` that declares `options` is a contradiction and is refused.
+    #[test]
+    fn validate_refuses_an_unknown_question_type_by_name() {
+        let with = |qt: &str, options: &[&str]| Node {
+            question_type: Some(qt.to_string()),
+            ..decide("d", options, &[("_", "x")])
+        };
+        let check = |n: Node| validate(&flow(vec![n, shell("x", &[])]));
+
+        let err = check(with("yolo", &["a"])).expect_err("unknown type");
+        assert!(
+            matches!(&err, FlowError::BadQuestionType { id, value } if id == "d" && value == "yolo"),
+            "{err:?}"
+        );
+        let err = check(with("noul", &["a"])).expect_err("noul with options");
+        assert!(
+            matches!(&err, FlowError::NoulWithOptions { id } if id == "d"),
+            "{err:?}"
+        );
+        // Controls: the accepted shapes still validate.
+        assert!(check(with("choice", &["a"])).is_ok());
+        assert!(check(with("noul", &[])).is_ok());
     }
 
     #[test]
