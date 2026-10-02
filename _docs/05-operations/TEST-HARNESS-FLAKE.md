@@ -187,3 +187,23 @@ what produced the false verdict.** A guard that cannot distinguish "zero" from "
 The guard around a destructive operation must **fail safe**: if the count is unreadable, refuse and
 report, never proceed. Here the bug was in the conservative direction (refusing to remove clean
 worktrees), which cost nothing but would have cost a great deal had it been inverted.
+
+---
+
+## A FOURTH check-mechanics bug, and the sharpest of them all: a criterion satisfied by the WRONG node
+
+Writing the exit criterion for the `laya-mcp`-on-`PATH` fix, I wrote:
+
+```sh
+… laya graph run example.flow.json 2>&1 | grep -qE '"success":true'
+```
+
+**Measured: with a stripped `PATH` the decision node FAILS and the criterion still passes**, because the
+flow's *shell* node succeeded and printed its own `"success":true`. The criterion was satisfied by a node
+other than the one it was about — the exact class this session spent a day removing, written into a NEW
+spec by the same hand that had just been documenting it.
+
+The corrected criterion names the decide and prints the failing node ids. **The general rule, now
+learned four separate ways today: a criterion must be satisfiable ONLY by the thing it names.** A
+`grep` for a token that several records share is not a check — it is a coin flip weighted in favour of
+passing.

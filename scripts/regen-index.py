@@ -37,6 +37,13 @@ DOCS = {
         "is silently inert, four silent misroutes pass a validate, and the reference doc advertises "
         "$.inputs, a feature that does not exist."
     ),
+    "03-reference/EXAMPLES-NEED-LAYA-MCP-ON-PATH.md": (
+        "The examples need laya-mcp on PATH — measured, and it is NOT intermittent",
+        "Every worked example runs a decision node, and the command spawns the server through the "
+        "caller's PATH, so the examples fail from a shell without the install directory. Measured three "
+        "ways. First mistaken for a flake: a nondeterministic cause and a differing environment look "
+        "identical from a single result."
+    ),
     "03-reference/GRAPH-FEATURES.md": (
         "Graph features — composability, branches, loops: what is implemented",
         "Measured by running, not reading. Branches: yes, working. Composability: implemented in the "

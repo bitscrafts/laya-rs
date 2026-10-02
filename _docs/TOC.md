@@ -15,6 +15,7 @@ reading order.
 ## 03-reference
 - [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md)
 - [The flow format contract — what changes, why, and what it costs](03-reference/GRAPH-FORMAT-CONTRACT.md)
+- [The examples need laya-mcp on PATH — measured, and it is NOT intermittent](03-reference/EXAMPLES-NEED-LAYA-MCP-ON-PATH.md)
 - [Graph features — composability, branches, loops: what is implemented](03-reference/GRAPH-FEATURES.md)
 - [Reference](03-reference/README.md)
 
