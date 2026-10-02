@@ -714,6 +714,31 @@ mod tests {
         assert!(err.contains("a/route"), "{err}");
     }
 
+    /// Spec 19: the refusal names the id and says why (`/` is the synthetic route id's separator),
+    /// and a near-miss id without a slash still takes the normal path.
+    #[test]
+    fn a_node_id_containing_a_slash_is_refused_by_name() {
+        let json = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"x/route","kind":"shell","run":"true"}]}"#;
+        let err = refusal(json).expect_err("`/` collides with the synthetic route id");
+        assert!(err.contains("x/route"), "must name the id: {err}");
+        assert!(err.contains('/'), "must give the reason: {err}");
+        let near_miss = r#"{"flow":"t","version":1,"nodes":[
+          {"id":"x_route","kind":"shell","run":"true"}]}"#;
+        assert_eq!(refusal(near_miss), Ok(()));
+    }
+
+    /// Spec 19's control: the refusals must not reject the working gate-then-ask example.
+    #[test]
+    fn the_control_a_well_formed_flow_is_accepted() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../_docs/02-guides/wc-classify-chained.flow.json");
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
+        let flow = crate::expand(&raw, &crate::Library::new()).expect("expand");
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
     #[test]
     fn a_subflow_node_is_refused_naming_the_missing_library() {
         let root: serde_json::Value = serde_json::from_str(

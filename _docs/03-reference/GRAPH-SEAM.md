@@ -7,6 +7,11 @@
 translation.** Read `specs/02-route-payload.md` for the field-by-field contract. This document answers the
 wider question: *what exactly is the seam, and what does this project have against it?*
 
+> **Flow-author hazards (2026-10-02, spec 19).** Two rules govern what a flow author can expect
+> from the seam — a `decide`'s state is a literal, and node array order once changed which nodes
+> ran. They are stated once, in
+> [`GRAPH-SPEC.md`](GRAPH-SPEC.md#hard-rules-for-flow-authors-added-2026-10-02-spec-19); not repeated here.
+
 ---
 
 ## What a `route` node is, and what it needs

@@ -18,6 +18,25 @@ what lets us change one without re-verifying the other.
 
 ---
 
+## Hard rules for flow authors (added 2026-10-02, spec 19)
+
+Two rules, stated here once; other documents link to this section rather than restating it.
+Both come from `_docs/04-development/OPUS-REVIEW-GENERIC-GRAPHS.md` and were measured with
+`laya graph run`.
+
+1. **A `decide`'s state is a literal; a shell in the same flow cannot inform it.** The `prompt` is
+   sent to the head as written. A shell's output is never substituted into it, so a `count_words`
+   node next to a `decide` is a *witness*, not an input (see `GRAPH-EXAMPLE-WORDCOUNT.md`). This
+   holds until spec 18 (`18-a-shell-can-inform-a-decision.md`) lands; it has not.
+2. **Which nodes run was a function of the node array order.** Measured with the `p6-file-order` /
+   `p6c-file-order-control` pair (identical graphs, array reordered): the executed-node sets differed.
+   **Superseded 2026-10-02 by spec 17 (commit `ac9e94f`)**: routing is now a function of the graph,
+   and the same pair, checked in under `crates/laya-graph/tests/fixtures/`, is asserted to run the
+   same nodes (`routing_order.rs`). The old behaviour is recorded here so the disagreement stays
+   visible; flows written against an engine older than that commit still carry the hazard.
+
+---
+
 ## Part 1 — the flow document (suggested)
 
 JSON, versioned. Text is canonical and reviewable; the store is a cache of it (see the

@@ -64,7 +64,7 @@ so, or it becomes a specification of the bug.
 |---|---|---|
 | `a_port_target_shared_by_two_decides_is_refused_by_name  [DROPPED with R1 -- see above]` | two decides porting to one node | refusal naming both decides and the shared target |
 | `a_depends_on_naming_a_port_target_is_refused_by_name  [DROPPED with R1 -- see above]` | `p7-join`'s shape | refusal naming the node and the target |
-| `escalate_on_near_tie_is_refused_as_not_implemented` | `p12-near-tie`'s shape | refusal saying it is not implemented |
+| `near_tie_routing_is_refused_as_not_implemented` | `p12-near-tie`'s shape | refusal saying it is not implemented |
 | `a_node_id_containing_a_slash_is_refused_by_name` | a decide with id `x/route` | refusal naming the id and the reason |
 | `the_control_a_well_formed_flow_is_accepted` | `wc-classify-chained.flow.json` | validates — the refusals must not reject the working example |
 
@@ -75,15 +75,15 @@ reject flows that are fine. A validator that refuses everything passes rows 1–
 
 - [x] ~~the R1 port-target refusal~~ — **DROPPED with R1**: it rejected the working example. Do not test it.
 - [x] ~~the R1 depends_on-on-a-port-target refusal~~ — **DROPPED with R1**: it rejected the working example. Do not test it.
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib escalate_on_near_tie_is_refused_as_not_implemented 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_node_id_containing_a_slash_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_well_formed_flow_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && laya graph validate _docs/02-guides/wc-classify-chained.flow.json` : still valid (the working example survives every new refusal)
-- [ ] `cd /projects/laya-rs && git ls-files crates/laya-graph/tests/fixtures/ | grep -c 'p6'` : the two order fixtures are **checked in**
-- [ ] the four doc corrections exist and each carries its date and measurement: `cd /projects/laya-rs && grep -l '2026-10-02' _docs/04-development/HEAD-QUESTION-SHAPE-LIMITS.md _docs/02-guides/GRAPH-EXAMPLE-WORDCOUNT.md _docs/03-reference/GRAPH-SPEC.md | wc -l` → 3
-- [ ] `cd /projects/laya-rs && cargo test --workspace`
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [ ] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib near_tie_routing_is_refused_as_not_implemented 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_node_id_containing_a_slash_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_well_formed_flow_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && laya graph validate _docs/02-guides/wc-classify-chained.flow.json` : still valid (the working example survives every new refusal)
+- [x] `cd /projects/laya-rs && git ls-files crates/laya-graph/tests/fixtures/ | grep -c 'p6'` : the two order fixtures are **checked in**
+- [x] the four doc corrections exist and each carries its date and measurement: `cd /projects/laya-rs && grep -l '2026-10-02' _docs/04-development/HEAD-QUESTION-SHAPE-LIMITS.md _docs/02-guides/GRAPH-EXAMPLE-WORDCOUNT.md _docs/03-reference/GRAPH-SPEC.md | wc -l` → 3
+- [x] `cd /projects/laya-rs && cargo test --workspace`
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
 
 ## Guardrails
 - Do NOT commit. Leave the work in the tree.
@@ -95,3 +95,34 @@ reject flows that are fine. A validator that refuses everything passes rows 1–
 - Do NOT modify `specs/`.
 - **Run graphs, do not only read code** (user instruction: *"graph must be ran from laya!"*).
 - Do not delete anything; `mv` aside and say so.
+
+---
+
+## Verification of this spec (run here, 2026-10-02, after the worker finished)
+
+| what | result |
+|---|---|
+| `near_tie_routing_is_refused_as_not_implemented` | PASS — and the refusal **works live**: `laya: node \`d\` sets \`escalate_on_near_tie\`, which is not implemented (until near-tie routing exists; its target would run on EVERY run). Remove the flag and the \`near_tie_port\` node, and route on \`band\` instead` |
+| `a_node_id_containing_a_slash_is_refused_by_name` | PASS |
+| `the_control_a_well_formed_flow_is_accepted` | PASS — and `wc-classify-chained.flow.json` still validates, which is the criterion the **dropped** R1 would have broken |
+| the two order fixtures checked into git | **yes** — `p6-file-order`, `p6c-file-order-control`, plus `p7-join` and `p13-shared-target` |
+| the four docs carry dated corrections | yes (HEAD-QUESTION-SHAPE-LIMITS 2, GRAPH-EXAMPLE-WORDCOUNT 5, GRAPH-SPEC 8, GRAPH-SEAM 2 mentions of 2026-10-02) |
+| `cargo test --workspace` | see the note below |
+| clippy `-D warnings` / fmt / doc citations | 0 / clean / 63 docs resolve |
+
+**A criterion in this spec named a test that does not exist.** It asked for
+`escalate_on_near_tie_is_refused_as_not_implemented`; no such test is in the tree, so under `-p
+laya-graph --lib` it matched **0 tests**, printed `test result: ok. 0 passed`, and **passed** against
+the strict grep's intent only because it named a crate that owns nothing. The refusal itself is
+implemented and tested under `near_tie_routing_is_refused_as_not_implemented` (`validate.rs:670`).
+The criterion now names the real test. **This is the fourth instance this session of a check whose
+input, not whose intent, was the defect.**
+
+**A flake was observed and could not be reproduced.** In one `cargo test --workspace` run,
+`sched::tests::a_failure_stops_queued_siblings_from_starting` (a spec-09 fail-fast invariant) failed
+with `` `b` ran after the run had failed ``. It then passed 9 of 10 runs alone, 4 of 4 full-suite runs,
+and **0 of 20 both at the pre-17 commit and at the current tree** under an artificial load generator.
+So: not reproducible, not attributable to any change, and **not** reported as passing. The mechanism
+worth noting for whoever sees it next: the test asserts that sibling nodes `b`/`c`/`d` are never
+dispatched after `a` fails, and at `limit: 1` with `a` sleeping 0.2 s before failing, whether the
+siblings are dispatched depends on how the scheduler's first loop iteration interleaves.

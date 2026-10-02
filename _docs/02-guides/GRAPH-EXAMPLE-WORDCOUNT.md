@@ -17,6 +17,13 @@ Five flows, in build order:
 | **`wc-classify-chained.flow.json`** | `band` gates + `label` asks | **CURRENT** | two chained threshold questions, gate→ask |
 | **`wc-classify-chained.control.flow.json`** | `band` gates + `label` asks | **CURRENT** | identical shape, 412-word document, must differ |
 
+> **CORRECTION 2026-10-02 (spec 19) — read this before the table above.** In every flow here the
+> `count_words` (`wc`) node is a **witness, not an input**: it runs *after* the `decide` nodes (measured
+> `started_at_ms` 703 vs 0–505) and its output reaches no `decide`. The count that drives each
+> decision is **typed into that `decide`'s `prompt` as literal text**. The example demonstrates the
+> graph's shape and proves nothing about `wc` informing a decision. The rule is stated for flow authors in
+> [`GRAPH-SPEC.md`](../03-reference/GRAPH-SPEC.md#hard-rules-for-flow-authors-added-2026-10-02-spec-19).
+
 ---
 
 ## 1. The limitation the exercise was built to test — CONFIRMED
