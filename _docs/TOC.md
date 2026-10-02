@@ -9,6 +9,7 @@ reading order.
 
 ## 02-guides
 - [Guides](02-guides/README.md)
+- [Graph example — the `wc` word count, and what it exposed](02-guides/GRAPH-EXAMPLE-WORDCOUNT.md)
 
 ## 03-reference
 - [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md)

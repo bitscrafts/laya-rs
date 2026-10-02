@@ -1,0 +1,31 @@
+{
+  "flow": "wc-classify-control",
+  "version": 1,
+  "description": "CONTROL for wc-classify: the IDENTICAL graph shape over a LONGER document, which must land on a DIFFERENT label (LONG -> report_long) than its pairing (SHORT -> report_short). A single flow proves nothing -- a graph stuck on one branch would pass it too. Same limit as its pairing: the word count in the prompt is a hand-copied literal, because the engine has no interpolation (crates/laya-graph/src/lower.rs:104).",
+  "nodes": [
+    {
+      "id": "count_words",
+      "kind": "shell",
+      "run": "wc -w /projects/_tmp/wc-example/long-note.txt",
+      "timeout": 30
+    },
+    {
+      "id": "classify",
+      "kind": "decide",
+      "depends_on": ["count_words"],
+      "prompt": "A shell command counted the words in a document. It printed: `412 /projects/_tmp/wc-example/long-note.txt`. The document therefore has 412 words. Classification rule: SHORT = fewer than 100 words; MEDIUM = 100 to 300 words; LONG = more than 300 words. The document has 412 words.",
+      "question": "By the rule stated, is this document SHORT, MEDIUM or LONG?",
+      "options": ["SHORT", "MEDIUM", "LONG"],
+      "ports": {
+        "SHORT": "report_short",
+        "MEDIUM": "report_medium",
+        "LONG": "report_long",
+        "_": "escalate_fallback"
+      }
+    },
+    { "id": "report_short", "kind": "shell", "run": "echo 'CLASSIFIED: SHORT'" },
+    { "id": "report_medium", "kind": "shell", "run": "echo 'CLASSIFIED: MEDIUM'" },
+    { "id": "report_long", "kind": "shell", "run": "echo 'CLASSIFIED: LONG'" },
+    { "id": "escalate_fallback", "kind": "shell", "run": "echo 'CLASSIFIED: no match -> human looks'" }
+  ]
+}

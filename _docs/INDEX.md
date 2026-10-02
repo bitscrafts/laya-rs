@@ -27,6 +27,7 @@ in exactly one place; this index points at it, never restates it.
 - [What laya-rs is](01-overview/README.md) — The idea in four sentences, the three safety properties, and what is implemented today.
 
 ### 02-guides
+- [Graph example — the `wc` word count, and what it exposed](02-guides/GRAPH-EXAMPLE-WORDCOUNT.md) — A worked graph using `wc`, its control, and the fix: the head answered MEDIUM across a 77x range with confidence 0.09-0.26 (band=low) every time, and only the flow that routed on `band` escalated instead of acting on a label the head had disowned.
 - [Guides](02-guides/README.md) — How to build, gate and call laya-rs.
 
 ### 03-reference

@@ -18,6 +18,12 @@ DOCS = {
     ),
     "01-overview/README.md#the-three-properties": ("", ""),
     "02-guides/README.md": ("Guides", "How to build, gate and call laya-rs."),
+    "02-guides/GRAPH-EXAMPLE-WORDCOUNT.md": (
+        "Graph example — the `wc` word count, and what it exposed",
+        "A worked graph using `wc`, its control, and the fix: the head answered MEDIUM across a 77x "
+        "range with confidence 0.09-0.26 (band=low) every time, and only the flow that routed on "
+        "`band` escalated instead of acting on a label the head had disowned."
+    ),
     "03-reference/GRAPH-SPEC.md": (
         "Suggested graph specification, and how a flow becomes a graph",
         "A SUGGESTED (not decided) format for flows — nodes, kinds, composition — and the "

@@ -1,0 +1,31 @@
+{
+  "flow": "wc-classify-band",
+  "version": 1,
+  "description": "The `wc` word-count example, FIXED to route on `band` instead of `label`. Measured 2026-10-02: over counts from 13 to 1000 words, this head answers MEDIUM every time with a confidence of 0.09-0.26, which the policy bands as LOW. Routing on `label` therefore picks a branch on an answer the head has just said it does not know; routing on `band` sends it to the escalation port, which is what the head was asking for. Keep the `_` catch-all: a band the ports do not name must not fall through silently.",
+  "nodes": [
+    {
+      "id": "count_words",
+      "kind": "shell",
+      "run": "wc -w /projects/_tmp/wc-example/short-note.txt",
+      "timeout": 30
+    },
+    {
+      "id": "classify",
+      "kind": "decide",
+      "depends_on": ["count_words"],
+      "on": "band",
+      "prompt": "A shell command counted the words in a document. It printed: `13 file.txt`. The document therefore has 13 words. Classify by this rule: SHORT is under 100 words, MEDIUM is 100 to 300 words, LONG is over 300 words.",
+      "question": "By the rule stated, is this document SHORT, MEDIUM or LONG?",
+      "options": ["SHORT", "MEDIUM", "LONG"],
+      "ports": {
+        "high": "report_confident",
+        "mid": "report_confident",
+        "low": "escalate_low_confidence",
+        "_": "escalate_unparsed"
+      }
+    },
+    { "id": "report_confident", "kind": "shell", "run": "echo 'CONFIDENT: the head is sure enough to act on this label'" },
+    { "id": "escalate_low_confidence", "kind": "shell", "run": "echo 'ESCALATED: band=low -- the head does NOT know; a human or a bigger model decides'" },
+    { "id": "escalate_unparsed", "kind": "shell", "run": "echo 'UNPARSED: no port for that band'" }
+  ]
+}
