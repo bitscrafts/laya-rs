@@ -31,7 +31,7 @@
 #
 # A spec's brief lives at /projects/_tmp/brief-spec<N>.md. Both spec and brief are
 # checked before dispatch: a dispatch with a missing brief fails here, in one
-# second, not after 120 turns.
+# second, not after a full turn budget is spent.
 #
 # GENERALISED 2026-10-02 -- it was hardcoded to spec 07, so the six specs the
 # architectural review produced could not be dispatched from it at all, which
@@ -43,7 +43,20 @@ REPO=/projects/laya-rs
 BRIEF_DIR=/projects/_tmp
 STATE_DIR=/projects/_tmp/spec-dispatch
 MODEL=sonnet
-MAX_TURNS=120
+# The turn cap is a COST bound, not a difficulty setting — but 120 turned out to sit
+# inside the range that legitimate specs need, so it was failing real work rather
+# than bounding runaways. Measured 2026-10-01/02 across five dispatches:
+#
+#   part1   53 turns  success                     part4  121 turns  error_max_turns  (FAILED)
+#   part2   47 turns  success                     spec08 120 turns  success (AT the cap)
+#   part3   84 turns  success
+#
+# Spec 08 finished on its LAST allowed turn; one more and it would have died with
+# its verification unfinished, which is the expensive shape of failure. 160 gives
+# roughly a third more headroom over the largest observed need. At the measured
+# ~$0.06/turn that bounds a run near $9.50 — close to what part 4 already cost.
+# Override per-run with MAX_TURNS=200 when a spec is known to be larger.
+MAX_TURNS="${MAX_TURNS:-160}"
 
 # The worker's environment. Set here, never assumed: a background shell starts
 # with a minimal env and `cargo` would not be found.
