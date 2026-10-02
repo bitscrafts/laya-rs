@@ -161,3 +161,29 @@ session, so it is now impossible by construction in this script.
 | the fix applied | the scratch dir is unique **per call** (atomic counter), so a collision is impossible regardless of tag |
 | still open | the two **`sched.rs` timing-family** flakes, which are a different phenomenon (ordering under a wall-clock race) and are unrelated to this path |
 
+---
+
+## A THIRD check-mechanics bug, same family: `grep -c` exits 1 when the count is ZERO
+
+Cleaning up this session's scratch worktrees, the guard
+`dirty=$(git status --porcelain | grep -vc '^$' || echo 0)` reported **every clean worktree as DIRTY**,
+because:
+
+```
+grep -c pattern          # prints "0" ... and exits 1 when nothing matched
+grep -c pattern || echo 0   # so BOTH run: value becomes "0\n0"
+[ "0\n0" = "0" ]         # false  -> "DIRTY", on a worktree with nothing in it
+```
+
+**`grep -c` conflates "found zero" with "failed",** and the `|| echo 0` fallback — which looks like the
+careful thing to write — turned a correct zero into a poisoned value. `wc -l` is the right tool: it
+always exits 0 and prints the real count.
+
+This is the **seventh** check-mechanics bug of the session and the same family as the piped exit-status
+reads: the command was fine, the *reading* of it was wrong, and the wrong reading was the one that
+looked safer. Note the shape it shares with the others — **the fallback written to be defensive was
+what produced the false verdict.** A guard that cannot distinguish "zero" from "failed" is not a guard.
+
+The guard around a destructive operation must **fail safe**: if the count is unreadable, refuse and
+report, never proceed. Here the bug was in the conservative direction (refusing to remove clean
+worktrees), which cost nothing but would have cost a great deal had it been inverted.
