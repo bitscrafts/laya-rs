@@ -1,19 +1,19 @@
 {
   "flow": "wc-classify",
   "version": 1,
-  "description": "WORKED EXAMPLE: exercises the graph executor with the real `wc` word-count command. A `shell` node runs `wc -w` on a document; a `decide` node classifies the document SHORT/MEDIUM/LONG; the graph routes on that label. TWO THINGS ARE DELIBERATE. (1) The decision is deterministic: the classification rule is stated in the prompt together with the exact word count, so the model is not guessing. (2) The count in the prompt is a LITERAL, copied from `wc`'s real output by hand -- the engine has NO interpolation, so the shell node's output does not flow into the decide node's state. That limitation is the finding, documented in /projects/_tmp/wc-example/REPORT.md, not a bug: `decide.prompt` is forwarded verbatim (crates/laya-graph/src/lower.rs:104) and a `route` may only follow an `mcp` node (crates/laya-graph/src/route_exec.rs:68-75). Its pairing control is wc-classify.control.flow.json: the identical graph shape over a longer document, which must land on a DIFFERENT label.",
+  "description": "WORKED EXAMPLE: exercises the graph executor with the real `wc` word-count command. A `shell` node runs `wc -w` on a document; a `decide` node classifies the document SHORT/MEDIUM/LONG; the graph routes on that label. TWO THINGS ARE DELIBERATE. (1) The decision is deterministic: the classification rule is stated in the prompt together with the exact word count, so the model is not guessing. (2) The count in the prompt is a LITERAL, copied from `wc`'s real output by hand -- the engine has NO interpolation, so the shell node's output does not flow into the decide node's state. That limitation is the finding, documented in _docs/02-guides/wc-example/REPORT.md, not a bug: `decide.prompt` is forwarded verbatim (crates/laya-graph/src/lower.rs:104) and a `route` may only follow an `mcp` node (crates/laya-graph/src/route_exec.rs:68-75). Its pairing control is wc-classify.control.flow.json: the identical graph shape over a longer document, which must land on a DIFFERENT label.",
   "nodes": [
     {
       "id": "count_words",
       "kind": "shell",
-      "run": "wc -w /projects/_tmp/wc-example/short-note.txt",
+      "run": "wc -w _docs/02-guides/wc-example/short-note.txt",
       "timeout": 30
     },
     {
       "id": "classify",
       "kind": "decide",
       "depends_on": ["count_words"],
-      "prompt": "A shell command counted the words in a document. It printed: `13 /projects/_tmp/wc-example/short-note.txt`. The document therefore has 13 words. Classification rule: SHORT = fewer than 100 words; MEDIUM = 100 to 300 words; LONG = more than 300 words. The document has 13 words.",
+      "prompt": "A shell command counted the words in a document. It printed: `13 _docs/02-guides/wc-example/short-note.txt`. The document therefore has 13 words. Classification rule: SHORT = fewer than 100 words; MEDIUM = 100 to 300 words; LONG = more than 300 words. The document has 13 words.",
       "question": "By the rule stated, is this document SHORT, MEDIUM or LONG?",
       "options": ["SHORT", "MEDIUM", "LONG"],
       "ports": {

@@ -6,7 +6,7 @@
     {
       "id": "count_words",
       "kind": "shell",
-      "run": "wc -w < \"${WC_FILE:-/projects/_tmp/wc-example/short-note.txt}\"",
+      "run": "wc -w < \"${WC_FILE:-_docs/02-guides/wc-example/short-note.txt}\"",
       "timeout": 30
     },
     {

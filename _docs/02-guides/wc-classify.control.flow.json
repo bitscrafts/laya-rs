@@ -6,14 +6,14 @@
     {
       "id": "count_words",
       "kind": "shell",
-      "run": "wc -w /projects/_tmp/wc-example/long-note.txt",
+      "run": "wc -w _docs/02-guides/wc-example/long-note.txt",
       "timeout": 30
     },
     {
       "id": "classify",
       "kind": "decide",
       "depends_on": ["count_words"],
-      "prompt": "A shell command counted the words in a document. It printed: `412 /projects/_tmp/wc-example/long-note.txt`. The document therefore has 412 words. Classification rule: SHORT = fewer than 100 words; MEDIUM = 100 to 300 words; LONG = more than 300 words. The document has 412 words.",
+      "prompt": "A shell command counted the words in a document. It printed: `412 _docs/02-guides/wc-example/long-note.txt`. The document therefore has 412 words. Classification rule: SHORT = fewer than 100 words; MEDIUM = 100 to 300 words; LONG = more than 300 words. The document has 412 words.",
       "question": "By the rule stated, is this document SHORT, MEDIUM or LONG?",
       "options": ["SHORT", "MEDIUM", "LONG"],
       "ports": {

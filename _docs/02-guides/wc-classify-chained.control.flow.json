@@ -1,12 +1,12 @@
 {
   "flow": "wc-classify-chained-control",
   "version": 1,
-  "description": "CONTROL for wc-classify-chained: the IDENTICAL graph shape over a 412-word document, which must reach a DIFFERENT terminal branch (LONG -> class_long) than its pairing (13 words -> class_short). A single flow proves nothing -- a graph stuck on one branch would pass it too -- and this control is the reason the FIRST wc example was thrown away: its two flows both landed MEDIUM. Same two measured facts as its pairing: the count is a LITERAL in the prompt because there is no shell->route interpolation (crates/laya-graph/src/lower.rs:104), and the decides are 2-option choices on the wire because LiveMcpCaller rebuilds every flow decide that way (crates/laya-cli/src/mcp_client.rs:106-120). On the measured boundary, this document's executed gate (412 > 300) bands mid (conf 0.632) so the classification completes rather than escalating; the break-the-control check exists because if both flows ever reach the same branch, the pair certifies nothing. See also the low-band probe under /projects/_tmp/wc-example/ which shows the escalation ports firing on a state the head bands low.",
+  "description": "CONTROL for wc-classify-chained: the IDENTICAL graph shape over a 412-word document, which must reach a DIFFERENT terminal branch (LONG -> class_long) than its pairing (13 words -> class_short). A single flow proves nothing -- a graph stuck on one branch would pass it too -- and this control is the reason the FIRST wc example was thrown away: its two flows both landed MEDIUM. Same two measured facts as its pairing: the count is a LITERAL in the prompt because there is no shell->route interpolation (crates/laya-graph/src/lower.rs:104), and the decides are 2-option choices on the wire because LiveMcpCaller rebuilds every flow decide that way (crates/laya-cli/src/mcp_client.rs:106-120). On the measured boundary, this document's executed gate (412 > 300) bands mid (conf 0.632) so the classification completes rather than escalating; the break-the-control check exists because if both flows ever reach the same branch, the pair certifies nothing. See also the low-band probe under _docs/02-guides/wc-example/ which shows the escalation ports firing on a state the head bands low.",
   "nodes": [
     {
       "id": "count_words",
       "kind": "shell",
-      "run": "wc -w /projects/_tmp/wc-example/long-note.txt",
+      "run": "wc -w _docs/02-guides/wc-example/long-note.txt",
       "timeout": 30
     },
     {
