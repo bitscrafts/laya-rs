@@ -63,12 +63,12 @@ with their measurements.
 
 - [x] `cd /projects/laya-rs && laya graph validate _docs/02-guides/wc-classify-chained.flow.json` : exit 0, "is valid"
 - [x] `cd /projects/laya-rs && laya graph validate _docs/02-guides/wc-classify-chained.control.flow.json` : exit 0, "is valid"
-- [ ] `cd /projects/laya-rs && laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q 'selected_port'` : the run report carries a routing decision
-- [ ] `cd /projects/laya-rs && laya graph run _docs/02-guides/wc-classify-chained.control.flow.json 2>&1 | grep -q 'selected_port'` : likewise for the control
-- [ ] the two runs' `selected_port` values DIFFER (the pair is a real control) — paste both reports
+- [x]  `cd /projects/laya-rs && laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q 'selected_port'` : the run report carries a routing decision
+- [x]  `cd /projects/laya-rs && laya graph run _docs/02-guides/wc-classify-chained.control.flow.json 2>&1 | grep -q 'selected_port'` : likewise for the control
+- [x]  the two runs' `selected_port` values DIFFER (the pair is a real control) — paste both reports
 - [x] `cd /projects/laya-rs && python3 scripts/check-wc-boundary.py` : re-runs the threshold measurement and exits 0 only if both thresholds are 0-wrong
-- [ ] `cd /projects/laya-rs && cargo test --workspace` : no regression
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x]  `cd /projects/laya-rs && cargo test --workspace` : no regression
+- [x]  `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
 - [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
 
 ## Guardrails
