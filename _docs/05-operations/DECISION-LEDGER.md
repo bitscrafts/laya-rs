@@ -80,21 +80,24 @@ One JSON object per decision. Field names are the contract.
 
 | field | meaning |
 |---|---|
-| `ts` | RFC 3339 timestamp, UTC |
-| `run_id`, `node_id`, `seq` | the **join key to the graph journal** (review: the design promised this and never defined it) |
+| `ts` | a human-readable stamp — **`epoch+{secs}`, not RFC 3339**. This table claimed RFC 3339 and the function never produced it; the claim is corrected rather than the wire format changed |
+| `ts_nanos` | monotonic nanoseconds **from the writing process's start**. Recorded, but **not** an ordering key: two processes measure from their own start |
+| `wall_nanos` | **epoch nanoseconds — the ordering key.** Added 2026-10-02 after the live store showed server rows at `65..171` against CLI outcome rows near `1.79e18`; a ~10^16 gap put every outcome after every decision whatever the real time |
+| `run_id`, `node_id` | the **join key to the caller's own run and node**. Threaded from the tool call (2026-10-02); every row before that carried `None`, so no decision could be joined to its run |
 | `question_id`, `question_type` | which question, and which of the three types |
 | `label` | the answer as a routing label |
-| `confidence` | Laya's calibrated confidence |
+| `confidence` | Laya's calibrated confidence — **`Option<f64>`**. It was `unwrap_or(0.0)`, so a missing value recorded as `0.0`: indistinguishable from "maximally unsure", and it poisons any calibration built on the column |
 | `band` | `low` / `mid` / `high`, computed by us (B5) |
 | `margin` | **top1 − top2 gap** — added by blocker B1, because a near-tie is where a port can flip |
 | `near_tie` | whether `margin` fell under the policy floor. **Added 2026-09-30** — it was a payload field while this table omitted it, and with `escalate_on_near_tie` it is what demotes a band, so a recorded decision without it cannot be re-explained |
 | `probabilities` | the full distribution, so saturation can be re-derived |
 | `saturated` | whether one option held > `saturation_threshold` |
-| `p` / `score` | for a `noul` / `score` |
+| ~~`p` / `score`~~ | **not fields of the row.** This table listed them and `DecisionRow` never had them; a `score` question's value lives in `label`. The payload (`DecisionPayload`) does carry `p` and `score` — the row simply does not copy them, so a `noul`'s raw probability is not recoverable from the ledger |
 | `latency_ms` | measured, wall-clock, on the **real** path (review M2: three different paths were conflated) |
 | `laya_version` | the pinned Laya version |
 | `head_sha256`, `backbone_sha256` | **provenance** — a mismatched artifact must fail loudly, not silently produce different decisions (B1/M9) |
-| `bucket_clamped` | true when the head's temperature clamp fired (B2); confidence from such a bucket is **uncalibrated** |
+| `bucket_clamped` | whether the head's temperature clamp fired (B2); confidence from such a bucket is **uncalibrated**. Now `Option<bool>` — it used to be copied from `saturated`, a different fact, so an unknown clamp state was recorded as a known `false` |
+| `executed` | whether the action judged was **carried out**. For a `gate` row this separates "allowed" from "allowed and then run" — a permission and an event are different things, and the ledger needs to tell them apart |
 | `state_sha256` | hash of the state, **never the state itself** — see the secrets rule |
 | `tool` | which tool produced it (`decide`, `ask_file`, …) |
 

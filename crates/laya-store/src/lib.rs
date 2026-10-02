@@ -91,10 +91,21 @@ pub const NEXT_SEQ: &str = "next_seq";
 /// someone to gate on it).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DecisionRow {
-    /// RFC 3339 timestamp, UTC.
+    /// A human-readable stamp. **Not RFC 3339** — the server emits `epoch+{secs}`, which this
+    /// comment used to claim was RFC 3339. The wire format is left alone and the claim is fixed.
     pub ts: String,
-    /// Monotonic nanoseconds — the ordering key for compaction, immune to clock steps.
+    /// Monotonic nanoseconds, measured from THIS process's start. **Not comparable across
+    /// processes**, so it is not an ordering key.
     pub ts_nanos: u64,
+    /// Epoch nanoseconds — comparable across every writer. **This is the ordering key.**
+    ///
+    /// Merging segments by `ts_nanos` interleaves rows from different processes arbitrarily.
+    /// Measured on the live store: server rows carried 65..171 (process-relative) while CLI
+    /// outcome rows carried epoch nanos near 1.79e18 — a ~10^16 gap, so every outcome sorted
+    /// after every decision whatever the real time. `ts` is second-resolution and cannot break
+    /// the tie.
+    #[serde(default)]
+    pub wall_nanos: u64,
     /// Which tool produced it (`decide`, `gate`, `ask_file`, …).
     pub tool: String,
     /// The join key to the consumer's own run, when it has one.
@@ -109,8 +120,12 @@ pub struct DecisionRow {
     pub question_type: String,
     /// The answer as a routing label — the field a graph `route` node matches on.
     pub label: String,
-    /// Laya's calibrated confidence.
-    pub confidence: f64,
+    /// Laya's calibrated confidence, or `None` when the payload carried none.
+    ///
+    /// **Never defaulted to 0.0.** A missing confidence recorded as 0.0 is indistinguishable
+    /// from "maximally unsure" and poisons every calibration metric built on the column.
+    #[serde(default)]
+    pub confidence: Option<f64>,
     /// `low` / `mid` / `high`, computed by us, not by the model.
     pub band: String,
     /// top1 − top2. A near tie is where a route port can flip.
@@ -135,12 +150,18 @@ pub struct DecisionRow {
     /// Hash of the backbone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backbone_sha256: Option<String>,
-    /// True when the head's temperature clamp fired; confidence from such a bucket is
-    /// **uncalibrated**.
+    /// Whether the head's temperature clamp fired; confidence from such a bucket is
+    /// **uncalibrated**. `None` until a source that actually knows supplies it — it used to be
+    /// copied from `saturated`, a different fact, which made a missing value look known.
     #[serde(default)]
-    pub bucket_clamped: bool,
+    pub bucket_clamped: Option<bool>,
     /// Wall-clock latency, measured on the **real** path.
     pub latency_ms: u64,
+    /// Whether the action this row judged was actually carried out. For a `gate` row this
+    /// separates "allowed" from "allowed and then executed", which is the difference between a
+    /// permission and an event.
+    #[serde(default)]
+    pub executed: bool,
 }
 
 /// An outcome for an earlier decision.
@@ -152,8 +173,12 @@ pub struct DecisionRow {
 pub struct OutcomeRow {
     /// RFC 3339 timestamp, UTC.
     pub ts: String,
-    /// Monotonic nanoseconds, as in [`DecisionRow::ts_nanos`].
+    /// Monotonic nanoseconds from THIS process's start, as in [`DecisionRow::ts_nanos`]. Not
+    /// comparable across processes.
     pub ts_nanos: u64,
+    /// Epoch nanoseconds — the key that orders across every writer. See [`DecisionRow::wall_nanos`].
+    #[serde(default)]
+    pub wall_nanos: u64,
     /// The [`Record::identity`] of the decision being judged. A reference, so the store stays
     /// append-only.
     pub decision: String,
@@ -200,7 +225,17 @@ impl Record {
         }
     }
 
-    /// When this record happened, in monotonic nanoseconds — the ordering key.
+    /// The comparable ordering key. See [`DecisionRow::wall_nanos`].
+    #[must_use]
+    pub const fn wall_nanos(&self) -> u64 {
+        match self {
+            Self::Decision(d) => d.wall_nanos,
+            Self::Outcome(o) => o.wall_nanos,
+        }
+    }
+
+    /// When this record happened, in THIS process's monotonic nanoseconds. Not comparable
+    /// across processes; [`Record::wall_nanos`] is what orders.
     #[must_use]
     pub const fn ts_nanos(&self) -> u64 {
         match self {
@@ -516,9 +551,24 @@ impl Ledger {
     /// so "a server never writes the store" is a property of the TYPE rather than a convention
     /// a reviewer has to go and check.
     ///
+    /// Creates the store when it is missing.
+    ///
+    /// A read that failed because nothing had been recorded yet would be the same defect as a
+    /// reader that reports zeros as if they were measurements — a fresh install has to produce
+    /// an EMPTY answer, not an error. The store is created once, empty, and every read after
+    /// that is genuinely read-only: redb's read-only handle cannot begin a write transaction,
+    /// so "a reader never writes" is still a property of the type rather than a convention.
+    /// Nothing is created when the store already exists, so calling this against a live store
+    /// cannot take the writer's lock or touch its bytes.
+    ///
     /// # Errors
-    /// [`StoreError::Redb`] if the store does not exist or cannot be opened.
+    /// [`StoreError::Redb`] if the store exists and cannot be opened.
     pub fn read_only(path: &Path) -> Result<LedgerReader> {
+        if !path.exists() {
+            // `open_writer` creates it; the handle is dropped immediately, so this is not a
+            // writer that outlives the call.
+            let _ = Self::open_writer(path)?;
+        }
         match redb::Builder::new().open_read_only(path) {
             Ok(db) => Ok(LedgerReader {
                 db,
@@ -790,6 +840,43 @@ fn summarise(records: &[Record]) -> Stats {
     for d in &decisions {
         *by_band.entry(d.band.clone()).or_insert(0_usize) += 1;
     }
+    // Per tool, because a blended percentile hides the tool that is actually slow.
+    let mut by_tool: std::collections::BTreeMap<String, Vec<&DecisionRow>> =
+        std::collections::BTreeMap::new();
+    for d in &decisions {
+        by_tool.entry(d.tool.clone()).or_default().push(d);
+    }
+    let by_tool = by_tool
+        .into_iter()
+        .map(|(tool, rows)| {
+            let mut lats: Vec<u64> = rows.iter().map(|d| d.latency_ms).collect();
+            lats.sort_unstable();
+            // A `gate` verdict is its `label`; `executed` is whether the command ran. Both are
+            // read off the row, so a refusal is counted exactly like an allow.
+            let mut verdicts = std::collections::BTreeMap::new();
+            let mut executed = 0_usize;
+            for d in &rows {
+                if d.tool == "gate" || d.tool == "ask" {
+                    *verdicts.entry(d.label.clone()).or_insert(0_usize) += 1;
+                    if d.label == "allow" && d.executed {
+                        executed += 1;
+                    }
+                }
+            }
+            (
+                tool,
+                ToolStats {
+                    decisions: rows.len(),
+                    latency_p50_ms: percentile(&lats, 50),
+                    latency_p95_ms: percentile(&lats, 95),
+                    latency_max_ms: lats.last().copied(),
+                    verdicts,
+                    executed,
+                },
+            )
+        })
+        .collect();
+
     Stats {
         decisions: decisions.len(),
         outcomes,
@@ -799,6 +886,7 @@ fn summarise(records: &[Record]) -> Stats {
         latency_p50_ms: percentile(&latencies, 50),
         latency_p95_ms: percentile(&latencies, 95),
         latency_max_ms: latencies.last().copied(),
+        by_tool,
     }
 }
 
@@ -821,6 +909,28 @@ pub struct Stats {
     pub latency_p95_ms: Option<u64>,
     /// Worst observed latency, in milliseconds.
     pub latency_max_ms: Option<u64>,
+    /// Per tool, the same numbers — the point of the exercise.
+    ///
+    /// A single blended p50 answers nothing: `decide` and `gate` are different costs, and an
+    /// average of them moves only when the mix changes. Keyed by tool name.
+    pub by_tool: std::collections::BTreeMap<String, ToolStats>,
+}
+
+/// Per-tool aggregates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolStats {
+    /// How many rows this tool produced.
+    pub decisions: usize,
+    /// Median, 95th percentile and worst latency for this tool.
+    pub latency_p50_ms: Option<u64>,
+    /// 95th percentile latency for this tool.
+    pub latency_p95_ms: Option<u64>,
+    /// Worst latency for this tool.
+    pub latency_max_ms: Option<u64>,
+    /// For `gate`/`ask`: how many times the gate allowed, asked, denied, or was unparseable.
+    pub verdicts: std::collections::BTreeMap<String, usize>,
+    /// For `gate`/`ask`: how many verdicts were actually executed.
+    pub executed: usize,
 }
 
 /// Nearest-rank percentile over a sorted slice. `None` for an empty slice, because a percentile
@@ -868,7 +978,7 @@ pub fn compact(dir: &Path, store: &Path) -> Result<CompactReport> {
     // Sort by monotonic time so the sequence numbers reflect real order even when segments came
     // from several processes.
     let mut all: Vec<Record> = parsed.into_iter().flatten().collect();
-    all.sort_by_key(Record::ts_nanos);
+    all.sort_by_key(Record::wall_nanos);
 
     for record in &all {
         if ledger.insert_if_new(record, seq)? {
@@ -943,17 +1053,34 @@ mod tests {
         }
     }
 
+    /// A row whose two clocks differ, which is the only fixture that can expose R8.
+    ///
+    /// `decision()` sets both clocks to the same number, so any ordering assertion it supports
+    /// passes whichever key the sort uses -- a check that cannot fail. Two processes measure
+    /// `ts_nanos` from their own start, so a row late in one process's life can precede a row
+    /// early in another's.
+    fn row(tool: &str, label: &str, ts_nanos: u64, wall_nanos: u64, latency_ms: u64) -> Record {
+        let mut r = decision(label, ts_nanos);
+        if let Record::Decision(d) = &mut r {
+            d.tool = tool.to_string();
+            d.wall_nanos = wall_nanos;
+            d.latency_ms = latency_ms;
+        }
+        r
+    }
+
     fn decision(label: &str, nanos: u64) -> Record {
         Record::Decision(DecisionRow {
             ts: "2026-09-30T00:00:00Z".to_string(),
             ts_nanos: nanos,
+            wall_nanos: nanos,
             tool: "decide".to_string(),
             run_id: Some("run-1".to_string()),
             node_id: Some("triage".to_string()),
             question_id: "kind".to_string(),
             question_type: "choice".to_string(),
             label: label.to_string(),
-            confidence: 0.93,
+            confidence: Some(0.93),
             band: "high".to_string(),
             margin: Some(0.89),
             near_tie: false,
@@ -963,8 +1090,9 @@ mod tests {
             state_sha256: "abc".to_string(),
             head_sha256: None,
             backbone_sha256: None,
-            bucket_clamped: false,
+            bucket_clamped: Some(false),
             latency_ms: 240,
+            executed: false,
         })
     }
 
@@ -1215,14 +1343,168 @@ mod tests {
     fn compact_orders_by_monotonic_time_across_segments() {
         // Segments come from several processes, so file order says nothing about real order.
         let tmp = Tmp::new("order");
-        let _ = append_segment(tmp.path(), &decision("later", 200)).expect("a");
-        let _ = append_segment(tmp.path(), &decision("earlier", 100)).expect("b");
+        let _ = append_segment(tmp.path(), &row("decide", "later", 200, 200, 1)).expect("a");
+        let _ = append_segment(tmp.path(), &row("decide", "earlier", 100, 100, 1)).expect("b");
         let store = tmp.path().join(STORE_FILE);
         let _ = compact(tmp.path(), &store).expect("compact");
         let ledger = Ledger::open_writer(&store).expect("reopen");
         let records = ledger.records().expect("records");
-        assert_eq!(records[0].ts_nanos(), 100, "the earlier record comes first");
-        assert_eq!(records[1].ts_nanos(), 200);
+        assert_eq!(
+            records[0].wall_nanos(),
+            100,
+            "the earlier record comes first"
+        );
+        assert_eq!(records[1].wall_nanos(), 200);
+    }
+
+    #[test]
+    fn merged_rows_sort_by_wall_time_not_process_relative_nanos() {
+        // R8. Two processes each measure `ts_nanos` from their OWN start, so the two keys
+        // disagree about order by construction. Process 101 wrote at wall 1000 but only 5ns into
+        // its life; process 102 wrote at wall 500, 900ns into its life.
+        //
+        // Sorted on `ts_nanos` the store reads [A, B] -- the row from wall 1000 placed BEFORE the
+        // row from wall 500. Sorted on `wall_nanos` it reads [B, A], which is what happened.
+        // Measured live before the fix: server rows 65..171 against outcome rows near 1.79e18.
+        let tmp = Tmp::new("wall-order");
+        let _ = append_segment_for(tmp.path(), 101, &row("decide", "A", 5, 1_000, 1))
+            .expect("segment A");
+        let _ = append_segment_for(tmp.path(), 102, &row("decide", "B", 900, 500, 1))
+            .expect("segment B");
+        let store = tmp.path().join(STORE_FILE);
+        let _ = compact(tmp.path(), &store).expect("compact");
+
+        let ledger = Ledger::open_writer(&store).expect("reopen");
+        let records = ledger.records().expect("records");
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            records[0].wall_nanos(),
+            500,
+            "the row written first in real time comes first, whatever its process-relative value"
+        );
+        assert_eq!(records[1].wall_nanos(), 1_000);
+        // And the control: on the old key the order really is inverted, which is why this test
+        // can fail. If a future change made `ts_nanos` comparable this assertion would break and
+        // the test would have to be revisited -- deliberately, not silently.
+        assert!(
+            records[0].ts_nanos() > records[1].ts_nanos(),
+            "the old key disagrees -- so this test is not vacuous"
+        );
+    }
+
+    #[test]
+    fn an_absent_confidence_is_none_not_zero() {
+        // R3, second half. `unwrap_or(0.0)` recorded a missing confidence as 0.0, which reads as
+        // "maximally unsure" and poisons every calibration metric built on the column.
+        let missing: DecisionRow = serde_json::from_value(serde_json::json!({
+            "ts": "epoch+1", "ts_nanos": 1, "tool": "decide", "question_id": "q",
+            "question_type": "noul", "label": "yes", "band": "low", "near_tie": false,
+            "saturated": false, "laya_version": "0.3.5", "state_sha256": "x", "latency_ms": 1
+        }))
+        .expect("an old row without the newer fields must still deserialise");
+        assert_eq!(missing.confidence, None, "absent is absent, not zero");
+        assert_eq!(
+            missing.bucket_clamped, None,
+            "an unknown clamp state is not `false`"
+        );
+        assert_eq!(missing.wall_nanos, 0, "an old row has no wall clock");
+        assert!(!missing.executed);
+    }
+
+    #[test]
+    fn stats_reports_per_tool_latency_and_gate_decisions() {
+        // R7. A single blended p50 answers nothing: `decide` and `gate` are different costs, and
+        // the average moves only when the mix changes.
+        let tmp = Tmp::new("per-tool");
+        let _ = append_segment(tmp.path(), &row("decide", "billing", 1, 1, 10)).expect("d1");
+        let _ = append_segment(tmp.path(), &row("decide", "auth", 2, 2, 20)).expect("d2");
+        let _ = append_segment(tmp.path(), &row("gate", "allow", 3, 3, 30)).expect("g1");
+        let _ = append_segment(tmp.path(), &row("gate", "ask", 4, 4, 40)).expect("g2");
+        let _ = append_segment(tmp.path(), &row("gate", "deny", 5, 5, 50)).expect("g3");
+        let store = tmp.path().join(STORE_FILE);
+        let _ = compact(tmp.path(), &store).expect("compact");
+
+        let stats = Ledger::open_writer(&store)
+            .expect("reopen")
+            .stats()
+            .expect("stats");
+
+        let decide = stats
+            .by_tool
+            .get("decide")
+            .expect("decide must be separate");
+        assert_eq!(decide.decisions, 2);
+        assert_eq!(decide.latency_p50_ms, Some(10));
+        assert_eq!(decide.latency_max_ms, Some(20));
+        assert!(decide.verdicts.is_empty(), "decide has no verdicts");
+
+        let gate = stats.by_tool.get("gate").expect("gate must be separate");
+        assert_eq!(gate.decisions, 3);
+        assert_eq!(gate.latency_max_ms, Some(50));
+        assert_eq!(gate.verdicts.get("allow"), Some(&1));
+        assert_eq!(gate.verdicts.get("ask"), Some(&1));
+        assert_eq!(
+            gate.verdicts.get("deny"),
+            Some(&1),
+            "a refusal is counted, not omitted -- the half an incident review wants"
+        );
+        // The blended view is still there, and still different from either tool's own numbers.
+        assert_eq!(stats.decisions, 5);
+        assert_eq!(stats.latency_p50_ms, Some(30));
+    }
+
+    #[test]
+    fn the_documented_fields_exist_on_the_row() {
+        // R9. The ledger doc tabulated `p` and `score`, which the row never had -- a reader
+        // auditing the ledger would hunt for columns that were never built.
+        let doc = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../_docs/05-operations/DECISION-LEDGER.md");
+        let text = std::fs::read_to_string(&doc).expect("the ledger doc must be readable");
+        let table = text
+            .split("### What is deliberately absent")
+            .next()
+            .expect("the schema table");
+        // EVERY optional field must be present in this comparison. The row type skips a `None`
+        // field when serialising, so a sparse row would make the check pass by omission -- it
+        // would "confirm" a documented field that the struct no longer has.
+        let full = serde_json::json!({
+            "ts": "epoch+1", "ts_nanos": 1, "wall_nanos": 1, "tool": "decide",
+            "run_id": "r", "node_id": "n", "question_id": "q", "question_type": "noul",
+            "label": "yes", "confidence": 0.5, "band": "low", "margin": 0.1, "near_tie": false,
+            "probabilities": {"yes": 0.5, "no": 0.5}, "saturated": false, "laya_version": "0.3.5",
+            "state_sha256": "x", "head_sha256": "h", "backbone_sha256": "b",
+            "bucket_clamped": false, "latency_ms": 1, "executed": true
+        });
+        let parsed: DecisionRow =
+            serde_json::from_value(full).expect("a fully-populated row must deserialise");
+        let row = serde_json::to_value(parsed).expect("serialise");
+        let keys: Vec<&String> = row.as_object().expect("an object").keys().collect();
+
+        // Every field the table presents as real must exist. A struck-through entry is a claim
+        // that has been withdrawn, so it is skipped rather than asserted.
+        let mut checked = 0;
+        for line in table.lines().filter(|l| l.starts_with("| `")) {
+            if line.contains("~~") {
+                continue;
+            }
+            // Only the FIRST column is the field list; the second column is prose and may
+            // itself quote a value in backticks. Taking every backticked token on the line
+            // reads `epoch+{secs}` as a field name and fails on the doc's own wording.
+            let field_cell = line.split('|').nth(1).unwrap_or_default();
+            for field in field_cell.split('`').skip(1).step_by(2).filter(|f| {
+                !f.is_empty() && f.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            }) {
+                assert!(
+                    keys.iter().any(|k| k.as_str() == field),
+                    "DECISION-LEDGER.md documents `{field}`, which DecisionRow does not have"
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 10,
+            "the table must have been parsed: {checked} fields"
+        );
     }
 
     #[test]
@@ -1261,6 +1543,7 @@ mod tests {
         let outcome = OutcomeRow {
             ts: "2026-09-30T01:00:00Z".to_string(),
             ts_nanos: 2,
+            wall_nanos: 1,
             decision: d.identity(),
             correct: true,
             source: "test".to_string(),
@@ -1286,6 +1569,7 @@ mod tests {
         let orphan = OutcomeRow {
             ts: "2026-09-30T01:00:00Z".to_string(),
             ts_nanos: 2,
+            wall_nanos: 1,
             decision: "d\u{1f}999\u{1f}decide\u{1f}q\u{1f}x".to_string(),
             correct: true,
             source: "test".to_string(),

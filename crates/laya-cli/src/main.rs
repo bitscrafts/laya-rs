@@ -215,6 +215,7 @@ pub const DEFAULT_LEDGER_DIR: &str = ".laya";
 /// Each subcommand is its own function: the dispatcher stays readable, and a reader looking for
 /// what `compact` does does not have to hold four unrelated behaviours in their head at once.
 fn ledger(args: &[String]) -> ExitCode {
+    let no_compact = args.iter().any(|a| a == "--no-compact");
     let Some(sub) = args.first().map(String::as_str) else {
         eprintln!(
             "usage: laya ledger <compact|stats|tail|outcome> [args]\n\
@@ -231,8 +232,11 @@ fn ledger(args: &[String]) -> ExitCode {
 
     match sub {
         "compact" => ledger_compact(&dir, &store),
-        "stats" => ledger_stats(&store),
-        "tail" => ledger_tail(&store, args),
+        // Ingest first by default: a reader that ignores un-ingested segments reports an empty
+        // store while decisions sit on disk beside it. `--no-compact` is the pure read, for
+        // anyone who wants the store exactly as it stands.
+        "stats" => ledger_stats(&dir, &store, no_compact),
+        "tail" => ledger_tail(&dir, &store, args, no_compact),
         "outcome" => ledger_outcome(&store, args),
         other => {
             eprintln!("laya: unknown ledger subcommand `{other}`");
@@ -269,8 +273,11 @@ fn ledger_compact(dir: &std::path::Path, store: &std::path::Path) -> ExitCode {
 }
 
 /// `laya ledger stats` — and it says plainly when there is nothing to calibrate.
-fn ledger_stats(store: &std::path::Path) -> ExitCode {
-    match laya_store::Ledger::open_writer(store).and_then(|l| l.stats()) {
+fn ledger_stats(dir: &std::path::Path, store: &std::path::Path, no_compact: bool) -> ExitCode {
+    ingest_before_reading(dir, store, no_compact);
+    // READ-ONLY. This used to open_writer, so asking for numbers while a `compact` ran got a
+    // lock error instead of an answer -- a read demanding exclusivity it does not need.
+    match laya_store::Ledger::read_only(store).and_then(|l| l.stats()) {
         Ok(s) => {
             println!("decisions:      {}", s.decisions);
             println!("outcomes:       {}", s.outcomes);
@@ -282,6 +289,26 @@ fn ledger_stats(store: &std::path::Path) -> ExitCode {
             println!("latency p50:    {} ms", show_ms(s.latency_p50_ms));
             println!("latency p95:    {} ms", show_ms(s.latency_p95_ms));
             println!("latency max:    {} ms", show_ms(s.latency_max_ms));
+            // Per tool, because a single blended percentile answers nothing: `decide` and
+            // `gate` are different costs, and the average moves only when the mix changes.
+            if !s.by_tool.is_empty() {
+                println!("\nper tool:");
+                for (tool, ts) in &s.by_tool {
+                    println!(
+                        "  {tool:<16} {:<5} p50 {} ms  p95 {} ms  max {} ms",
+                        ts.decisions,
+                        show_ms(ts.latency_p50_ms),
+                        show_ms(ts.latency_p95_ms),
+                        show_ms(ts.latency_max_ms)
+                    );
+                    for (verdict, n) in &ts.verdicts {
+                        println!("    {verdict:<12} {n}");
+                    }
+                    if !ts.verdicts.is_empty() {
+                        println!("    {:<12} {}", "executed", ts.executed);
+                    }
+                }
+            }
             if s.outcomes == 0 {
                 // Stated plainly, because the alternative is a reader assuming a calibration
                 // exists. ECE needs (confidence, correct) pairs and there are none.
@@ -299,13 +326,51 @@ fn ledger_stats(store: &std::path::Path) -> ExitCode {
     }
 }
 
+/// Ingest any un-compacted segments before a read, so a reader sees what is on disk.
+///
+/// **Why this is here at all:** the server appends to `ledger-<pid>.jsonl` and `stats` reads
+/// `ledger.redb`, which only `compact` fills. Measured on the live deployment: 7 real decisions
+/// on disk, `stats` reporting `decisions: 0 — latency unknown`, and nothing scheduled to ever
+/// compact. The two states were indistinguishable from outside: a ledger switched OFF and a
+/// ledger nobody had ingested both read as zero.
+///
+/// **It never fails the read.** Compaction is opportunistic: if another writer holds the store
+/// (its normal state while a server is up), the read proceeds against what is already ingested.
+/// A read that refused because it could not also write would be worse than the staleness.
+fn ingest_before_reading(dir: &std::path::Path, store: &std::path::Path, no_compact: bool) {
+    if no_compact {
+        return;
+    }
+    if laya_store::segments(dir).map_or(true, |s| s.is_empty()) {
+        return;
+    }
+    // Held by a live writer, or nothing to insert: read what is already there and say nothing.
+    // Silence here is deliberate -- the read still has an answer, and a warning on every call
+    // while a server is up would be noise. A read is never failed by a failed ingestion: it
+    // would be trading its answer for the chance to write.
+    if let Ok(r) = laya_store::compact(dir, store)
+        && r.records_inserted > 0
+    {
+        eprintln!(
+            "laya: ingested {} row(s) from {} segment(s) before reading",
+            r.records_inserted, r.segments_read
+        );
+    }
+}
+
 /// `laya ledger tail [N]` — the most recent records, newest first.
-fn ledger_tail(store: &std::path::Path, args: &[String]) -> ExitCode {
+fn ledger_tail(
+    dir: &std::path::Path,
+    store: &std::path::Path,
+    args: &[String],
+    no_compact: bool,
+) -> ExitCode {
+    ingest_before_reading(dir, store, no_compact);
     let n = args
         .get(1)
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(10);
-    match laya_store::Ledger::open_writer(store).and_then(|l| l.tail(n)) {
+    match laya_store::Ledger::read_only(store).and_then(|l| l.tail(n)) {
         Ok(records) => {
             for r in records {
                 println!("{}", serde_json::to_string(&r).unwrap_or_default());
@@ -350,7 +415,10 @@ fn ledger_outcome(store: &std::path::Path, args: &[String]) -> ExitCode {
         ts: format!("{}", elapsed.as_secs()),
         // `as_nanos` is u128; the ledger key is u64. Saturate rather than truncate: a wrapped
         // timestamp would sort an outcome BEFORE the decision it judges.
+        // This row is already epoch-based; it is the SERVER's rows that were process-relative,
+        // which is why the two could never be ordered together.
         ts_nanos: u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX),
+        wall_nanos: u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX),
         decision: decision.clone(),
         correct,
         source,
@@ -413,7 +481,12 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::panic)]
+    #![allow(
+        clippy::panic,
+        clippy::expect_used,
+        clippy::unwrap_used,
+        clippy::indexing_slicing
+    )]
 
     use super::*;
 
@@ -485,5 +558,116 @@ mod tests {
             .unwrap_or_else(|e| panic!("must parse: {e}"));
         assert_eq!(c.as_deref(), Some("graph"));
         assert_eq!(rest, vec!["run", "flow.json", "--flag", "x"]);
+    }
+    // ---- the ingest step, which nothing used to perform -------------------------
+
+    /// A decision row, for driving the real ingest path.
+    fn a_decision(label: &str, wall_nanos: u64) -> laya_store::Record {
+        laya_store::Record::Decision(laya_store::DecisionRow {
+            ts: "epoch+1".to_string(),
+            ts_nanos: 1,
+            wall_nanos,
+            tool: "decide".to_string(),
+            run_id: Some("run-1".to_string()),
+            node_id: None,
+            question_id: "kind".to_string(),
+            question_type: "choice".to_string(),
+            label: label.to_string(),
+            confidence: Some(0.9),
+            band: "high".to_string(),
+            margin: None,
+            near_tie: false,
+            probabilities: None,
+            saturated: false,
+            laya_version: "0.3.5".to_string(),
+            state_sha256: "x".to_string(),
+            head_sha256: None,
+            backbone_sha256: None,
+            bucket_clamped: None,
+            latency_ms: 7,
+            executed: false,
+        })
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let p = std::env::temp_dir().join(format!("laya-cli-{tag}-{nanos}"));
+        std::fs::create_dir_all(&p).expect("mkdir");
+        p
+    }
+
+    #[test]
+    fn reading_ingests_pending_segments_first() {
+        // The defect measured in the live deployment: 7 real decisions sat in segments while
+        // `stats` reported `decisions: 0 -- latency unknown`, and nothing was ever scheduled to
+        // compact. A reader that ignores pending segments says "no data" about data on disk.
+        let dir = scratch("ingest-first");
+        let store = dir.join(laya_store::STORE_FILE);
+        let _ = laya_store::append_segment(&dir, &a_decision("billing", 1)).expect("a");
+        let _ = laya_store::append_segment(&dir, &a_decision("auth", 2)).expect("b");
+
+        // Before: the store is empty and holds nothing.
+        assert_eq!(
+            laya_store::Ledger::read_only(&store)
+                .expect("open")
+                .len()
+                .expect("len"),
+            0
+        );
+
+        ingest_before_reading(&dir, &store, false);
+
+        assert_eq!(
+            laya_store::Ledger::read_only(&store)
+                .expect("open")
+                .len()
+                .expect("len"),
+            2,
+            "both rows must be readable after an ordinary read"
+        );
+    }
+
+    #[test]
+    fn the_control_no_compact_reads_the_store_exactly_as_it_stands() {
+        // The near-miss: `--no-compact` must NOT ingest, or the flag is a lie and there is no
+        // way to inspect the store without mutating it.
+        let dir = scratch("no-compact");
+        let store = dir.join(laya_store::STORE_FILE);
+        let _ = laya_store::append_segment(&dir, &a_decision("billing", 1)).expect("a");
+
+        ingest_before_reading(&dir, &store, true);
+
+        assert_eq!(
+            laya_store::Ledger::read_only(&store)
+                .expect("open")
+                .len()
+                .expect("len"),
+            0,
+            "--no-compact must leave the store alone"
+        );
+        assert_eq!(
+            laya_store::segments(&dir).expect("segments").len(),
+            1,
+            "and the segment must still be there to ingest later"
+        );
+    }
+
+    #[test]
+    fn a_read_never_fails_because_ingestion_could_not_write() {
+        // A reader must not trade its answer for the chance to write. With no segments at all
+        // the helper must do nothing and stay silent, which is its state whenever a server is
+        // between writes.
+        let dir = scratch("ingest-noop");
+        let store = dir.join(laya_store::STORE_FILE);
+        ingest_before_reading(&dir, &store, false);
+        assert_eq!(
+            laya_store::Ledger::read_only(&store)
+                .expect("open")
+                .len()
+                .expect("len"),
+            0
+        );
     }
 }

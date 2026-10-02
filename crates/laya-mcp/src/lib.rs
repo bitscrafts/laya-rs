@@ -218,6 +218,16 @@ impl ServerState {
         self
     }
 
+    /// Turn ledgering on or off explicitly, for tests and for embedding.
+    ///
+    /// The environment is the deployed path, but a test needs a directory of its own — and a
+    /// test that recorded into the operator's real ledger would be a side effect, not a check.
+    #[must_use]
+    pub fn with_ledger_dir(mut self, dir: Option<std::path::PathBuf>) -> Self {
+        self.ledger_dir = dir;
+        self
+    }
+
     /// Point at a specific sidecar socket (tests, or a non-default deployment).
     #[must_use]
     pub fn with_sidecar(mut self, sidecar: laya_backbone::Sidecar) -> Self {
@@ -389,6 +399,13 @@ pub struct RawArgs {
     /// `laya_abi::Question` array is the next step (the adapter is ready).
     #[serde(default)]
     questions: Option<serde_json::Value>,
+    /// The CALLER's run id, when it has one. Threaded into the ledger so a decision can be
+    /// joined to the run that made it — the join is the whole point of recording.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The CALLER's node id, when it has one. Same purpose as `run_id`, one level finer.
+    #[serde(default)]
+    node_id: Option<String>,
 }
 
 /// What a tool handler concluded.
@@ -549,10 +566,57 @@ pub fn handle(
 /// The fail-closed rule is the point: if the sidecar cannot answer, the gate says
 /// `ask` — never `allow`. An unavailable gate must never mean permission.
 fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let started = std::time::Instant::now();
     let action = args.action.clone().unwrap_or_default();
     let irreversible = args.irreversible.unwrap_or(false);
     let payload = judge_command(&action, irreversible, state)?;
-    to_result(ToolOutcome::Ok(payload.to_string()))
+
+    // Every gate verdict is recorded, INCLUDING a refusal. A gate that logs only its approvals
+    // answers "what did you allow" and stays silent on "what did you stop", which is the half an
+    // incident review reaches for first.
+    // The verdict is the row's label. A normal payload carries `label`; the fail-closed payload
+    // carries `decision` and no label at all, so reading only `label` recorded an empty string
+    // for the one case where the gate could not reach the head.
+    // The GATE'S DECISION is the row's label -- `allow` / `ask` / `deny`.
+    //
+    // The order matters and the first version had it backwards: it read the model's own
+    // `label` first, so a gate row recorded `"yes"` and the per-tool verdict counts came out as
+    // `yes: 1` instead of `allow: 1`. The model's yes/no is a downgrade-only input to the
+    // verdict, not the verdict, and an operator asking "what did the gate allow yesterday"
+    // needs the decision. The model's label is still in `probabilities`/`band`.
+    let verdict_label = payload
+        .get("decision")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| payload.get("label").and_then(serde_json::Value::as_str))
+        .unwrap_or("unknown")
+        .to_string();
+    let spec = RowSpec {
+        tool: "gate",
+        question_id: &state_sha256(&json!(action)),
+        question_type: "noul",
+        run_id: args.run_id.as_deref(),
+        node_id: args.node_id.as_deref(),
+        // A verdict is a permission, not an event: this call answered, it did not execute.
+        executed: false,
+        label_override: Some(&verdict_label),
+    };
+    let note = record_decision_for(
+        state,
+        &payload,
+        Timing {
+            latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            ts_nanos: now_nanos(),
+            wall_nanos: now_wall_nanos(),
+        },
+        &state_sha256(&json!({ "action": action, "irreversible": irreversible })),
+        &spec,
+    );
+
+    let mut body = payload;
+    if let (Some(obj), Some(note)) = (body.as_object_mut(), note) {
+        obj.insert("ledger".into(), json!(note));
+    }
+    to_result(ToolOutcome::Ok(body.to_string()))
 }
 
 /// Judge ONE command, returning the gate payload.
@@ -687,8 +751,69 @@ fn record_decision(
     question_id: &str,
     question_type: &str,
     payload: &serde_json::Value,
-    latency_ms: u64,
+    timing: Timing,
     state_sha256: &str,
+) -> Option<String> {
+    record_decision_for(
+        state,
+        payload,
+        timing,
+        state_sha256,
+        &RowSpec {
+            tool,
+            question_id,
+            question_type,
+            ..RowSpec::default()
+        },
+    )
+}
+
+/// The three clocks a row records, grouped because they are always taken together.
+#[derive(Debug, Clone, Copy)]
+struct Timing {
+    /// Wall-clock milliseconds spent answering — the measured number.
+    latency_ms: u64,
+    /// Monotonic nanoseconds from this process's start.
+    ts_nanos: u64,
+    /// Epoch nanoseconds — the ordering key. See [`laya_store::DecisionRow::wall_nanos`].
+    wall_nanos: u64,
+}
+
+/// Everything about a row except the answer and the clocks.
+///
+/// Grouped rather than passed as five positional arguments: the recorder had eight, and a
+/// signature that long is one transposition away from writing the wrong question id into the
+/// ledger — a defect no type checker catches, because both are `&str`.
+#[derive(Debug, Default, Clone)]
+struct RowSpec<'a> {
+    /// Which tool produced it.
+    tool: &'a str,
+    /// Which question it answers (or, for a refusal, what was refused).
+    question_id: &'a str,
+    /// `noul`, `choice` or `score`.
+    question_type: &'a str,
+    /// The consumer's own run id, when it supplied one.
+    run_id: Option<&'a str>,
+    /// The consumer's own node id, when it supplied one.
+    node_id: Option<&'a str>,
+    /// Whether the action judged had actually been carried out at the moment of recording.
+    executed: bool,
+    /// The label to record, when the payload does not carry one.
+    ///
+    /// Two callers need this. A refusal has no model label, so the refusal itself is the label —
+    /// otherwise the row shows nothing and a denial disappears from the ledger. A gate verdict
+    /// carries `decision` rather than `label`, so without this a fail-closed `ask` recorded an
+    /// empty label: the row existed and said nothing, which my own test caught.
+    label_override: Option<&'a str>,
+}
+
+/// The real recorder. [`record_decision`] is the short form that carries no ids.
+fn record_decision_for(
+    state: &ServerState,
+    payload: &serde_json::Value,
+    timing: Timing,
+    state_sha256: &str,
+    spec: &RowSpec<'_>,
 ) -> Option<String> {
     let dir = state.ledger_dir.as_ref()?;
     let band = payload
@@ -697,21 +822,30 @@ fn record_decision(
         .unwrap_or("unknown");
     let row = laya_store::DecisionRow {
         ts: now_rfc3339(),
-        ts_nanos: now_nanos(),
-        tool: tool.to_string(),
-        run_id: None,
-        node_id: None,
-        question_id: question_id.to_string(),
-        question_type: question_type.to_string(),
-        label: payload
-            .get("label")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        ts_nanos: timing.ts_nanos,
+        wall_nanos: timing.wall_nanos,
+        tool: spec.tool.to_string(),
+        run_id: spec.run_id.map(str::to_string),
+        node_id: spec.node_id.map(str::to_string),
+        question_id: spec.question_id.to_string(),
+        question_type: spec.question_type.to_string(),
+        // A refusal has no model label -- the label IS the refusal, so the row is a fact in the
+        // ledger rather than an absence. What the gate denied is the row an incident review wants.
+        label: spec.label_override.map_or_else(
+            || {
+                payload
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            },
+            str::to_string,
+        ),
+        // `None` when absent -- never 0.0, which would read as "maximally unsure" and poison
+        // every calibration metric built on the column.
         confidence: payload
             .get("confidence")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.0),
+            .and_then(serde_json::Value::as_f64),
         band: band.to_string(),
         margin: payload.get("margin").and_then(serde_json::Value::as_f64),
         near_tie: payload
@@ -727,11 +861,13 @@ fn record_decision(
         state_sha256: state_sha256.to_string(),
         head_sha256: None,
         backbone_sha256: None,
+        // NO LONGER copied from `saturated`: that is a different fact, and copying it made an
+        // unknown clamp state look known. `None` until a source that actually knows supplies it.
         bucket_clamped: payload
-            .get("saturated")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        latency_ms,
+            .get("bucket_clamped")
+            .and_then(serde_json::Value::as_bool),
+        latency_ms: timing.latency_ms,
+        executed: spec.executed,
     };
     match laya_store::append_segment(dir, &laya_store::Record::Decision(row)) {
         Ok(_) => None,
@@ -771,6 +907,19 @@ pub fn now_nanos() -> u64 {
 
 /// The process start, so `now_nanos` is monotonic and starts near zero.
 static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Epoch nanoseconds — the key that is comparable across every writer.
+///
+/// `now_nanos` above is measured from **this process's** start, so two servers' rows cannot be
+/// ordered against each other. Measured: server rows read 65..171 while CLI outcome rows read
+/// epoch nanos near 1.79e18, a ~10^16 gap that put every outcome after every decision. Rows
+/// carry both: this one orders, the other stays for per-process sequencing.
+#[must_use]
+pub fn now_wall_nanos() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
+}
 
 /// A wall-clock timestamp, for a human reading the ledger.
 #[must_use]
@@ -822,10 +971,40 @@ pub fn now_rfc3339() -> String {
 /// An [`McpError`] for a missing or malformed question block, nothing to judge, an oversized
 /// state, a file outside the read scope, or a command the gate did not allow.
 fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
-    let questions = laya_core::agentic::validate_questions(
+    let started = std::time::Instant::now();
+    // A refusal is recorded BEFORE the error is returned. A ledger that only holds successes
+    // cannot answer "what did you refuse", which is the question that matters after an incident.
+    let refuse = |why: &str| -> Option<String> {
+        record_decision_for(
+            state,
+            &json!({}),
+            Timing {
+                latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                ts_nanos: now_nanos(),
+                wall_nanos: now_wall_nanos(),
+            },
+            &state_sha256(&json!(why)),
+            &RowSpec {
+                tool: "ask",
+                question_id: why,
+                question_type: "noul",
+                run_id: args.run_id.as_deref(),
+                node_id: args.node_id.as_deref(),
+                executed: false,
+                label_override: Some("refused"),
+            },
+        )
+    };
+
+    let questions = match laya_core::agentic::validate_questions(
         args.questions.as_ref().unwrap_or(&serde_json::Value::Null),
-    )
-    .map_err(|e| McpError::invalid_params(format!("laya-mcp: {e}"), None))?;
+    ) {
+        Ok(q) => q,
+        Err(e) => {
+            let _ = refuse(&format!("invalid questions: {e}"));
+            return Err(McpError::invalid_params(format!("laya-mcp: {e}"), None));
+        }
+    };
 
     let scope = &state.read_scope;
     let mut files: Vec<laya_core::agentic::StateFile> = Vec::new();
@@ -839,6 +1018,7 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
                 content: file.content,
             }),
             Err(e) => {
+                let _ = refuse(&format!("read refused: {e}"));
                 return Err(McpError::invalid_params(e.to_string(), None));
             }
         }
@@ -1440,7 +1620,11 @@ fn decide_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolRes
             id,
             question_type,
             payload,
-            elapsed_ms,
+            Timing {
+                latency_ms: elapsed_ms,
+                ts_nanos: now_nanos(),
+                wall_nanos: now_wall_nanos(),
+            },
             &state_sha256(&state_value),
         ) {
             ledger_note = Some(note);
@@ -1798,7 +1982,12 @@ pub fn resolve_read_scope(raw: Option<&str>) -> (laya_core::ask_file::Scope, Vec
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::panic)]
+    #![allow(
+        clippy::panic,
+        clippy::expect_used,
+        clippy::unwrap_used,
+        clippy::indexing_slicing
+    )]
 
     use super::*;
     use laya_core::readiness::judge;
@@ -1826,6 +2015,39 @@ mod tests {
         RawArgs::default()
     }
 
+    /// A state whose ledger is ON, in a directory of its own.
+    ///
+    /// Recording is the thing under test, so the state must have a ledger dir — the default
+    /// `test_state()` has none, and a recorder with no directory returns `None` and writes
+    /// nothing, which would make every recording assertion below pass for the wrong reason.
+    fn state_with_ledger(dir: &std::path::Path) -> ServerState {
+        ServerState::new("http://x:1")
+            .with_sidecar(laya_backbone::Sidecar::new("/tmp/laya-test-no-such.sock"))
+            .with_ledger_dir(Some(dir.to_path_buf()))
+    }
+
+    fn tempdir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let p = std::env::temp_dir().join(format!("laya-mcp-{tag}-{nanos}"));
+        std::fs::create_dir_all(&p).expect("mkdir");
+        p
+    }
+
+    /// Every row the server has appended, read back from the segments it wrote.
+    fn recorded(dir: &std::path::Path) -> Vec<laya_store::DecisionRow> {
+        let mut out = Vec::new();
+        for f in laya_store::segments(dir).expect("segments") {
+            for r in laya_store::read_segment(&f).expect("read") {
+                if let laya_store::Record::Decision(d) = r {
+                    out.push(d);
+                }
+            }
+        }
+        out
+    }
+
     // ---- the tool surface ---------------------------------------------------
 
     #[test]
@@ -1842,6 +2064,121 @@ mod tests {
         ] {
             assert!(is_known_tool(t), "{t} must be a tool");
         }
+    }
+
+    #[test]
+    fn a_refused_gate_is_recorded() {
+        // R2's refusal half. The sidecar socket cannot exist, so the gate takes its fail-closed
+        // path and answers `ask`. That verdict -- the one where the gate could NOT decide -- is
+        // exactly what has to appear in the ledger, because "what did the gate refuse" is the
+        // question an incident review asks first.
+        let dir = tempdir("gate-refusal");
+        let state = state_with_ledger(&dir);
+        let args = RawArgs {
+            action: Some("rm -rf /".to_string()),
+            ..RawArgs::default()
+        };
+        let _ =
+            gate_via_sidecar(&args, &state).expect("the gate answers even when the head is down");
+
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1, "a refusal must be a row, not an absence");
+        let row = &rows[0];
+        assert_eq!(row.tool, "gate");
+        // The VERDICT, not the model's yes/no. Reading `label` first recorded "yes" and the
+        // per-tool counts came out as `yes: 1` instead of `ask: 1` -- a metric that cannot
+        // answer "what did the gate refuse".
+        assert!(
+            ["allow", "ask", "deny"].contains(&row.label.as_str()),
+            "the row must carry the gate's decision, got {:?}",
+            row.label
+        );
+        assert!(!row.executed, "a verdict is a permission, not an event");
+        assert_eq!(row.run_id, None, "no caller id was supplied");
+    }
+
+    #[test]
+    fn the_gate_row_carries_the_callers_run_and_node_ids() {
+        // R6's real requirement: an event without the ids answers nothing, because it cannot be
+        // joined to the run that made it.
+        let dir = tempdir("gate-ids");
+        let state = state_with_ledger(&dir);
+        let args = RawArgs {
+            action: Some("git status".to_string()),
+            run_id: Some("run-42".to_string()),
+            node_id: Some("triage".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = gate_via_sidecar(&args, &state).expect("gate answers");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].run_id.as_deref(), Some("run-42"));
+        assert_eq!(rows[0].node_id.as_deref(), Some("triage"));
+    }
+
+    #[test]
+    fn a_gate_row_carries_a_comparable_wall_clock() {
+        // Without a wall clock the row cannot be ordered against rows from another process,
+        // which is what made `tail`'s "newest" untrue.
+        let dir = tempdir("gate-wall");
+        let state = state_with_ledger(&dir);
+        let args = RawArgs {
+            action: Some("git status".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = gate_via_sidecar(&args, &state).expect("gate answers");
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1);
+        let epoch_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        assert!(
+            rows[0].wall_nanos / 1_000_000_000 > epoch_now - 60,
+            "wall_nanos must be epoch-based ({}), not process-relative",
+            rows[0].wall_nanos
+        );
+    }
+
+    #[test]
+    fn an_invalid_question_is_recorded_as_a_refusal_before_the_error_returns() {
+        // The refusal path is the one that used to vanish: it returns early, so nothing was
+        // written, and the ledger showed a clean store while `ask` was refusing callers.
+        let dir = tempdir("ask-refusal");
+        let state = state_with_ledger(&dir);
+        let args = RawArgs {
+            questions: Some(serde_json::json!({"not": "a question map"})),
+            ..RawArgs::default()
+        };
+        let err = ask_via_sidecar(&args, &state).expect_err("an invalid question map is an error");
+        assert!(
+            err.message.contains("laya-mcp"),
+            "the error is still reported: {}",
+            err.message
+        );
+        let rows = recorded(&dir);
+        assert_eq!(rows.len(), 1, "the refusal is a row");
+        assert_eq!(rows[0].tool, "ask");
+        assert_eq!(rows[0].label, "refused");
+    }
+
+    #[test]
+    fn the_control_a_state_without_a_ledger_directory_records_nothing() {
+        // The near-miss that keeps the four tests above honest: they pass because recording
+        // works, not because `record_decision` always writes. With no directory configured the
+        // recorder must return without touching the filesystem -- and it must not create one.
+        let dir = tempdir("no-ledger");
+        let state = ServerState::new("http://x:1")
+            .with_sidecar(laya_backbone::Sidecar::new("/tmp/laya-test-no-such.sock"));
+        assert!(
+            state.ledger_dir.is_none(),
+            "the default state has no ledger"
+        );
+        let args = RawArgs {
+            action: Some("git status".to_string()),
+            ..RawArgs::default()
+        };
+        let _ = gate_via_sidecar(&args, &state).expect("gate answers");
+        assert!(laya_store::segments(&dir).expect("segments").is_empty());
     }
 
     #[test]
