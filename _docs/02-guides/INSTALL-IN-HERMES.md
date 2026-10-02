@@ -70,7 +70,7 @@ This is not theoretical; it happened while building this, and the tell is worth
 remembering:
 
 ```
-$ (new session) mcp__laya__gate -> {"decision":"allow","confidence":0.9479}
+$ (new session) mcp__laya__gate -> {"decision":"allow","allowlisted":true,"allowlist_entry":"git status"}
 $ (old session) mcp__laya__gate -> laya-rs: `gate` is not implemented yet
                                     ^^^^^^^ the OLD binary's diagnostic prefix
 ```
@@ -124,6 +124,48 @@ and loop counts in your code — only bounded, typed judgements go to Laya.
 pointing at a path that does not exist, `gate` returns
 `{"decision":"ask","reason":"sidecar-unavailable"}` while `decide` errors.
 
+### `allow` requires an allowlist match — the model can only downgrade
+
+**`gate` (and `ask`, which gates its own command through the same function) can only
+reach `allow` for a command that matches a configured prefix in `Policy::gate_allow`.**
+The default is a small read-only set: `ls`, `pwd`, `cat`, `head`, `tail`, `wc`,
+`git status`, `git diff`, `git log`, `git show`, `cargo check`, `cargo test`,
+`cargo clippy`. A command with no match — `mkfs.ext4 /dev/sda1`, `shred -u`, anything
+the operator has not listed — **cannot** be `allow`, however confident the model is.
+
+A match is defeated outright by a shell metacharacter (`; | & $ \` > < ( ) { } \n` or a
+backslash): `git status; rm x` matches no entry, because the semicolon means a second
+command is about to run that the match never saw.
+
+On top of the allowlist, the decision head is consulted — but **only to downgrade**:
+
+* a destructive pattern in the command (`destructive_signals`, e.g. `rm -rf`, `: >`,
+  `dd … of=`) forces `ask` regardless of anything else;
+* `irreversible: true` forces `ask` for every command, allowlisted or not;
+* only then does the model's `yes`/`no` apply, and only a confident `yes` (the noul
+  high band) with no near tie reaches `allow` — a confident `no` is `deny`, anything
+  else is `ask`.
+
+Verified live (the two commands differ only in whether they are allowlisted — same
+decision head, same confidence magnitude):
+
+```
+mcp__laya__gate {"action": "git status"}
+  -> {"decision":"allow","allowlisted":true,"allowlist_entry":"git status",
+      "destructive_signals":[],"model_decision":"allow"}
+
+mcp__laya__gate {"action": "mkfs.ext4 /dev/sda1"}
+  -> {"decision":"ask","allowlisted":false,"allowlist_entry":null,
+      "destructive_signals":[],"model_decision":"allow"}
+```
+
+The second line is the whole point: the model alone says `allow` (`model_decision`) for
+a disk-formatting command — it was MEASURED unable to separate safe commands from
+destructive ones (6/12 on a noul, negative separation on six consequence phrasings) — and
+the allowlist is what actually stops it. A caller that needs a command this server does
+not allowlist edits `Policy::gate_allow`; an empty `gate_allow` is a valid policy and
+means "never allow", with no fallback to the default.
+
 ---
 
 ## 5. Cost and latency, so you can decide when to call it
@@ -163,8 +205,12 @@ Consequences worth acting on:
 ```
 hermes mcp list       laya  /root/.local/bin/laya-mcp  all  ✓ enabled
 hermes mcp test laya  ✓ Connected (859 ms)   ✓ Tools discovered: 7
-in-session call       mcp__laya__gate -> {"decision":"allow","band":"high",
-                                          "confidence":0.9479,"saturated":false}
+in-session call       mcp__laya__gate {"action": "git status"}
+                       -> {"decision":"allow","allowlisted":true,
+                           "allowlist_entry":"git status","destructive_signals":[]}
 ```
 
-Last verified 2026-09-30. Re-run `hermes mcp test laya` before trusting this line.
+Last verified 2026-09-30 (`hermes mcp list`/`test`). The `gate` decision itself was
+re-verified over real stdio on 2026-10-02 against spec 08's fix — see
+`scripts/gate-live-corpus.py`, which is the re-runnable version of this check. Re-run
+`hermes mcp test laya` before trusting the Hermes-connection lines above.

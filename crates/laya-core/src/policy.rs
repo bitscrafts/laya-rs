@@ -158,6 +158,39 @@ pub struct Policy {
     /// Whether to refuse to act on a saturated answer at all (`Ask` instead of
     /// acting), or merely record it. Default: record only.
     pub escalate_on_saturation: bool,
+    /// Command prefixes `gate_verdict` may allow, matched on whitespace-tokenised words
+    /// (spec 08, R1). An **empty** list is a valid policy and means "never allow" — it must
+    /// never fall back to a default, because a caller that deliberately locked the gate down
+    /// must stay locked down.
+    ///
+    /// The default is a small read-only set: enough to let an agent orient itself without a
+    /// human in the loop, and nothing that writes or deletes.
+    pub gate_allow: Vec<String>,
+    /// How long `ask` lets its command run before killing it and reporting `timed_out: true`
+    /// (spec 08, R8). A hung command must not stall the serial server.
+    pub ask_deadline_secs: u64,
+}
+
+/// [`Policy::gate_allow`]'s default: read-only commands an agent needs to orient itself.
+fn default_gate_allow() -> Vec<String> {
+    [
+        "ls",
+        "pwd",
+        "cat",
+        "head",
+        "tail",
+        "wc",
+        "git status",
+        "git diff",
+        "git log",
+        "git show",
+        "cargo check",
+        "cargo test",
+        "cargo clippy",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 impl Default for Policy {
@@ -165,7 +198,17 @@ impl Default for Policy {
         Self {
             high_threshold: 0.9,
             low_threshold: 0.5,
-            noul_high_threshold: 0.9,
+            // Lower than the choice/score pair, DELIBERATELY (spec 08). 0.9 was tuned for
+            // the OLD design, where this was the ONLY gate on a destructive action. Measured
+            // live (2026-10-01) against allowlisted, read-only commands: `ls -la /tmp`
+            // 0.8314, `git status` 0.8722, `cargo test` 0.8327 — all below 0.9, and the
+            // model's own separation from destructive commands is NEGATIVE at this range
+            // (several destructive commands measured 0.90-0.99 "safe"). So 0.9 would keep
+            // `gate_verdict` asking on every legitimate, already-allowlisted command, while
+            // not keeping out a single unsafe one the allowlist does not already stop. Safety
+            // now lives in `gate_allow` and `destructive_signals`, not here — this threshold
+            // only decides whether an ALREADY-vetted command additionally needs a human.
+            noul_high_threshold: 0.8,
             noul_low_threshold: 0.5,
             noul_threshold: 0.5,
             saturation_threshold: 0.999,
@@ -174,6 +217,8 @@ impl Default for Policy {
             near_tie_margin: 0.01,
             escalate_on_near_tie: false,
             escalate_on_saturation: false,
+            gate_allow: default_gate_allow(),
+            ask_deadline_secs: 60,
         }
     }
 }
@@ -266,6 +311,12 @@ impl Policy {
     /// confidence that allows it is `High`. The video's measured example is the
     /// reason — `rm -rf node_modules && npm install` was classified "reversible"
     /// at confidence 0.35, and 0.35 must ask a human however the pick reads.
+    ///
+    /// **Superseded by [`crate::agentic::gate_verdict`] for anything that runs a real
+    /// command.** This function can reach `Allow` from confidence alone, which is exactly
+    /// the defect spec 08 fixed: `allow` now requires a positive allowlist match, which this
+    /// method has no notion of. Kept for the generic confidence-to-decision mapping other
+    /// callers still use; `laya-mcp`'s `gate`/`ask` tools no longer call it directly.
     #[must_use]
     pub fn gate(&self, confidence: f64, irreversible: bool, saturated: bool) -> GateDecision {
         if saturated && self.escalate_on_saturation {
@@ -586,5 +637,58 @@ mod tests {
             (p.low_threshold - 0.5).abs() < f64::EPSILON,
             "choice pair keeps defaults"
         );
+    }
+
+    // ---- gate_allow (spec 08) -----------------------------------------------
+
+    #[test]
+    fn the_default_allowlist_is_the_small_read_only_set() {
+        let p = Policy::default();
+        for entry in [
+            "ls",
+            "pwd",
+            "cat",
+            "head",
+            "tail",
+            "wc",
+            "git status",
+            "git diff",
+            "git log",
+            "git show",
+            "cargo check",
+            "cargo test",
+            "cargo clippy",
+        ] {
+            assert!(
+                p.gate_allow.iter().any(|e| e == entry),
+                "`{entry}` must be in the default allowlist"
+            );
+        }
+        assert_eq!(p.gate_allow.len(), 13, "no more, no fewer than specified");
+    }
+
+    #[test]
+    fn an_empty_allowlist_is_valid_and_is_not_replaced_by_the_default() {
+        // The control: a caller who deliberately locks the gate down must stay locked
+        // down. A fallback to the default here would make "never allow" unreachable.
+        let p = Policy {
+            gate_allow: Vec::new(),
+            ..Policy::default()
+        };
+        assert!(p.gate_allow.is_empty());
+        assert!(p.validate().is_ok(), "an empty allowlist is a valid policy");
+    }
+
+    #[test]
+    fn the_default_ask_deadline_is_sixty_seconds() {
+        assert_eq!(Policy::default().ask_deadline_secs, 60);
+    }
+
+    #[test]
+    fn gate_allow_survives_a_toml_round_trip() {
+        let p = Policy::from_toml("gate_allow = [\"ls\", \"pwd\"]\nask_deadline_secs = 5")
+            .unwrap_or_default();
+        assert_eq!(p.gate_allow, vec!["ls".to_string(), "pwd".to_string()]);
+        assert_eq!(p.ask_deadline_secs, 5);
     }
 }

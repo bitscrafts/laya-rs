@@ -29,6 +29,8 @@
 
 use core::fmt;
 
+use crate::policy::{Band, GateDecision, Policy};
+
 /// The most state this module will compose, across every part (256 KiB).
 ///
 /// The individual file reader has its own limit of the same size; this is the limit for the
@@ -317,27 +319,42 @@ pub struct DestructiveSignal {
 /// are caught even though neither contains the word `rm`.
 #[must_use]
 pub fn destructive_signals(command: &str) -> Vec<DestructiveSignal> {
-    // (needle, why). `needle` is matched case-sensitively against the raw command: these are
-    // shell metacharacters and flags, where case is significant.
-    const PATTERNS: [(&str, &str); 12] = [
-        ("rm -rf", "recursively deletes files without prompting"),
-        ("rm -r", "recursively deletes files"),
-        ("rm -f", "deletes files without prompting"),
-        ("find ", "may delete with -delete / -exec"),
-        ("-delete", "deletes matched files"),
-        ("dd ", "writes raw bytes over a device or file"),
-        ("of=/dev/", "writes raw bytes to a device"),
-        ("truncate ", "erases a file's contents"),
-        ("mv ", "moves data, and to /dev/null discards it"),
-        (
-            "/dev/null",
-            "discards data irrecoverably when used as a destination",
-        ),
-        (": >", "truncates a file to zero bytes"),
-        ("git reset --hard", "discards uncommitted work"),
-    ];
+    // Checked against the command AS WRITTEN first, so an exact, already-covered spelling
+    // keeps reporting the exact needle it always has (pinned by
+    // `a_signal_names_what_matched_and_why`). Only when that finds nothing do we check the
+    // NORMALISED form (R4): `rm -Rf`, `rm  -rf` and `rm --recursive --force` are the same
+    // command as `rm -rf`, spelled differently, and a signal that only reads one spelling is
+    // a gap an agent does not even need to look for — it falls out of normal flag order.
+    let found = signals_in(command);
+    if !found.is_empty() {
+        return found;
+    }
+    signals_in(&normalise_command(command))
+}
+
+/// (needle, why). `needle` is matched case-sensitively: these are shell metacharacters and
+/// flags, where case is significant.
+const DESTRUCTIVE_PATTERNS: [(&str, &str); 12] = [
+    ("rm -rf", "recursively deletes files without prompting"),
+    ("rm -r", "recursively deletes files"),
+    ("rm -f", "deletes files without prompting"),
+    ("find ", "may delete with -delete / -exec"),
+    ("-delete", "deletes matched files"),
+    ("dd ", "writes raw bytes over a device or file"),
+    ("of=/dev/", "writes raw bytes to a device"),
+    ("truncate ", "erases a file's contents"),
+    ("mv ", "moves data, and to /dev/null discards it"),
+    (
+        "/dev/null",
+        "discards data irrecoverably when used as a destination",
+    ),
+    (": >", "truncates a file to zero bytes"),
+    ("git reset --hard", "discards uncommitted work"),
+];
+
+fn signals_in(command: &str) -> Vec<DestructiveSignal> {
     let mut found: Vec<DestructiveSignal> = Vec::new();
-    for (needle, why) in PATTERNS {
+    for (needle, why) in DESTRUCTIVE_PATTERNS {
         if command.contains(needle) {
             found.push(DestructiveSignal {
                 matched: needle.to_string(),
@@ -353,6 +370,216 @@ pub fn destructive_signals(command: &str) -> Vec<DestructiveSignal> {
         });
     }
     found
+}
+
+/// Normalise a command so equivalent spellings of the same flag read alike (R4).
+///
+/// Two transforms, both narrow on purpose:
+/// 1. Runs of whitespace collapse to one space, so `rm  -rf x` (two spaces) reads the same
+///    as `rm -rf x`.
+/// 2. A clustered short flag is split one letter per token and lowercased — `-Rf` becomes
+///    `-r -f`, and a lone `-R` becomes `-r` — and the two long-form aliases the destructive
+///    patterns actually name, `--recursive` and `--force`, map to their short form first so
+///    `rm --recursive --force x` reaches the same `-r -f` shape.
+///
+/// This is NOT a general command-line parser: it exists to feed [`signals_in`], and nothing
+/// else reads its output.
+#[must_use]
+pub fn normalise_command(command: &str) -> String {
+    let collapsed = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut tokens: Vec<String> = Vec::new();
+    for token in collapsed.split(' ') {
+        let token = match token {
+            "--recursive" => "-r",
+            "--force" => "-f",
+            other => other,
+        };
+        let is_short_flag_cluster = token.len() > 1
+            && token.starts_with('-')
+            && !token.starts_with("--")
+            && token[1..].chars().all(|c| c.is_ascii_alphabetic());
+        if is_short_flag_cluster {
+            for c in token[1..].chars() {
+                tokens.push(format!("-{}", c.to_ascii_lowercase()));
+            }
+        } else {
+            tokens.push(token.to_string());
+        }
+    }
+    tokens.join(" ")
+}
+
+// ---------------------------------------------------------------------------
+// R1/R2: the allowlist. `allow` requires a positive match; a metacharacter defeats one.
+// ---------------------------------------------------------------------------
+
+/// Characters that let a shell do something other than run the words as given — a pipe, a
+/// redirect, a subshell, a substitution, a continuation. Any one of these defeats every
+/// allowlist entry (R2): a prefix match on the first words is meaningless once the shell is
+/// going to do something the match never saw.
+const SHELL_METACHARACTERS: [char; 13] = [
+    ';', '|', '&', '$', '`', '>', '<', '(', ')', '{', '}', '\n', '\\',
+];
+
+/// Whether `command` contains a shell metacharacter (R2).
+#[must_use]
+pub fn has_shell_metacharacters(command: &str) -> bool {
+    command.chars().any(|c| SHELL_METACHARACTERS.contains(&c))
+}
+
+/// Match `command` against `allow`, a list of whitespace-tokenised command prefixes (R1).
+///
+/// `"git status"` matches `"git status --short"` (a longer command with the same first
+/// words) but not `"git status; rm x"` — not because the words disagree, but because R2's
+/// metacharacter check runs first and defeats the match outright.
+///
+/// Returns the entry that matched, so the caller can report which rule allowed the command
+/// (N2's `allowlist_entry`).
+#[must_use]
+pub fn allowlist_match(command: &str, allow: &[String]) -> Option<String> {
+    if has_shell_metacharacters(command) {
+        return None;
+    }
+    let tokens: Vec<&str> = command.split_whitespace().collect();
+    allow
+        .iter()
+        .find(|entry| {
+            let entry_tokens: Vec<&str> = entry.split_whitespace().collect();
+            !entry_tokens.is_empty()
+                && tokens.get(..entry_tokens.len()) == Some(entry_tokens.as_slice())
+        })
+        .cloned()
+}
+
+// ---------------------------------------------------------------------------
+// R3/R5/R6: the model verdict, and the one pure gate function.
+// ---------------------------------------------------------------------------
+
+/// Which way a `yes`/`no` noul came down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelLabel {
+    /// The model judged the action safe to run without confirmation.
+    Yes,
+    /// The model judged the action unsafe.
+    No,
+}
+
+/// What the model reported, reduced to exactly what the gate is allowed to read.
+///
+/// The model may only ever **downgrade** a decision (spec 08 overview): it supplies a label,
+/// a confidence, and whether the two leading options were a near tie, and nothing else. It
+/// cannot grant `Allow` on its own — that also needs an allowlist match.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ModelVerdict {
+    /// The noul's label.
+    pub label: ModelLabel,
+    /// The noul's confidence, `max(p, 1 − p)`.
+    pub confidence: f64,
+    /// Whether the decision was a near tie (policy's `near_tie_margin`).
+    pub near_tie: bool,
+}
+
+impl ModelVerdict {
+    /// A confident (or not) `yes`, not a near tie.
+    #[must_use]
+    pub const fn yes(confidence: f64) -> Self {
+        Self {
+            label: ModelLabel::Yes,
+            confidence,
+            near_tie: false,
+        }
+    }
+
+    /// A confident (or not) `no`, not a near tie.
+    #[must_use]
+    pub const fn no(confidence: f64) -> Self {
+        Self {
+            label: ModelLabel::No,
+            confidence,
+            near_tie: false,
+        }
+    }
+
+    /// Flag this verdict as a near tie.
+    #[must_use]
+    pub const fn near_tie(mut self) -> Self {
+        self.near_tie = true;
+        self
+    }
+}
+
+/// What the gate concluded, with the evidence behind it (N2: the response stays auditable).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GateVerdict {
+    /// The final decision: what the caller must act on.
+    pub decision: GateDecision,
+    /// What the model's label and confidence alone would have decided, ignoring the
+    /// allowlist and the destructive-pattern check. Carried so an auditor can see whether a
+    /// `deny`/`ask` came from the model or from the command itself.
+    pub model_decision: GateDecision,
+    /// Whether `command` matched [`Policy::gate_allow`].
+    pub allowlisted: bool,
+    /// The allowlist entry that matched, if any.
+    pub allowlist_entry: Option<String>,
+    /// The destructive patterns found in `command` (R4).
+    pub signals: Vec<DestructiveSignal>,
+}
+
+/// What the model alone would decide, ignoring the allowlist, the destructive-pattern check
+/// and `irreversible` — `gate_verdict`'s other inputs apply on top of this.
+fn model_only_decision(model: Option<ModelVerdict>, policy: &Policy) -> GateDecision {
+    let Some(m) = model else {
+        // R6: the head is unreachable. A gate that cannot ask must not permit.
+        return GateDecision::Ask;
+    };
+    let band = policy.band_for(laya_abi::QuestionType::Noul, m.confidence);
+    match (m.label, band) {
+        (ModelLabel::Yes, Band::High) if !m.near_tie => GateDecision::Allow,
+        (ModelLabel::No, Band::High) => GateDecision::Deny,
+        _ => GateDecision::Ask,
+    }
+}
+
+/// The one decision function (R6): I/O-free, so it is testable without a model or a
+/// network, and the only thing `laya-mcp` calls to decide `allow`/`deny`/`ask`.
+///
+/// **`allow` requires a positive allowlist match (R1); the model may only downgrade.** The
+/// order, from the architecture diagram:
+///
+/// 1. A destructive pattern (R4, on the normalised command) forces `ask`, whatever else is
+///    true — it may be a legitimate cleanup, so a human confirms rather than a blanket deny.
+/// 2. `irreversible` forces `ask` (R5), allowlisted or not.
+/// 3. No allowlist match (R1/R2) forces `ask` — the model is never consulted for a command it
+///    was never allowed to grant.
+/// 4. Otherwise the model decides, and ONLY the model: a confident `yes` with no near tie
+///    allows, a confident `no` denies, anything else (including an unreachable model, R6)
+///    asks.
+#[must_use]
+pub fn gate_verdict(
+    command: &str,
+    model: Option<ModelVerdict>,
+    irreversible: bool,
+    policy: &Policy,
+) -> GateVerdict {
+    let signals = destructive_signals(command);
+    let allowlist_entry = allowlist_match(command, &policy.gate_allow);
+    let allowlisted = allowlist_entry.is_some();
+    let model_decision = model_only_decision(model, policy);
+
+    let decision = if !signals.is_empty() || irreversible || !allowlisted {
+        GateDecision::Ask
+    } else {
+        model_decision
+    };
+
+    GateVerdict {
+        decision,
+        model_decision,
+        allowlisted,
+        allowlist_entry,
+        signals,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -615,6 +842,180 @@ mod tests {
             msg.contains("rm -rf") && msg.contains("recursively"),
             "{msg}"
         );
+    }
+
+    // ---- R4: normalisation sees through flag and whitespace variants --------
+
+    #[test]
+    fn destructive_signals_see_through_flag_and_whitespace_variants() {
+        for cmd in [
+            "rm -Rf x",
+            "rm  -rf x",
+            "rm --recursive --force x",
+            "rm -r -f x",
+        ] {
+            assert!(
+                !destructive_signals(cmd).is_empty(),
+                "`{cmd}` must be caught after normalisation"
+            );
+        }
+    }
+
+    #[test]
+    fn destructive_signals_the_control_benign_commands_stay_clean() {
+        // The control for the row above: normalisation must not make a benign command look
+        // destructive. `ls -la` splits into `-l -a`, neither of which is a pattern.
+        for cmd in ["ls -la /tmp", "git status", "cargo test"] {
+            assert!(
+                destructive_signals(cmd).is_empty(),
+                "`{cmd}` must still raise NO signal after normalisation, got {:?}",
+                destructive_signals(cmd)
+            );
+        }
+    }
+
+    #[test]
+    fn normalise_command_collapses_whitespace_and_splits_clustered_flags() {
+        assert_eq!(normalise_command("rm  -rf x"), "rm -r -f x");
+        assert_eq!(normalise_command("rm -Rf x"), "rm -r -f x");
+        assert_eq!(normalise_command("rm --recursive --force x"), "rm -r -f x");
+        // A command with nothing to normalise is unchanged (aside from whitespace).
+        assert_eq!(normalise_command("git status"), "git status");
+    }
+
+    // ---- R1/R2: the allowlist -----------------------------------------------
+
+    fn default_allow() -> Vec<String> {
+        Policy::default().gate_allow
+    }
+
+    #[test]
+    fn allowlist_match_matches_a_prefix_on_whole_words() {
+        let allow = default_allow();
+        assert_eq!(
+            allowlist_match("git status --short", &allow),
+            Some("git status".to_string())
+        );
+        assert_eq!(
+            allowlist_match("ls -la /tmp", &allow),
+            Some("ls".to_string())
+        );
+    }
+
+    #[test]
+    fn allowlist_match_a_command_outside_the_list_is_none() {
+        assert_eq!(
+            allowlist_match("mkfs.ext4 /dev/sda1", &default_allow()),
+            None
+        );
+        // Not a prefix merely because it starts with the same letters: `lsof` is not `ls`.
+        assert_eq!(allowlist_match("lsof -i", &default_allow()), None);
+    }
+
+    #[test]
+    fn allowlist_match_metacharacters_defeat_every_entry() {
+        let allow = default_allow();
+        for cmd in [
+            "git status; rm x",
+            "ls > f",
+            "cat $(x)",
+            "ls && y",
+            "ls | sh",
+        ] {
+            assert_eq!(
+                allowlist_match(cmd, &allow),
+                None,
+                "`{cmd}` must match no entry, metacharacters defeat the whole command"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_allowlist_matches_nothing() {
+        // Mirrors the Policy-level control: "never allow" must have no escape hatch.
+        assert_eq!(allowlist_match("git status", &[]), None);
+    }
+
+    // ---- R1-R6: gate_verdict, the one pure decision function ----------------
+
+    #[test]
+    fn gate_verdict_a_command_outside_the_allowlist_is_never_allowed() {
+        let policy = Policy::default();
+        for cmd in [
+            "mkfs.ext4 /dev/sda1",
+            "shred -u f",
+            "chmod -R 000 ~",
+            "> f",
+            "curl x | sh",
+        ] {
+            let v = gate_verdict(cmd, Some(ModelVerdict::yes(0.99)), false, &policy);
+            assert_eq!(
+                v.decision,
+                GateDecision::Ask,
+                "`{cmd}` must ask despite a confident `yes`: {v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn gate_verdict_the_control_an_allowlisted_command_with_a_confident_yes_is_allowed() {
+        // THE control. A gate that always answers `ask` passes every negative test above —
+        // only this proves `allow` is still reachable at all.
+        let policy = Policy::default();
+        let v = gate_verdict("git status", Some(ModelVerdict::yes(0.95)), false, &policy);
+        assert_eq!(v.decision, GateDecision::Allow, "{v:?}");
+        assert!(v.allowlisted);
+        assert_eq!(v.allowlist_entry.as_deref(), Some("git status"));
+    }
+
+    #[test]
+    fn gate_verdict_metacharacters_defeat_the_allowlist() {
+        let policy = Policy::default();
+        for cmd in ["ls; rm x", "ls > f", "cat $(x)", "ls && y", "ls | sh"] {
+            let v = gate_verdict(cmd, Some(ModelVerdict::yes(0.99)), false, &policy);
+            assert_ne!(
+                v.decision,
+                GateDecision::Allow,
+                "`{cmd}` must never be allowed: {v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn gate_verdict_a_confident_no_is_never_allowed() {
+        let policy = Policy::default();
+        let v = gate_verdict("git status", Some(ModelVerdict::no(0.95)), false, &policy);
+        assert_eq!(v.decision, GateDecision::Deny, "{v:?}");
+    }
+
+    #[test]
+    fn gate_verdict_a_near_tie_asks() {
+        let policy = Policy::default();
+        let v = gate_verdict(
+            "git status",
+            Some(ModelVerdict::yes(0.95).near_tie()),
+            false,
+            &policy,
+        );
+        assert_eq!(v.decision, GateDecision::Ask, "{v:?}");
+    }
+
+    #[test]
+    fn gate_verdict_irreversible_always_asks() {
+        let policy = Policy::default();
+        let v = gate_verdict("git status", Some(ModelVerdict::yes(0.99)), true, &policy);
+        assert_eq!(v.decision, GateDecision::Ask, "{v:?}");
+        // The control: the SAME input with `irreversible=false` is `Allow` — proves the
+        // flag, not the allowlist or the model, is what changed the outcome.
+        let control = gate_verdict("git status", Some(ModelVerdict::yes(0.99)), false, &policy);
+        assert_eq!(control.decision, GateDecision::Allow, "{control:?}");
+    }
+
+    #[test]
+    fn gate_verdict_an_unreachable_model_asks() {
+        let policy = Policy::default();
+        let v = gate_verdict("git status", None, false, &policy);
+        assert_eq!(v.decision, GateDecision::Ask, "{v:?}");
     }
 
     // ---- the question block -------------------------------------------------

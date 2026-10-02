@@ -593,67 +593,55 @@ fn judge_command(
                 let answer = answer_from_laya(&policy, "safe", &entry, &[])
                     .map_err(|e| McpError::internal_error(format!("laya-mcp: {e}"), None))?;
                 let dp = laya_core::DecisionPayload::from_answer(&answer, &policy);
-                // The gate decision is derived from CONFIDENCE, never from the noul value
-                // alone: "the answer says what, confidence says whether."
-                //
-                // A NEAR TIE cannot allow. A gate whose evidence is a coin flip must ask — that
-                // is the same rule as an unreachable head, applied to a reachable but
-                // undecided one. The measured 0.0006 backend drift can flip an answer this
-                // close, so `allow` here would be permission granted on noise.
-                let model_decision = if dp.near_tie {
-                    laya_core::GateDecision::Ask
-                } else {
-                    policy.gate(answer.confidence, irreversible, answer.saturated())
-                };
 
-                // ------------------------------------------------------------------
-                // THE SECOND SIGNAL, AND WHY ALLOW REQUIRES BOTH.
-                //
-                // MEASURED 2026-09-30: this head cannot classify command danger. "Is this action
-                // safe?" as a noul scored 6/12 — `ls -la /tmp` and `rm -rf <dir>` both came back
-                // ~0.85-0.89. Six consequence phrasings all had a NEGATIVE separation (the lowest
-                // destructive score below the highest benign one), so no threshold could work. A
-                // `choice` over declared effects did better, 13/18, and still missed `: > file`
-                // and `dd if=... of=...`.
-                //
-                // So the model ALONE must not be the control. But a static list must not be the
-                // control either: `find . -delete` is an idiom many engineers never think of, and
-                // the source research records an agent ROUTING AROUND a string block by writing
-                // the same file through a bash heredoc.
-                //
-                // Hence two signals, and `allow` requires BOTH to be clear. They cover each
-                // other: the model generalises to shapes nobody enumerated, the pattern check is
-                // exact where it matches. A pattern match can NEVER be allowed through, whatever
-                // the model says.
-                // ------------------------------------------------------------------
-                let signals = laya_core::agentic::destructive_signals(action);
-                let destructive = !signals.is_empty();
-
-                let decision = if destructive {
-                    // We know this is destructive, exactly. It may still be legitimate — a
-                    // deliberate cleanup — so a human confirms rather than a blanket deny.
-                    laya_core::GateDecision::Ask
-                } else {
-                    model_decision
+                // THE MODEL MAY ONLY DOWNGRADE. MEASURED 2026-09-30: this head cannot
+                // classify command danger — "is this action safe?" as a noul scored 6/12,
+                // with `ls -la /tmp` and `rm -rf <dir>` both coming back ~0.85-0.89. So the
+                // model is reduced to a `yes`/`no` label plus confidence and handed to
+                // `gate_verdict`, which can only use it to ASK or DENY more — never to grant
+                // `allow` on its own. `allow` additionally requires a positive allowlist
+                // match (spec 08, R1): the defect this fixed was `allow` reachable from
+                // confidence alone, with no allowlist and a 12-entry denylist that measured
+                // 0/6 on the live corpus.
+                let model = match answer.value.as_str() {
+                    "yes" => Some(laya_core::agentic::ModelVerdict {
+                        label: laya_core::agentic::ModelLabel::Yes,
+                        confidence: answer.confidence,
+                        near_tie: dp.near_tie,
+                    }),
+                    "no" => Some(laya_core::agentic::ModelVerdict {
+                        label: laya_core::agentic::ModelLabel::No,
+                        confidence: answer.confidence,
+                        near_tie: dp.near_tie,
+                    }),
+                    // "unknown": the noul itself could not be read. Same rule as an
+                    // unreachable head — `gate_verdict` treats `None` as `ask`.
+                    _ => None,
                 };
+                let verdict =
+                    laya_core::agentic::gate_verdict(action, model, irreversible, &policy);
 
                 serde_json::to_value(&dp).map_or_else(
                     |_| json!({}),
                     |mut v| {
                         if let Some(o) = v.as_object_mut() {
-                            o.insert("decision".into(), json!(decision));
-                            o.insert("model_decision".into(), json!(model_decision));
+                            o.insert("decision".into(), json!(verdict.decision));
+                            o.insert("model_decision".into(), json!(verdict.model_decision));
                             o.insert(
                                 "destructive_signals".into(),
-                                serde_json::to_value(&signals).unwrap_or_else(|_| json!([])),
+                                serde_json::to_value(&verdict.signals)
+                                    .unwrap_or_else(|_| json!([])),
                             );
+                            o.insert("allowlisted".into(), json!(verdict.allowlisted));
+                            o.insert("allowlist_entry".into(), json!(verdict.allowlist_entry));
                             o.insert("irreversible".into(), json!(irreversible));
                             o.insert(
                                 "signals_note".into(),
                                 json!(
-                                    "allow requires BOTH signals clear: no destructive pattern \
-                                     matched, and the model's confidence reached the high band. \
-                                     The head alone was measured at 6/12 on known commands."
+                                    "allow requires a positive allowlist match; the model and \
+                                     the destructive-pattern check may only downgrade it to \
+                                     ask or deny, never grant it. The head alone was measured \
+                                     at 6/12 on known commands."
                                 ),
                             );
                         }
@@ -817,6 +805,19 @@ pub fn now_rfc3339() -> String {
 /// The state composition itself is [`laya_core::agentic::compose_state`], where the order and
 /// the cap are pinned by offline tests.
 ///
+/// **Validate the WHOLE request before anything executes (spec 08, R7).** The historical
+/// defect measured live: a command was gated, then RUN, and only afterwards did
+/// `compose_state` discover there was nothing to judge — by which point a destructive
+/// command had already destroyed data. So every refusal this function can produce is
+/// decided first: `validate_questions`, the scoped file reads, and the part of
+/// [`laya_core::agentic::compose_state`]'s precondition that does not depend on the
+/// command's own output (a [`laya_core::agentic::AskFailure::StateTooLarge`] from the
+/// summary and files ALONE can only get worse once output is added, so it is certain and is
+/// raised now; [`laya_core::agentic::AskFailure::NoState`] is raised now only when there is
+/// no command to possibly rescue it). Only once all of that holds does the command's own
+/// gate verdict get consulted, and only an `allow` runs it — bounded by a deadline (R8), so
+/// a hung command cannot stall this single-client, serial server.
+///
 /// # Errors
 /// An [`McpError`] for a missing or malformed question block, nothing to judge, an oversized
 /// state, a file outside the read scope, or a command the gate did not allow.
@@ -843,45 +844,33 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
         }
     }
 
-    // Gate the command FIRST, then run it. A refusal here is final: the command is not
-    // executed at all, so there is nothing to route around.
-    let (stdout, stderr) = if let Some(cmd) =
-        args.command.as_deref().filter(|c| !c.trim().is_empty())
-    {
-        let verdict = judge_command(cmd, false, state)?;
-        let decision = verdict.get("decision").and_then(serde_json::Value::as_str);
-        if decision != Some("allow") {
-            return Err(McpError::invalid_params(
-                format!(
-                    "laya-mcp: the gate did not allow this command, so it was NOT run. \
-                     decision={} evidence={verdict}",
-                    decision.unwrap_or("unknown")
-                ),
-                None,
-            ));
+    let summary = args.state.as_deref();
+    let command = args.command.as_deref().filter(|c| !c.trim().is_empty());
+
+    let policy = laya_core::Policy::default();
+    let gate_decision = match command {
+        Some(cmd) => {
+            let verdict = judge_command(cmd, false, state)?;
+            verdict
+                .get("decision")
+                .and_then(|d| serde_json::from_value::<laya_core::GateDecision>(d.clone()).ok())
+                .unwrap_or(laya_core::GateDecision::Ask)
         }
-        let out = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .output()
-            .map_err(|e| {
-                McpError::internal_error(format!("laya-mcp: could not run the command: {e}"), None)
-            })?;
-        (
-            String::from_utf8_lossy(&out.stdout).to_string(),
-            String::from_utf8_lossy(&out.stderr).to_string(),
-        )
-    } else {
-        (String::new(), String::new())
+        // Unused by `ask_execute` when there is no command; `Ask` keeps the value
+        // meaningful rather than an arbitrary placeholder.
+        None => laya_core::GateDecision::Ask,
     };
 
-    let composed = laya_core::agentic::compose_state(
-        args.state.as_deref(),
+    let (stdout, stderr, timed_out) = ask_execute(
+        summary,
         &files,
-        Some(&stdout),
-        Some(&stderr),
-    )
-    .map_err(|e| McpError::invalid_params(format!("laya-mcp: {e}"), None))?;
+        command,
+        gate_decision,
+        policy.ask_deadline_secs,
+    )?;
+
+    let composed = laya_core::agentic::compose_state(summary, &files, Some(&stdout), Some(&stderr))
+        .map_err(|e| McpError::invalid_params(format!("laya-mcp: {e}"), None))?;
     let state_bytes = composed.len();
 
     let answers = state
@@ -896,16 +885,136 @@ fn ask_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult
 
     // The answers, plus what the caller needs to AUDIT the arithmetic — and deliberately
     // NOT the files or the output. `content_in_context: false` states it so a caller does not
-    // have to infer it from what is absent.
+    // have to infer it from what is absent. `timed_out` is DATA, not a JSON-RPC error: the
+    // caller needs to know the command started even though it did not finish.
     let body = json!({
         "answers": answers,
         "state_bytes": state_bytes,
         "files_read": files.len(),
-        "command_ran": args.command.as_deref().is_some_and(|c| !c.trim().is_empty()),
+        "command_ran": command.is_some(),
+        "timed_out": timed_out,
         "content_in_context": false,
         "questions_asked": questions.as_object().map_or(0, serde_json::Map::len),
     });
     to_result(ToolOutcome::Ok(body.to_string()))
+}
+
+/// Validate what is already decidable, THEN gate-check, THEN run the command (R7) — split
+/// out from [`ask_via_sidecar`] so the ordering is testable without a live sidecar: a test
+/// supplies `gate_decision` directly instead of going through [`judge_command`].
+///
+/// Returns `(stdout, stderr, timed_out)`.
+///
+/// # Errors
+/// An oversized state from `summary`/`files` alone, "nothing to judge" when there is no
+/// command to possibly rescue it, a command the gate did not allow, or a failure to spawn
+/// the command at all.
+fn ask_execute(
+    summary: Option<&str>,
+    files: &[laya_core::agentic::StateFile],
+    command: Option<&str>,
+    gate_decision: laya_core::GateDecision,
+    deadline_secs: u64,
+) -> Result<(String, String, bool), McpError> {
+    match laya_core::agentic::compose_state(summary, files, None, None) {
+        Err(e @ laya_core::agentic::AskFailure::StateTooLarge { .. }) => {
+            // Adding the command's output can only make this BIGGER, never smaller: already
+            // certain to fail, so refused now, before anything runs.
+            return Err(McpError::invalid_params(format!("laya-mcp: {e}"), None));
+        }
+        Err(e @ laya_core::agentic::AskFailure::NoState) if command.is_none() => {
+            // No command exists that could rescue this, so it is certain now too.
+            return Err(McpError::invalid_params(format!("laya-mcp: {e}"), None));
+        }
+        // Everything else — `Ok`, and `NoState` with a command present, which may still
+        // supply the only state there is — is deferred to the real composition after the
+        // command runs.
+        Ok(_) | Err(_) => {}
+    }
+
+    let Some(cmd) = command else {
+        return Ok((String::new(), String::new(), false));
+    };
+
+    if gate_decision != laya_core::GateDecision::Allow {
+        return Err(McpError::invalid_params(
+            format!(
+                "laya-mcp: the gate did not allow this command, so it was NOT run. \
+                 decision={gate_decision:?}"
+            ),
+            None,
+        ));
+    }
+
+    run_with_deadline(cmd, deadline_secs)
+}
+
+/// Run `cmd` under `sh -c`, bounded by `deadline_secs` (R8).
+///
+/// On expiry the child is killed and `timed_out` is `true` in the result — never a JSON-RPC
+/// error, because the caller needs to know the command STARTED. stdout/stderr are read on
+/// their own threads so a child that fills a pipe cannot deadlock against this thread
+/// waiting on it.
+///
+/// # Errors
+/// An [`McpError`] if the command could not even be spawned.
+fn run_with_deadline(cmd: &str, deadline_secs: u64) -> Result<(String, String, bool), McpError> {
+    use std::io::Read as _;
+
+    // `exec` replaces the shell's own process image with `cmd` instead of forking it as a
+    // child of `sh`, so the process this `Command` tracks IS the command itself — killing
+    // it kills the real work, not just a shell sitting above it with the pipes still held
+    // open by a grandchild. Safe for every command that can reach here: the gate that must
+    // have allowed it (R1/R2) already proved it carries no shell metacharacter, so there is
+    // no `&&`/`;` for `exec` to truncate.
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("exec {cmd}"))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            McpError::internal_error(format!("laya-mcp: could not run the command: {e}"), None)
+        })?;
+
+    let mut out_pipe = child.stdout.take();
+    let mut err_pipe = child.stderr.take();
+    let out_handle = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(p) = out_pipe.as_mut() {
+            let _ = p.read_to_string(&mut buf);
+        }
+        buf
+    });
+    let err_handle = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(p) = err_pipe.as_mut() {
+            let _ = p.read_to_string(&mut buf);
+        }
+        buf
+    });
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(deadline_secs);
+    let timed_out = loop {
+        match child.try_wait() {
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            // Exited on its own (`Ok(Some(_))`), or the exit status could not be determined
+            // (`Err(_)`): either way this is not a timeout, so the caller sees whatever the
+            // reader threads captured rather than a fabricated one.
+            Ok(Some(_)) | Err(_) => break false,
+        }
+    };
+
+    let stdout = out_handle.join().unwrap_or_default();
+    let stderr = err_handle.join().unwrap_or_default();
+    Ok((stdout, stderr, timed_out))
 }
 
 /// The `should_compact` tool (L7): the four judgements, turned into advice by OUR code.
@@ -1958,6 +2067,107 @@ mod tests {
             .unwrap_or_else(|e| panic!("gate must answer, not error: {e:?}"));
         assert_eq!(gate_decision(&out), "ask");
         assert_ne!(gate_decision(&out), "allow");
+    }
+
+    // ---- ask: validate the WHOLE request before anything executes (R7/R8) ---
+    //
+    // These call `ask_execute`/`run_with_deadline` directly rather than going through
+    // `handle("ask", ...)`: `test_state()` points at a dead sidecar (deliberately, so every
+    // other test in this module stays offline), so there is no way to stub the MODEL'S
+    // answer through the full pipeline. The gate decision these tests need IS the seam
+    // `ask_execute` exists to make testable — see its doc comment.
+
+    #[test]
+    fn ask_refuses_before_it_executes() {
+        // A request `compose_state` refuses: the summary ALONE is already over the cap, so
+        // the command's output could only make it worse — certain to fail, known without
+        // running anything. THE FIX is that this is caught before the command runs, not
+        // after: the measured live defect was the gate allowing a destructive command, the
+        // command running, and only THEN compose_state refusing — by which point the data
+        // was already gone.
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let canary = dir.path().join("canary");
+        let huge_summary = "x".repeat(laya_core::agentic::STATE_CAP_BYTES + 1);
+        let cmd = format!("touch {}", canary.display());
+
+        let out = ask_execute(
+            Some(&huge_summary),
+            &[],
+            Some(&cmd),
+            // Stubbed to Allow ON PURPOSE: proves the refusal comes from the precondition,
+            // not from the gate — a gate that happened to also refuse would prove nothing.
+            laya_core::GateDecision::Allow,
+            60,
+        );
+        assert!(out.is_err(), "an oversized state must refuse: {out:?}");
+        assert!(
+            !canary.exists(),
+            "the command must NOT have run: {}",
+            canary.display()
+        );
+    }
+
+    #[test]
+    fn ask_the_control_a_valid_request_does_execute() {
+        // THE control. Proves the precondition check does not block every request — only
+        // the one that was always going to fail.
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let canary = dir.path().join("canary");
+        let cmd = format!("touch {}", canary.display());
+
+        let out = ask_execute(
+            Some("a short, valid summary"),
+            &[],
+            Some(&cmd),
+            laya_core::GateDecision::Allow,
+            60,
+        );
+        assert!(out.is_ok(), "a valid request must execute: {out:?}");
+        assert!(canary.exists(), "the command must have run");
+    }
+
+    #[test]
+    fn ask_refuses_a_command_the_gate_did_not_allow() {
+        // The companion control: even a request that WOULD compose fine must not run a
+        // command the gate judged `ask`/`deny`.
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let canary = dir.path().join("canary");
+        let cmd = format!("touch {}", canary.display());
+
+        let out = ask_execute(
+            Some("a short, valid summary"),
+            &[],
+            Some(&cmd),
+            laya_core::GateDecision::Ask,
+            60,
+        );
+        assert!(out.is_err(), "a non-allow decision must refuse: {out:?}");
+        assert!(!canary.exists(), "the command must NOT have run");
+    }
+
+    #[test]
+    fn ask_a_command_past_its_deadline_is_killed() {
+        let start = std::time::Instant::now();
+        let (_, _, timed_out) =
+            run_with_deadline("sleep 30", 1).unwrap_or_else(|e| panic!("must run: {e:?}"));
+        assert!(
+            timed_out,
+            "a command past its deadline must report timed_out"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "must return promptly, not wait out the full sleep: {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn ask_a_command_within_its_deadline_is_not_marked_timed_out() {
+        // The control for the row above: a quick command must not be falsely flagged.
+        let (stdout, _, timed_out) =
+            run_with_deadline("echo hi", 60).unwrap_or_else(|e| panic!("must run: {e:?}"));
+        assert!(!timed_out);
+        assert!(stdout.contains("hi"));
     }
 
     // ---- the Laya <-> laya_abi question adapter ----------------------------

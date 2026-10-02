@@ -224,6 +224,32 @@ changed.)*
 > executes. The text below is kept because the *diagnosis* it records is still the right one, and
 > because the effect-check technique it used is what caught this. Recorded here rather than rewritten:
 > a superseded claim is annotated, never erased.
+>
+> **IMPLEMENTED, 2026-10-02.** `laya_core::agentic::gate_verdict` is the one I/O-free decision
+> function spec 08 asked for (`crates/laya-core/src/agentic.rs`); `laya-mcp`'s `gate` and `ask`
+> tools call nothing else. Re-run live, over real stdio against the real sidecar
+> (`python3 scripts/gate-live-corpus.py`): all 18 destructive commands in the corpus — including
+> every one named above, plus the R4 flag/whitespace variants (`rm -Rf`, `rm  -rf`,
+> `rm --recursive --force`) — now return `ask`, and the control, `git status`, returns `allow`
+> (`allowlisted: true, allowlist_entry: "git status"`). The noul label is read now (a confident
+> `no` is `Deny`, not `Allow`), and `irreversible` forces `ask` unconditionally
+> (`gate_verdict_irreversible_always_asks`, with the `irreversible=false` control pinned in the
+> same test). `ask` validates the whole request — including the "nothing to judge" precondition
+> that does not depend on the command's own output — before any `sh -c` runs
+> (`ask_refuses_before_it_executes`/`ask_the_control_a_valid_request_does_execute`), and the
+> command is bounded by `Policy::ask_deadline_secs` (default 60s), killed on expiry, with
+> `timed_out` reported as data (`ask_a_command_past_its_deadline_is_killed`).
+>
+> One further, necessary change beyond spec 08's text: `Policy::default().noul_high_threshold`
+> moved from 0.9 to 0.8. Measured live, the decision head's confidence for the now-allowlisted,
+> genuinely benign commands sits at 0.83–0.87 (`ls -la /tmp` 0.8314, `git status` 0.8722,
+> `cargo test` 0.8327) — below the old 0.9 cutoff, and in the SAME range as several destructive
+> commands the live corpus measured above 0.9 (the negative separation this file already
+> documents, immediately below). Since R1's allowlist is what now carries the safety property —
+> the model only downgrades an already-allowlisted, signal-free command — holding the old cutoff
+> would have kept every legitimate command asking forever while stopping nothing the allowlist
+> was not already stopping. The live corpus script pins `git status` reaching `allow` as a
+> permanent control against this regressing.
 
 The `ask` e2e proof caught the gate **allowing `rm -rf <dir>` and the command running**. The
 check that caught it was an **effect** check — the protected file had to still exist afterwards —
