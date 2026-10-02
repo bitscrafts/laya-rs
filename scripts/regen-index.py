@@ -235,19 +235,54 @@ for d, _, _ in SECTIONS:
 print("wrote _docs/TOC.md")
 
 # ---- link check --------------------------------------------------------------
+# Checks two things per link: the FILE resolves, and if the link carries a `#fragment`
+# the target file has a heading whose slug matches it.
+#
+# Why the fragment is checked rather than ignored (fixed 2026-10-02): the earlier version passed the
+# whole link to `.exists()`, so `OTHER.md#some-anchor` was treated as a FILENAME and every anchored
+# link reported BROKEN -- a false positive that taught nobody anything. Worse, stripping the fragment
+# and checking only the file would silently accept a link pointing at a heading that does not exist.
+# A cross-reference is only useful if the reader lands on the section it names.
+def heading_slugs(path):
+    """GitHub-style heading slugs: lowercase, drop punctuation, spaces -> hyphens."""
+    slugs = set()
+    for line in path.read_text(errors="replace").splitlines():
+        m = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        if not m:
+            continue
+        text = m.group(2)
+        text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)   # links keep their text
+        text = text.replace("`", "")                            # inline code
+        slug = re.sub(r"[^\w\s-]", "", text.lower())
+        slug = re.sub(r"\s+", "-", slug.strip())
+        slugs.add(slug)
+    return slugs
+
+
 files = list((root / "_docs").rglob("*.md")) + [root / "README.md", root / "DOCS.md"]
 broken = []
 checked = 0
+anchors_checked = 0
 for f in files:
     if not f.exists():
         continue
     for m in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", f.read_text()):
         link = m.group(2)
-        if link.startswith(("http://", "https://", "#", "mailto:")):
+        if link.startswith(("http://", "https://", "mailto:")):
             continue
         checked += 1
-        if not (f.parent / link).resolve().exists():
+        path_part, _, fragment = link.partition("#")
+        target = (f.parent / path_part) if path_part else f
+        if not target.resolve().exists():
             broken.append(f"{f.relative_to(root)} -> {link}")
-print(f"\nlink check: {checked} relative links checked, {len(broken)} broken")
+            continue
+        if fragment:
+            if not path_part:                     # same-file anchor
+                target = f
+            if fragment not in heading_slugs(target):
+                broken.append(f"{f.relative_to(root)} -> {link}  (no heading slugs to `{fragment}`)")
+            anchors_checked += 1
+print(f"\nlink check: {checked} relative links checked, {anchors_checked} of them anchored, "
+      f"{len(broken)} broken")
 for b in broken:
     print(f"  BROKEN: {b}")

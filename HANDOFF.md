@@ -1,17 +1,55 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (11) · **Status**: YELLOW — **specs 01–15 complete; specs 16–19 are written and
-NOT dispatched.** An independent review found that which nodes execute depends on the order of the
-nodes in the flow's JSON array, and that the run report says nothing about it. The graph engine is
-not yet a place to put a pipeline you depend on.
+**Date**: 2026-10-02 (12) · **Status**: YELLOW — **specs 20, 17 and 19 have landed; 18 and 16 are
+written and waiting on quota.** The graph engine's two worst defects are fixed: the flow format is
+now a contract instead of a wish, and which nodes execute is a function of the graph rather than of
+the order of nodes in the JSON file.
 
 ```
-cargo test --workspace                    538 passed · 0 failed · 3 ignored (the opt-in live acceptance)
+cargo test --workspace                    578 passed · 0 failed · 5 ignored
 cargo clippy --workspace --all-targets    0
 cargo fmt --all --check                   clean
-bash scripts/mutants-gate.sh              exit 0 — 194 mutants, 174 caught, 20 unviable, 0 MISSED
-python3 scripts/check-doc-citations.py    59 docs, every citation resolves
+python3 scripts/check-doc-citations.py    63 docs, every citation resolves
 ```
+
+## ⚠ THE DEPLOYED BINARIES ARE STALE — the one open operational item
+
+`/root/.local/bin/{laya,laya-mcp,laya-gate}` are the **14:27** build. Every commit from 15:00 onward
+is source-only. Measured: the deployed `laya` reports a typo'd-key flow as `is valid`; the fresh build
+refuses it by name. **Anyone using `laya` from `PATH` today gets the old behaviour and none of these
+fixes.**
+
+Do not deploy until 18 and 16 land — one rebuild instead of three. Then:
+
+```sh
+cd /projects/laya-rs && cargo build --release            # 1m 10s
+pgrep -x laya-gate || echo "clear to replace the gate"   # replacing it mid-turn blocks a live agent
+# mv the old binaries aside, copy the new ones (never cp over a live binary), then verify hashes
+cd /projects/laya-rs && for b in laya laya-mcp laya-gate; do
+  echo "$b $(sha256sum /root/.local/bin/$b | cut -c1-16) $(sha256sum target/release/$b | cut -c1-16)"
+done
+```
+
+## Spec state
+
+| spec | state | commit |
+|---|---|---|
+| **20** — the format is a contract | **DONE, 12/12** | `10fc381` |
+| **17** — routing is a function of the graph | **10/11** (the 11th is the mutation gate, below) | `ac9e94f` |
+| **19** — the doc corrections + fixtures | **DONE, 11/11** | `98d99d3` |
+| 18 — `{{node_id}}` | written, brief ready, **waiting on quota** | — |
+| 16 — `question_type` | written, brief ready, **waiting on quota** | — |
+
+**Quota, 2026-10-02 19:15 UTC:** the five-hour window is 43% free, below the 45% floor the dispatch
+script enforces — it refuses to start a run that would die partway. It resets **21:40 UTC**. The two
+briefs are complete and reviewed; dispatch is one command each when the window reopens.
+
+**Spec 17's open criterion is deliberate.** `bash scripts/mutants-gate.sh` requires `exit 0` and exits
+**3** — *215 mutants, 193 caught, 20 unviable, **2 timeouts, 0 MISSED***. `cargo-mutants` exits 3 for a
+timeout and 2 for a missed mutant, and the two timeouts are replacements of `dependency_tables`
+(`sched.rs:87`) that return a phantom-only map, leaving a node's indegree above zero so the scheduler
+**waits instead of failing**. No mutant survived; the invariant is undefended and the hang is the
+symptom. Recorded in the spec rather than absorbed into a green tick.
 
 ## The graph is the active work
 
