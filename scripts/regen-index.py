@@ -57,6 +57,12 @@ DOCS = {
         "Measured state of observability in the deployment: the ledger that was silently off, the "
         "operating configuration, the measured cost per call, and the questions still unanswerable.",
     ),
+    "04-development/GENERIC-GRAPHS-ANALYSIS.md": (
+        "Analysis — why a generic graph cannot run today",
+        "The engine has no data flow at all: every decide input is a literal compiled into the flow "
+        "file, and all four mechanisms that could carry run-time data are absent. The two-phase "
+        "execution model, what a flow can actually express, and a ranked set of fixes."
+    ),
     "04-development/ENGINE-DEFECTS-2026-10-02.md": (
         "Engine defects — three confirmed findings in the graph executor",
         "depends_on does not order a decide before its shell (measured: the shell ran LAST); "
