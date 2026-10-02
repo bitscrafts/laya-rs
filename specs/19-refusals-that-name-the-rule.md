@@ -14,26 +14,25 @@ without being told which rule they broke.
 
 ## Requirements
 
-### R1 — `validate` refuses the shapes that mis-execute today
-Each refusal must **name the node and the rule** in the `FlowError`, following the house style
-(`MissingNearTiePort` at `validate.rs:79`):
+### R1 — DROPPED 2026-10-02 after review. Do not implement it.
 
-- **a port target shared by two `decide` nodes** — measured: `p13-shared-target`, where both decides
-  routed and **neither** handler ran. Today: silent.
-- **a `depends_on` naming a node that is itself a port target** — measured: `p7-join`, where
-  `needs_long` ran although `long_path` never did. Today: silent.
-- **a `decide` whose `depends_on` names a non-decide** — the ordering it implies is not honoured
-  (spec 17 fixes the mechanism; until it lands, refuse the shape).
-- **a node id containing `/`** — the collision hole: a decide node id like `x/route` collides with
-  the synthetic route id, and a node silently vanishes. One check.
+**This requirement was written to refuse three shapes, and an independent review showed it rejects
+the working example.** Re-verified here against `_docs/02-guides/wc-classify-chained.flow.json`, the
+flow this spec's own control row requires to stay valid:
 
-Each refusal's message must say **what to do instead**, not only what is wrong.
+```
+gt100_ask.depends_on -> gt100_gate    (a port target of gt300_ask)   <- this R1's rule (b)
+gt300_gate.depends_on -> count_words  (a shell)                      <- this R1's rule (c)
+...and the flow validates today.
+```
 
-### R2 — `escalate_on_near_tie` is refused until it is implemented
-Measured on `p12-near-tie`: the flag's target has no inbound edge, so it is a root of the tail and
-**runs on every run**. Until near-tie routing exists (spec 17 R4's later half), `validate` must
-refuse the flag with a message saying it is not implemented. A safety field that validates and then
-fires a branch for no reason is worse than one that refuses.
+The gate-then-ask pattern **requires** both shapes, and in that flow neither mis-executes. The
+refusals are too broad to be precise, and making them precise is as hard as fixing the scheduler —
+which is spec 17's job. **Drop R1; do 17 instead.** (Spec 17's own R5 has the same problem if it is
+ever invoked.)
+
+R2 (the near-tie refusal) **moves to spec 20**, which owns the parse-and-validate contract layer, so
+the same refusal is not specified twice.
 
 ### R3 — the docs stop saying the withdrawn things
 Four corrections, each **annotated with the date and the measurement**, never silently rewritten
@@ -63,8 +62,8 @@ so, or it becomes a specification of the bug.
 
 | Test Name | Input | Expected Output |
 |---|---|---|
-| `a_port_target_shared_by_two_decides_is_refused_by_name` | two decides porting to one node | refusal naming both decides and the shared target |
-| `a_depends_on_naming_a_port_target_is_refused_by_name` | `p7-join`'s shape | refusal naming the node and the target |
+| `a_port_target_shared_by_two_decides_is_refused_by_name  [DROPPED with R1 -- see above]` | two decides porting to one node | refusal naming both decides and the shared target |
+| `a_depends_on_naming_a_port_target_is_refused_by_name  [DROPPED with R1 -- see above]` | `p7-join`'s shape | refusal naming the node and the target |
 | `escalate_on_near_tie_is_refused_as_not_implemented` | `p12-near-tie`'s shape | refusal saying it is not implemented |
 | `a_node_id_containing_a_slash_is_refused_by_name` | a decide with id `x/route` | refusal naming the id and the reason |
 | `the_control_a_well_formed_flow_is_accepted` | `wc-classify-chained.flow.json` | validates — the refusals must not reject the working example |
@@ -74,8 +73,8 @@ reject flows that are fine. A validator that refuses everything passes rows 1–
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_port_target_shared_by_two_decides_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_depends_on_naming_a_port_target_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] ~~the R1 port-target refusal~~ — **DROPPED with R1**: it rejected the working example. Do not test it.
+- [x] ~~the R1 depends_on-on-a-port-target refusal~~ — **DROPPED with R1**: it rejected the working example. Do not test it.
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib escalate_on_near_tie_is_refused_as_not_implemented 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_node_id_containing_a_slash_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_well_formed_flow_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`

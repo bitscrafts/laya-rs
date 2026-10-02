@@ -49,6 +49,11 @@ arguments so the caller can read it. Keep the existing keys unchanged (`question
 - `choice` (or absent, the default) → today's exact shape, `criteria` built from `options`.
 - Anything else must never reach here if R2 holds; if it does, return an error rather than guessing.
 
+**CORRECTED 2026-10-02 after review:** this requirement contradicted R1. The resolution: **absent
+means `choice`** (R1 is the authority — it is the behaviour every committed flow relies on). A
+`noul` must be asked for explicitly. A flow that wants a noul sets `question_type: "noul"`; nothing
+infers it from the absence of `options`.
+
 ### R5 — the contract is documented where a flow author looks
 `_docs/03-reference/GRAPH-SPEC.md` (the flow format reference) must state the field, its accepted
 values, the default, and the measured reason to prefer `noul` for a threshold question. One place,
@@ -69,11 +74,20 @@ by changing the default to `noul` and watching it go red, then restore.**
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_documented_fields_exist_on_the_row 2>&1 | grep -qE '^test result: ok'` : the schema test still passes with the new field
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_flow_without_question_type_still_asks_a_choice` : default preserved
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_noul_decide_sends_no_criteria` : the new path
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unknown_question_type_is_refused_by_name` : refusal
+- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_flow_without_question_type_still_asks_a_choice 2>&1 | grep -qE '^test result: ok\. 1 passed'` : default preserved
+- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_noul_decide_sends_no_criteria 2>&1 | grep -qE '^test result: ok\. 1 passed'` : the new path, asserting on the bytes the server receives
+- [ ] `cd /projects/laya-rs && cargo test -p laya-cli --lib an_unknown_question_type_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` : refusal
+- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_noul_decide_needs_port_coverage 2>&1 | grep -qE '^test result: ok\. 1 passed'` : a noul has no `options`, so the coverage check is vacuous unless ports must cover `yes`/`no` or carry `_`
 - [ ] `cd /projects/laya-rs && cargo test --workspace` : no regression
+
+**CORRECTED 2026-10-02 after review — the four criteria above replace four that were VACUOUS.** They
+named `the_documented_fields_exist_on_the_row`, which lives in **laya-store**
+(`crates/laya-store/src/lib.rs:1525`); under `-p laya-graph` it matches 0 tests and printed
+`test result: ok. 0 passed; ...`, satisfying `grep -qE '^test result: ok'`. The other three named
+`laya-graph` although the wire payload is built in **laya-cli** (`mcp_client.rs:105-120`), and had no
+grep at all. **All four passed with nothing implemented.** Every criterion above now uses
+`-p <the crate that owns it>` and `grep -qE '^test result: ok\. 1 passed'` — an `ok\. 0 passed` line
+must not satisfy a criterion.
 - [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
 - [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
 - [ ] `cd /projects/laya-rs && laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : **the committed example still runs unchanged** (R1's compatibility claim, end to end)

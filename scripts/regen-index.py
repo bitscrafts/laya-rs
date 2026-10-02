@@ -30,6 +30,13 @@ DOCS = {
         "four-stage translation to a graph, with the invariants, the renderer's round-trip "
         "test, and a list of the weakest points to attack first."
     ),
+    "03-reference/GRAPH-FORMAT-CONTRACT.md": (
+        "The flow format contract — what changes, why, and what it costs",
+        "The twelve changes that make every declared field either work, be refused by name, or be "
+        "documented as carrying no behaviour. With the measured 'before' for each: a typo of any key "
+        "is silently inert, four silent misroutes pass a validate, and the reference doc advertises "
+        "$.inputs, a feature that does not exist."
+    ),
     "03-reference/GRAPH-FEATURES.md": (
         "Graph features — composability, branches, loops: what is implemented",
         "Measured by running, not reading. Branches: yes, working. Composability: implemented in the "

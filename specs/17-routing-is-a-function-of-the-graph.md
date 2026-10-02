@@ -32,7 +32,7 @@ Both the p6 and the control are in `/projects/_tmp/opus-graph-analysis/` and bot
 
 Three mechanisms, from the code:
 
-1. `prune_unreachable` deletes the **unselected port targets themselves** without checking whether
+1. `prune_unreached` (`route_exec.rs:301`) deletes the **unselected port targets themselves** without checking whether
    another route also ports to them.
 2. `remove_node` deletes a node's edges, so a **pruned or removed dependency counts as satisfied**.
 3. `find_route_pair` takes the **first `Route` in `Vec` order**, so decides run in file order.
@@ -53,6 +53,11 @@ Three mechanisms, from the code:
 - **A `depends_on` edge is an AND.** If any `depends_on` predecessor is dead or skipped, this node is
   **skipped** (dead-path elimination). This fixes `p7`.
 - **A port edge into a node is an OR.** The node is live if any route selected it. This fixes `p13`.
+- **The mixed case must be stated explicitly, because the working example is exactly it:** a node that
+  has BOTH a selected port edge and `depends_on` entries is live **iff at least one port edge was
+  selected AND every `depends_on` predecessor completed**. The gate→ask pattern in
+  `wc-classify-chained.flow.json` is this case, and the review required it be written down rather than
+  left to the implementation to guess.
 - Skipping propagates transitively.
 
 ### R3 — a skipped node is VISIBLE
@@ -77,7 +82,7 @@ target; and a node id containing `/` (the collision hole where a node silently v
 
 | Test Name | Input | Expected Output |
 |---|---|---|
-| `the_files_node_order_does_not_change_which_nodes_run` | `p6-file-order` and `p6c` as fixtures | **identical** sets of executed node ids, from both |
+| `the_files_node_order_does_not_change_which_nodes_run` | `p6-file-order` and `p6c` — **this spec copies both into `crates/laya-graph/tests/fixtures/` itself**; do not depend on spec 19 for them, it lands later. The `--lib` tests need a `ScriptedCaller` (a label chosen per node id) so the assertion does not depend on the head | **identical** sets of executed node ids, from both |
 | `the_control_the_array_order_is_the_only_difference` | the same two fixtures, diffed | they differ ONLY in `nodes` array order — proves the test above tests order |
 | `a_branch_the_graph_did_not_select_does_not_run` | `p6-file-order` | `B_yes` is NOT in the records |
 | `a_node_whose_dependency_was_pruned_is_skipped_and_named` | `p7-join` | `needs_long` does not run, and appears in `skipped` |

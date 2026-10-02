@@ -1,15 +1,57 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (10) · **Status**: GREEN — **SPECS 01–14 COMPLETE: every spec has 0 open criteria.**
-The queue that this file described as outstanding (09–13, then 10/11/12/14) is empty as of HEAD `fe407fe`.
+**Date**: 2026-10-02 (11) · **Status**: YELLOW — **specs 01–15 complete; specs 16–19 are written and
+NOT dispatched.** An independent review found that which nodes execute depends on the order of the
+nodes in the flow's JSON array, and that the run report says nothing about it. The graph engine is
+not yet a place to put a pipeline you depend on.
 
 ```
 cargo test --workspace                    538 passed · 0 failed · 3 ignored (the opt-in live acceptance)
 cargo clippy --workspace --all-targets    0
 cargo fmt --all --check                   clean
 bash scripts/mutants-gate.sh              exit 0 — 194 mutants, 174 caught, 20 unviable, 0 MISSED
-python3 scripts/check-doc-citations.py    42 docs, every citation resolves
+python3 scripts/check-doc-citations.py    59 docs, every citation resolves
 ```
+
+## The graph is the active work
+
+**Read first:** `_docs/04-development/OPUS-REVIEW-GENERIC-GRAPHS.md` (the review, with the
+re-verification of each finding) and `_docs/03-reference/GRAPH-FEATURES.md` (composability, branches,
+loops — measured by running, not reading).
+
+| feature | status |
+|---|---|
+| branches (`label` / `band`, mandatory `_` catch-all) | **works** — 22 edges, 4 routes, only selected nodes run |
+| `allow_failure`, `timeout` | **work** |
+| cycle refusal | **works well** — refuses on both `validate` and `run`, names the path |
+| routing correctness | **broken** — depends on JSON array order; `not_started: []` hides it |
+| `retry` | **declared, validated, INERT** — a flaky step kills the run on its first failure |
+| `escalate_on_near_tie` / `near_tie_port` | **declared, validated, and the target runs UNCONDITIONALLY** |
+| `depends_on` (shell → decide) | **not honoured** — `count_words` and `class_short` both at ms 575 |
+| `subflow` / `uses` | **library-only** — `Subflow` is not a variant of `Kind`, and the CLI has no library flag |
+
+**Five declared fields that do nothing.** `allow_failure` and `timeout` do work, so the pattern is not
+universal — which is why the proposed spec 20 audits every field rather than fixing one. A field that
+validates and does nothing is worse than a missing field: it reads as a guarantee.
+
+**The specs, in the review's recommended order:** 17 (routing is a function of the graph — the
+priority) → 20 (retry + the field audit) → 18 (`{{node_id}}`, what makes graphs general) → 19
+(refusals that name the rule) → a CLI library flag for subflows. 16 (`question_type`) is written and
+the review ranks it lower than I did: it buys **confidence**, not correctness.
+
+**Resume the review session** (never start fresh):
+
+```sh
+cd /projects/laya-rs
+BRIEF=/projects/_tmp/brief-opus-round2.md \
+REPORT=/projects/_tmp/opus-graph-analysis/ROUND2.md \
+  scripts/run-opus-graph-analysis.sh --resume
+```
+
+Exit **3 means the dispatch failed** (nothing written). Procedure and traps:
+`_docs/05-operations/RESUMING-OPUS.md`.
+
+## The specs that landed before this batch
 
 The three `ignored` are deliberate and are the spec-13 change: the two tests that need a live
 backbone are opt-in behind `LAYA_ACCEPTANCE=1`, and `scripts/verify-all.sh` runs them with

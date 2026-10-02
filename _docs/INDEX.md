@@ -32,6 +32,7 @@ in exactly one place; this index points at it, never restates it.
 
 ### 03-reference
 - [Suggested graph specification, and how a flow becomes a graph](03-reference/GRAPH-SPEC.md) — A SUGGESTED (not decided) format for flows — nodes, kinds, composition — and the four-stage translation to a graph, with the invariants, the renderer's round-trip test, and a list of the weakest points to attack first.
+- [The flow format contract — what changes, why, and what it costs](03-reference/GRAPH-FORMAT-CONTRACT.md) — The twelve changes that make every declared field either work, be refused by name, or be documented as carrying no behaviour. With the measured 'before' for each: a typo of any key is silently inert, four silent misroutes pass a validate, and the reference doc advertises $.inputs, a feature that does not exist.
 - [Graph features — composability, branches, loops: what is implemented](03-reference/GRAPH-FEATURES.md) — Measured by running, not reading. Branches: yes, working. Composability: implemented in the library with tests, UNREACHABLE from the CLI (no library flag, and the error message blames the wrong field). Loops: no, refused by design with the cycle path named.
 - [Reference](03-reference/README.md) — Technical reference: the contract and the wire shapes.
 
