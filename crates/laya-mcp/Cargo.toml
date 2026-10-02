@@ -13,6 +13,14 @@ description = "The MCP stdio server: one Rust binary exposing laya-rs to Hermes,
 name = "laya-mcp"
 path = "src/main.rs"
 
+[[bin]]
+# One command judged, one verdict, one ledger row — for callers that cannot speak MCP,
+# such as a shell hook on every state-changing tool call. Registered here rather than in
+# laya-cli because the gate rule lives in this crate; a second copy of the rule, in
+# another crate, would be two gates that can drift apart.
+name = "laya-gate"
+path = "src/bin/laya-gate.rs"
+
 [dependencies]
 laya-store = { path = "../laya-store" }
 laya-abi = { path = "../laya-abi" }

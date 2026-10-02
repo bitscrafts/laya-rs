@@ -367,45 +367,54 @@ fn tool_meta(name: &str) -> (String, serde_json::Map<String, serde_json::Value>)
 /// gives a compile error only where it genuinely matters.
 #[derive(Debug, Default, Deserialize)]
 pub struct RawArgs {
+    // Fields are `pub` because the `laya-gate` binary is a separate crate target and must be
+    // able to build one. A builder would be the tidier shape for a library, but this struct
+    // is a flat argument bag with no invariants to protect, and the alternative is a
+    // constructor per field.
+    /// The state a `decide` call judges, as free text or a JSON structure.
     #[serde(default)]
-    state: Option<String>,
+    pub state: Option<String>,
+    /// The command `gate` judges.
     #[serde(default)]
-    action: Option<String>,
+    pub action: Option<String>,
+    /// Whether the caller believes the action cannot be undone. Forces `ask`.
     #[serde(default)]
-    irreversible: Option<bool>,
+    pub irreversible: Option<bool>,
+    /// The file `ask_file` reads.
     #[serde(default)]
-    path: Option<String>,
+    pub path: Option<String>,
     /// The question `ask_file` asks about the file. Separate from `path` on purpose:
     /// keeping them in distinct fields is what stops content being concatenated into the
     /// question, which is how a file's text could become an instruction.
     #[serde(default)]
-    question: Option<String>,
+    pub question: Option<String>,
     /// The command `ask` wants run. Gated BEFORE it is executed: a command the guardrail
     /// does not allow is never run, so there is nothing for a caller to route around.
     #[serde(default)]
-    command: Option<String>,
+    pub command: Option<String>,
     /// The paths `ask_files` asks about.
     #[serde(default)]
-    paths: Option<Vec<String>>,
+    pub paths: Option<Vec<String>>,
     /// The caller's own summary of recent turns, for `should_compact`.
     #[serde(default)]
-    turns_summary: Option<String>,
+    pub turns_summary: Option<String>,
     /// How full the context is. Supplied by the CALLER — counted, never estimated.
     #[serde(default)]
-    context_tokens: Option<u64>,
+    pub context_tokens: Option<u64>,
+    /// Which ledger operation was asked for.
     #[serde(default)]
-    op: Option<String>,
+    pub op: Option<String>,
     /// Laya's own question map. Kept as a `Value` in the POC; a typed
     /// `laya_abi::Question` array is the next step (the adapter is ready).
     #[serde(default)]
-    questions: Option<serde_json::Value>,
+    pub questions: Option<serde_json::Value>,
     /// The CALLER's run id, when it has one. Threaded into the ledger so a decision can be
     /// joined to the run that made it — the join is the whole point of recording.
     #[serde(default)]
-    run_id: Option<String>,
+    pub run_id: Option<String>,
     /// The CALLER's node id, when it has one. Same purpose as `run_id`, one level finer.
     #[serde(default)]
-    node_id: Option<String>,
+    pub node_id: Option<String>,
 }
 
 /// What a tool handler concluded.
@@ -566,22 +575,50 @@ pub fn handle(
 /// The fail-closed rule is the point: if the sidecar cannot answer, the gate says
 /// `ask` — never `allow`. An unavailable gate must never mean permission.
 fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResult, McpError> {
+    let out = gate_payload(args, state)?;
+    let mut body = out.payload;
+    if let (Some(obj), Some(note)) = (body.as_object_mut(), out.ledger_note) {
+        obj.insert("ledger".into(), json!(note));
+    }
+    to_result(ToolOutcome::Ok(body.to_string()))
+}
+
+/// What one judgement produced.
+#[derive(Debug, Clone)]
+pub struct GateOutcome {
+    /// The verdict payload: `decision`, `model_decision`, `band`, `confidence`, signals.
+    pub payload: serde_json::Value,
+    /// A note when the row could not be written. `None` means recorded, or nothing to record.
+    pub ledger_note: Option<String>,
+    /// Milliseconds spent producing the verdict.
+    pub latency_ms: u64,
+}
+
+/// Judge one command AND record it — the single entry point for a gate call.
+///
+/// Both the MCP `gate` tool and the `laya-gate` binary call this. Two entry points that
+/// each did their own judging would be two gates, and a rule stated twice is the defect
+/// class this project keeps finding: the copies drift, and only one of them gets fixed.
+///
+/// **Every verdict is recorded, including a refusal.** A gate that logs only its approvals
+/// answers "what did you allow" and stays silent on "what did you stop" — the half an
+/// incident review reaches for first.
+///
+/// # Errors
+/// An [`McpError`] when the head answered but its answer could not be read as a typed
+/// answer. An unreachable head is NOT an error: it is the fail-closed `ask` verdict.
+pub fn gate_payload(args: &RawArgs, state: &ServerState) -> Result<GateOutcome, McpError> {
     let started = std::time::Instant::now();
     let action = args.action.clone().unwrap_or_default();
     let irreversible = args.irreversible.unwrap_or(false);
     let payload = judge_command(&action, irreversible, state)?;
+    let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
-    // Every gate verdict is recorded, INCLUDING a refusal. A gate that logs only its approvals
-    // answers "what did you allow" and stays silent on "what did you stop", which is the half an
-    // incident review reaches for first.
-    // The verdict is the row's label. A normal payload carries `label`; the fail-closed payload
-    // carries `decision` and no label at all, so reading only `label` recorded an empty string
-    // for the one case where the gate could not reach the head.
     // The GATE'S DECISION is the row's label -- `allow` / `ask` / `deny`.
     //
     // The order matters and the first version had it backwards: it read the model's own
-    // `label` first, so a gate row recorded `"yes"` and the per-tool verdict counts came out as
-    // `yes: 1` instead of `allow: 1`. The model's yes/no is a downgrade-only input to the
+    // `label` first, so a gate row recorded `"yes"` and the per-tool verdict counts came out
+    // as `yes: 1` instead of `allow: 1`. The model's yes/no is a downgrade-only input to the
     // verdict, not the verdict, and an operator asking "what did the gate allow yesterday"
     // needs the decision. The model's label is still in `probabilities`/`band`.
     let verdict_label = payload
@@ -600,11 +637,11 @@ fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResul
         executed: false,
         label_override: Some(&verdict_label),
     };
-    let note = record_decision_for(
+    let ledger_note = record_decision_for(
         state,
         &payload,
         Timing {
-            latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            latency_ms,
             ts_nanos: now_nanos(),
             wall_nanos: now_wall_nanos(),
         },
@@ -612,11 +649,11 @@ fn gate_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallToolResul
         &spec,
     );
 
-    let mut body = payload;
-    if let (Some(obj), Some(note)) = (body.as_object_mut(), note) {
-        obj.insert("ledger".into(), json!(note));
-    }
-    to_result(ToolOutcome::Ok(body.to_string()))
+    Ok(GateOutcome {
+        payload,
+        ledger_note,
+        latency_ms,
+    })
 }
 
 /// Judge ONE command, returning the gate payload.

@@ -1,0 +1,460 @@
+//! `judge` — the one implementation of "may this action proceed?", and the recorder
+//! that turns each judgement into a ledger row.
+//!
+//! # Why this exists
+//!
+//! The rule was written once in `laya-mcp` and reached only the MCP tool surface. That
+//! left the layer unused: measured 2026-10-02, **3 calls to `gate` out of 63,886 tool
+//! calls ever**. Making it mandatory meant a hook on every state-changing tool call, and
+//! a hook cannot speak MCP — it needs one process that answers and exits. Putting a
+//! second gate in the CLI is the defect class this project keeps finding: a rule stated
+//! in two places, disagreeing. So the rule moved here, where both faces call it.
+//!
+//! # What is deliberately not here
+//!
+//! This module judges and records. It does not decide whether to *enforce*: a verdict of
+//! `ask` is a judgement, not a refusal, and the caller that blocks (the hook) is the one
+//! that knows what a refusal costs. Keeping policy about enforcement out of here is what
+//! lets the same judgement serve an MCP tool and a gate hook without either changing the
+//! other's meaning.
+
+use std::path::{Path, PathBuf};
+
+use crate::sidecar::{Sidecar, SidecarError};
+
+/// The question put to the head for a `gate` call.
+///
+/// One wording, used by every caller. Two wordings would be two different questions, and
+/// a decision layer that answers two subtly different questions cannot be measured as one.
+#[must_use]
+pub fn gate_question(action: &str, irreversible: bool) -> String {
+    if irreversible {
+        format!(
+            "Is this action safe to run WITHOUT human confirmation? It is believed to be \
+             IRREVERSIBLE, so a wrong 'yes' cannot be undone. Action: {action}"
+        )
+    } else {
+        format!("Is this action safe to run without human confirmation? Action: {action}")
+    }
+}
+
+/// One command judged, with every input the verdict was computed from.
+///
+/// Carried as a struct rather than a tuple so a caller cannot transpose the payload and
+/// the verdict — both are JSON, so a transposition would type-check and record the wrong
+/// thing.
+#[derive(Debug, Clone)]
+pub struct GateJudgement {
+    /// The verdict payload: `decision`, `model_decision`, `band`, `confidence`, signals.
+    pub payload: serde_json::Value,
+    /// `allow` / `ask` / `deny`. The row's `label`.
+    pub decision: String,
+    /// Why, when the payload says so (e.g. `sidecar-unavailable`).
+    pub reason: Option<String>,
+    /// How many destructive patterns matched. **Recorded, never enforced by itself** —
+    /// the list contains `"mv "` and `"find "`, which are routine here.
+    pub signal_count: usize,
+    /// Milliseconds spent producing the verdict.
+    pub latency_ms: u64,
+}
+
+/// Judge one command against the live head.
+///
+/// **Fails closed**: an unreachable head yields `ask` with `reason: sidecar-unavailable`,
+/// never `allow`. A gate that cannot ask must not permit.
+///
+/// # Errors
+/// [`SidecarError`] only when the head answered and the answer could not be read as a
+/// typed answer — a gate that cannot understand its own evidence must not proceed to a
+/// decision. An unreachable head is NOT an error; it is a verdict.
+pub fn judge_command(
+    action: &str,
+    irreversible: bool,
+    policy: &laya_core::Policy,
+    sidecar: &Sidecar,
+    started: std::time::Instant,
+) -> Result<GateJudgement, SidecarError> {
+    let question = gate_question(action, irreversible);
+    let questions = laya_core::agentic::questions_to_laya_one("safe", &question);
+    let latency = |started: std::time::Instant| {
+        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    };
+
+    let payload = match sidecar.predict(&serde_json::json!({ "action": action }), &questions) {
+        Ok(answers) => {
+            let entry = answers
+                .get("safe")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let answer = laya_core::agentic::answer_from_laya(policy, "safe", &entry, &[])?;
+            let dp = laya_core::DecisionPayload::from_answer(&answer, policy);
+
+            // THE MODEL MAY ONLY DOWNGRADE. Measured 2026-09-30: this head cannot classify
+            // command danger — "is this action safe?" as a noul scored 6/12, with
+            // `ls -la /tmp` and `rm -rf <dir>` both coming back ~0.85-0.89. So the model is
+            // reduced to a yes/no label plus confidence and handed to `gate_verdict`, which
+            // can only use it to ASK or DENY more — never to grant `allow` on its own.
+            // `allow` additionally requires a positive allowlist match.
+            let model = match answer.value.as_str() {
+                "yes" => Some(laya_core::agentic::ModelVerdict {
+                    label: laya_core::agentic::ModelLabel::Yes,
+                    confidence: answer.confidence,
+                    near_tie: dp.near_tie,
+                }),
+                "no" => Some(laya_core::agentic::ModelVerdict {
+                    label: laya_core::agentic::ModelLabel::No,
+                    confidence: answer.confidence,
+                    near_tie: dp.near_tie,
+                }),
+                // "unknown": the noul itself could not be read. Same rule as an unreachable
+                // head — `gate_verdict` treats `None` as `ask`.
+                _ => None,
+            };
+            let verdict = laya_core::agentic::gate_verdict(action, model, irreversible, policy);
+
+            let mut v = serde_json::to_value(&dp).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(o) = v.as_object_mut() {
+                o.insert("decision".into(), serde_json::json!(verdict.decision));
+                o.insert(
+                    "model_decision".into(),
+                    serde_json::json!(verdict.model_decision),
+                );
+                o.insert(
+                    "destructive_signals".into(),
+                    serde_json::to_value(&verdict.signals).unwrap_or_else(|_| serde_json::json!([])),
+                );
+                o.insert("allowlisted".into(), serde_json::json!(verdict.allowlisted));
+                o.insert(
+                    "allowlist_entry".into(),
+                    serde_json::json!(verdict.allowlist_entry),
+                );
+                o.insert("irreversible".into(), serde_json::json!(irreversible));
+                o.insert(
+                    "signals_note".into(),
+                    serde_json::json!(
+                        "allow requires a positive allowlist match; the model and the \
+                         destructive-pattern check may only downgrade it to ask or deny, \
+                         never grant it. The head alone was measured at 6/12 on known commands."
+                    ),
+                );
+            }
+            let signal_count = verdict.signals.len();
+            let decision = serde_json::to_value(&verdict.decision)
+                .ok()
+                .and_then(|d| d.as_str().map(str::to_string))
+                .unwrap_or_else(|| "ask".to_string());
+            return Ok(GateJudgement {
+                payload: v,
+                decision,
+                reason: None,
+                signal_count,
+                latency_ms: latency(started),
+            });
+        }
+        Err(e) => {
+            // FAIL CLOSED. The head is unreachable, so we cannot ask — and a gate that
+            // cannot ask must not allow.
+            eprintln!("laya: gate falling back to `ask`: {e}");
+            serde_json::json!({
+                "decision": laya_core::readiness::gate_when_down(),
+                "reason": "sidecar-unavailable",
+                "note": "the gate could not ask, so it must not allow",
+            })
+        }
+    };
+
+    let decision = payload
+        .get("decision")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("ask")
+        .to_string();
+    let reason = payload
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let signal_count = payload
+        .get("destructive_signals")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+
+    Ok(GateJudgement {
+        payload,
+        decision,
+        reason,
+        signal_count,
+        latency_ms: latency(started),
+    })
+}
+
+/// Everything about a ledger row except the answer.
+#[derive(Debug, Clone, Default)]
+pub struct RowSpec {
+    /// Which tool produced it.
+    pub tool: String,
+    /// Which question it answers (or, for a refusal, what was refused).
+    pub question_id: String,
+    /// `noul`, `choice` or `score`.
+    pub question_type: String,
+    /// The caller's own run id, when it has one.
+    pub run_id: Option<String>,
+    /// The caller's own node id, when it has one.
+    pub node_id: Option<String>,
+    /// Whether the action judged had actually been carried out.
+    pub executed: bool,
+    /// The label to record, when the payload does not carry one.
+    pub label_override: Option<String>,
+}
+
+/// The three clocks a row records, taken together.
+#[derive(Debug, Clone, Copy)]
+pub struct Timing {
+    /// Wall-clock milliseconds spent answering — the measured number.
+    pub latency_ms: u64,
+    /// Monotonic nanoseconds from this process's start.
+    pub ts_nanos: u64,
+    /// Epoch nanoseconds — the ordering key. See `DecisionRow::wall_nanos`.
+    pub wall_nanos: u64,
+}
+
+/// Epoch nanoseconds — comparable across every writer.
+#[must_use]
+pub fn wall_nanos() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
+}
+
+/// Monotonic nanoseconds from THIS process's start. **Not comparable across processes** —
+/// [`wall_nanos`] is what orders.
+#[must_use]
+pub fn monotonic_nanos() -> u64 {
+    use std::sync::OnceLock;
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_nanos()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+/// Append one ledger row, and never fail the decision because of it.
+///
+/// Returns a short note when the row could not be written, so the caller can surface it.
+/// The DECISION is not affected — a decision layer that refused to decide because its
+/// bookkeeping was broken would trade the whole function for the log. But it is reported
+/// rather than swallowed, because a ledger that has silently stopped recording is worse
+/// than one that never did: every "the latency budget is fine" claim keeps reading as
+/// measured.
+#[must_use]
+pub fn record(
+    dir: Option<&Path>,
+    payload: &serde_json::Value,
+    timing: Timing,
+    state_sha256: &str,
+    spec: &RowSpec,
+) -> Option<String> {
+    let dir = dir?;
+    let row = build_row(payload, timing, state_sha256, spec);
+    match crate::segment::append_segment(dir, &row) {
+        Ok(_) => None,
+        Err(e) => Some(format!("the decision was not recorded: {e}")),
+    }
+}
+
+/// The row itself, split out so it is testable without a filesystem.
+#[must_use]
+pub fn build_row(
+    payload: &serde_json::Value,
+    timing: Timing,
+    state_sha256: &str,
+    spec: &RowSpec,
+) -> crate::Record {
+    let band = payload
+        .get("band")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    crate::Record::Decision(crate::DecisionRow {
+        ts: epoch_stamp(),
+        ts_nanos: timing.ts_nanos,
+        wall_nanos: timing.wall_nanos,
+        tool: spec.tool.clone(),
+        run_id: spec.run_id.clone(),
+        node_id: spec.node_id.clone(),
+        question_id: spec.question_id.clone(),
+        question_type: spec.question_type.clone(),
+        // A refusal has no model label — the label IS the refusal, so the row is a fact in
+        // the ledger rather than an absence. What the gate denied is the row an incident
+        // review wants.
+        label: spec.label_override.clone().unwrap_or_else(|| {
+            payload
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }),
+        // `None` when absent — never 0.0, which would read as "maximally unsure" and poison
+        // every calibration metric built on the column.
+        confidence: payload.get("confidence").and_then(serde_json::Value::as_f64),
+        band: band.to_string(),
+        margin: payload.get("margin").and_then(serde_json::Value::as_f64),
+        near_tie: payload
+            .get("near_tie")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        probabilities: payload.get("probabilities").cloned(),
+        saturated: payload
+            .get("saturated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        laya_version: LAYA_VERSION.to_string(),
+        state_sha256: state_sha256.to_string(),
+        head_sha256: None,
+        backbone_sha256: None,
+        // NOT copied from `saturated`: that is a different fact, and copying it made an
+        // unknown clamp state look known.
+        bucket_clamped: payload
+            .get("bucket_clamped")
+            .and_then(serde_json::Value::as_bool),
+        latency_ms: timing.latency_ms,
+        executed: spec.executed,
+    })
+}
+
+/// A human-readable stamp. **Not RFC 3339** — see `DecisionRow::ts`.
+#[must_use]
+pub fn epoch_stamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    format!("epoch+{secs}")
+}
+
+/// The pinned Laya version, recorded in every row for provenance.
+pub const LAYA_VERSION: &str = "0.3.5";
+
+/// Where the ledger lives, from the environment.
+///
+/// **Unset means NO ledgering**, and that is deliberate: a decision layer whose bookkeeping
+/// silently started writing files somewhere unexpected — an agent's cwd, a read-only mount —
+/// would be worse than one that records nothing.
+#[must_use]
+pub fn resolve_ledger_dir(raw: Option<&str>) -> Option<PathBuf> {
+    let raw = raw.map(str::trim).filter(|s| !s.is_empty())?;
+    Some(PathBuf::from(raw))
+}
+
+/// A stable hash of the judged state. **Never the state itself** — a state can hold a
+/// file, and a file can hold a secret.
+#[must_use]
+pub fn state_sha256(state: &serde_json::Value) -> String {
+    // blake3 is not a dependency here, so this is a stable 64-bit FNV-1a in hex. It is
+    // sufficient for the job the field does — noticing that two decisions were made about
+    // the SAME input — and the weaker guarantee is stated rather than implied.
+    let text = state.to_string();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// The sidecar a judgement should be made against, honouring `LAYA_SIDECAR_SOCKET`.
+#[must_use]
+pub fn sidecar_from_env() -> Sidecar {
+    std::env::var(crate::SIDECAR_SOCKET_ENV).map_or_else(|_| Sidecar::default_path(), Sidecar::new)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_gate_question_names_the_action_and_the_irreversibility() {
+        let q = gate_question("rm -rf /", true);
+        assert!(q.contains("rm -rf /"));
+        assert!(q.contains("IRREVERSIBLE"));
+        let q = gate_question("ls", false);
+        assert!(q.contains("ls"));
+        assert!(!q.contains("IRREVERSIBLE"));
+    }
+
+    #[test]
+    fn a_missing_confidence_is_none_not_zero() {
+        let row = build_row(
+            &serde_json::json!({}),
+            Timing {
+                latency_ms: 1,
+                ts_nanos: 2,
+                wall_nanos: 3,
+            },
+            "x",
+            &RowSpec {
+                tool: "gate".into(),
+                ..RowSpec::default()
+            },
+        );
+        let crate::Record::Decision(d) = row else {
+            panic!("a decision row")
+        };
+        assert_eq!(d.confidence, None, "absent is absent, not zero");
+        assert_eq!(d.bucket_clamped, None, "an unknown clamp state is not `false`");
+    }
+
+    #[test]
+    fn a_refusal_is_recorded_as_its_own_label() {
+        // A refusal has no model label, so without the override the row exists and says
+        // nothing — which is how a denial disappeared from the ledger.
+        let row = build_row(
+            &serde_json::json!({}),
+            Timing {
+                latency_ms: 1,
+                ts_nanos: 2,
+                wall_nanos: 3,
+            },
+            "x",
+            &RowSpec {
+                tool: "ask".into(),
+                label_override: Some("refused".into()),
+                ..RowSpec::default()
+            },
+        );
+        let crate::Record::Decision(d) = row else {
+            panic!("a decision row")
+        };
+        assert_eq!(d.label, "refused");
+    }
+
+    #[test]
+    fn the_wall_clock_is_epoch_scale_and_the_monotonic_one_is_not() {
+        // The two keys must be distinguishable, or a reader cannot tell which one orders.
+        let wall = wall_nanos();
+        let mono = monotonic_nanos();
+        assert!(
+            wall > 1_000_000_000_000_000_000,
+            "epoch nanoseconds, got {wall}"
+        );
+        assert!(mono < 1_000_000_000_000, "process-relative, got {mono}");
+    }
+
+    #[test]
+    fn the_state_hash_is_stable_and_does_not_leak_the_state() {
+        let s = serde_json::json!({"secret": "hunter2"});
+        let h = state_sha256(&s);
+        assert_eq!(h, state_sha256(&s), "stable");
+        assert!(!h.contains("hunter2"), "never the state itself");
+        assert_eq!(h.len(), 16);
+    }
+
+    #[test]
+    fn an_unset_ledger_directory_resolves_to_none() {
+        assert_eq!(resolve_ledger_dir(None), None);
+        assert_eq!(resolve_ledger_dir(Some("  ")), None);
+        assert_eq!(
+            resolve_ledger_dir(Some("/var/lib/laya-ledger")),
+            Some(PathBuf::from("/var/lib/laya-ledger"))
+        );
+    }
+}
