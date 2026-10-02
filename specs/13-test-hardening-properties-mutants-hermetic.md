@@ -52,9 +52,18 @@ asserts presence rather than value. Four changes, ordered by value per effort:
   skips) when the backbone is down. That keeps N7/G23 of spec 07.
 - **R2: a mutation gate.** `scripts/mutants-gate.sh` runs `cargo mutants --cargo-test-arg=--lib` on
   `crates/laya-core/src/{policy,agentic,route_payload}.rs` and `crates/laya-graph/src/sched.rs`, into
-  a `mktemp -d` output dir, and exits with cargo-mutants' code. It is added to `verify-all.sh` as a
-  **separate, opt-in step** (`--with-mutants`), because it takes minutes. The tests that kill
-  today's missed mutants are part of this spec (TDD table).
+  an output dir under `/projects/_tmp/`, and exits with cargo-mutants' code. It is added to
+  `verify-all.sh` as a **separate, opt-in step** (`--with-mutants`), because it takes minutes. The
+  tests that kill today's missed mutants are part of this spec (TDD table).
+  **The script must set `TMPDIR` and pass `--gitignore true`, and both are load-bearing.** By default
+  cargo-mutants copies the whole tree into `$TMPDIR` **including gitignored files**, so a run copies
+  this repo's `.venv-laya` — 5.4 GB — into `/tmp`. Measured 2026-10-01: that filled the container's
+  root filesystem and the run died with `No space left on device` while copying
+  `nvidia/cusparselt/lib/libcusparseLt.so.0`, leaving a 6.0 GB orphan behind and root `/` at 95%.
+  Root `/` has ~22 GB free; `/projects` has ~188 GB. So the script uses
+  `TMPDIR=/projects/_tmp/mutants-tmp`, passes `--gitignore true`, and removes the copy it creates.
+  A gate that can fill the disk and then fail at random is worse than no gate: the failure lands on
+  whichever run is unlucky rather than on the change being tested.
 - **R3: offline property tests** (seeded LCG, ≥ 256 cases each, the seed printed on failure):
   - `route_payload`: for random probability vectors (k ∈ 2..13, summing to 1), `margin ≥ 0`,
     `margin == top1 − top2`, `label ∈ options`, `near_tie ⇔ margin ≤ policy.near_tie_margin`.
