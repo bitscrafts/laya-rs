@@ -23,3 +23,8 @@
 
 # graphify code knowledge graph (local, regenerable: graphify .)
 graphify-out/
+
+# A local ledger store. `laya-cli` defaults LAYA_LEDGER_DIR to `.laya` in the
+# current directory, so any `laya ledger ...` run from the checkout creates a
+# redb store here. It is device-local state, never part of the project.
+/.laya/
