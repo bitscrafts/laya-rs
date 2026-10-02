@@ -1,13 +1,54 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (9) · **Status**: GREEN — **SPECS 01–07 COMPLETE; SPEC 08 (the P0 gate) IMPLEMENTED,
-VERIFIED AND DEPLOYED.** A full architectural review produced six further specs (08–13), of which 08 has
-landed; 09–13 are specified, their criteria proven to fail on the pre-implementation tree, and ordered in
-`specs/README-PROPOSED-ORDER.md`.
-`scripts/verify-all.sh` → `VERDICT: ALL CHECKS PASS` (0 failed, 0 unmeasured) · doc-honesty 40 docs,
-every citation resolves.
+**Date**: 2026-10-02 (10) · **Status**: GREEN — **SPECS 01–14 COMPLETE: every spec has 0 open criteria.**
+The queue that this file described as outstanding (09–13, then 10/11/12/14) is empty as of HEAD `fe407fe`.
 
-## The P0: the safety gate failed open, and spec 08 closes it
+```
+cargo test --workspace                    538 passed · 0 failed · 3 ignored (the opt-in live acceptance)
+cargo clippy --workspace --all-targets    0
+cargo fmt --all --check                   clean
+bash scripts/mutants-gate.sh              exit 0 — 194 mutants, 174 caught, 20 unviable, 0 MISSED
+python3 scripts/check-doc-citations.py    42 docs, every citation resolves
+```
+
+The three `ignored` are deliberate and are the spec-13 change: the two tests that need a live
+backbone are opt-in behind `LAYA_ACCEPTANCE=1`, and `scripts/verify-all.sh` runs them with
+`--include-ignored` so they RUN rather than vanish. The third is hermetic and runs.
+
+## The six specs that landed in this batch
+
+Each was implemented by `sonnet` through `scripts/run-spec-part.sh` — never inline, per HARD RULE 0d
+— and verified here by running its own criteria rather than reading its report.
+
+| spec | commit | the thing that actually carried it |
+|---|---|---|
+| 09 scheduler fail-fast | `7e4267f` | the control reproduces the original defect verbatim: "`b` ran after the run had failed" |
+| 13 test hardening | `8c69f1e` | the ORPHAN test, not the flag test — disabling the group kill fails it while the flag test still passes |
+| 10 deadlines | `0ef1743` | a real run bounded by its deadline: exit 1 after 1s on a `sleep 3` node with `timeout: 1` |
+| 12 head kernel | `9ba02ad` | the PyTorch differential green with its tolerance untouched; live corpus agreement 1.0000 |
+| 11 observability | `451b337` | a data-loss bug the spec never knew about: `Record::identity` used the process-relative clock, so two servers dropped each other's rows |
+| criteria ticks | `50a4b30`, `fe407fe` | specs 08 and 14 were implemented but never marked |
+
+## The one open operational item: THE DEPLOYED BINARIES ARE STALE
+
+`/root/.local/bin/{laya,laya-mcp,laya-gate}` are the **03:05 / 03:43 builds**. Everything from spec 11
+onward exists only in the source tree. Measured consequence: the spec-11 criterion
+`python3 scripts/check-observability.py` **exits 1 against the deployed binaries and 0 against this
+tree's build**:
+
+```sh
+cd /projects/laya-rs
+pgrep -x laya-gate        # MUST be empty first: replacing it blocks every live agent mid-turn
+cargo build --release
+mv ~/.local/bin/laya-mcp ~/.local/bin/laya-mcp.old-$(date +%s) && cp target/release/laya-mcp ~/.local/bin/
+mv ~/.local/bin/laya     ~/.local/bin/laya.old-$(date +%s)     && cp target/release/laya     ~/.local/bin/
+python3 scripts/check-observability.py    # must exit 0 from the deployed path
+```
+
+Use `mv`-then-copy, never `cp` over a live binary. Four `laya-mcp` processes still hold the old
+inode (pids 1068293, 1068334, 1070199, 1109940); they self-heal on reconnect.
+
+## The P0 from the previous session: the safety gate failed open, and spec 08 closed it
 
 A read-only review of the whole tree, then independent re-verification by the orchestrator, established
 that the gate answered **`allow`** to a filesystem-formatting command, an unrecoverable shred, a recursive
