@@ -11,7 +11,17 @@
 #
 # VERDICT is derived from the accumulated failures, never from the last command.
 set -uo pipefail
-export PATH="/usr/local/cargo/bin:$PATH"
+# A script must be runnable from ANY shell. Prepending the cargo bin alone is not enough: the CLI
+# criteria below invoke `laya`, so without this the whole file fails with `laya: command not found`
+# when the caller's PATH lacks the install dir (measured 2026-10-02: `env -i PATH=/usr/bin:/bin`).
+export PATH="/root/.local/bin:/usr/local/cargo/bin:$PATH"
+# And pin the binary the CLI criteria test. The installed `laya` can be a STALE build -- three specs
+# this session had criteria that passed against an old binary while testing nothing. Prefer this
+# tree's build when it exists, so a criterion about THIS tree reads THIS tree.
+if [ -x "./target/debug/laya" ]; then
+  export LAYA_CLI_BIN="$PWD/target/debug/laya"
+  export PATH="$PWD/target/debug:$PATH"
+fi
 export CARGO_HOME=/usr/local/cargo
 export RUSTUP_HOME=/usr/local/rustup
 cd /projects/laya-rs
