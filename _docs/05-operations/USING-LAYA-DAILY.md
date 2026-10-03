@@ -88,6 +88,20 @@ cannot loop.
 - **Compose** — `subflow` needs a library the CLI does not load; inline the child's nodes.
 - **Pass data shell-to-shell** — use a file; `{{x}}` substitutes in a `decide`'s `prompt` only.
 
+## The verdict does not depend on the checkboxes — proven with a control
+
+The obvious worry about a gate whose input is a spec file: does it trust the `[x]` ticks? On 2026-10-02 a
+control spec was written with one criterion **unticked and failing** and one ticked and passing:
+
+```
+unticked + failing  ->  NOT DONE 1/2 passed, 1 failed; first failure: cd /projects/laya-rs && false   exit 1
+same spec, ticked   ->  NOT DONE 1/2 passed, 1 failed; first failure: cd /projects/laya-rs && false   exit 1
+```
+
+**Identical.** The parser accepts `- [x]` and `- [ ]`, and both are RUN. So "ALL DONE" means *every
+criterion executes and passes* — it is not a reading of tickmarks. That matters because "every spec 0
+open" had been exactly a tickmark count, and **a ticked criterion can still fail.**
+
 ## What the gate found on its FIRST real use — five defects
 
 Using it was itself the test, and it failed in five places. **All five were defects in the CRITERIA, not
