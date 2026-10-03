@@ -210,6 +210,71 @@ SECTIONS = [
     ("99-archive", "Archive", "superseded material, kept with its consequence labelled"),
 ]
 
+
+# ---- title/blurb for a document that is NOT in the curated map -------------------
+# Added 2026-10-03. Before this, a document absent from DOCS was silently omitted from both INDEX.md and
+# TOC.md -- fourteen were, some of them months old. An omission with no error is the worst kind: the index
+# still looks complete, and the reader builds a false model of the tree. Now anything uncurated is derived
+# from the document itself, so nothing can be invisible; DOCS remains as an override with better prose.
+def derive(rel: str) -> tuple[str, str]:
+    import re as _re
+    path = root / "_docs" / rel
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return (rel, "")
+    title = None
+    for ln in lines:
+        if ln.startswith("# "):
+            title = ln[2:].strip()
+            break
+    if not title:
+        title = rel.rsplit("/", 1)[-1].removesuffix(".md")
+    # the first prose paragraph that is not a heading, a bullet, a table row or a fence
+    blurb_lines: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("#") or s.startswith("|") or s.startswith("-") or s.startswith(">") or s.startswith("```"):
+            if blurb_lines:
+                break
+            continue
+        if not s:
+            if blurb_lines:
+                break
+            continue
+        blurb_lines.append(s)
+        if len(" ".join(blurb_lines)) > 160:
+            break
+    blurb = " ".join(blurb_lines)
+    blurb = _re.sub(r"[*`]", "", blurb)
+    return (title, blurb)
+
+
+def docs_in(section: str) -> list[str]:
+    """Every .md under _docs/<section>/, sorted -- the FILESYSTEM is the source of truth, not the map."""
+    base = root / "_docs" / section
+    if not base.is_dir():
+        return []
+    # rglob, not glob: a document nested in a subdirectory is still a document. Measured 2026-10-03 --
+    # glob at one level left `99-archive/one-shot-scripts-2026-09-30/README.md` invisible, and the
+    # coverage control named it.
+    return sorted(str(f.relative_to(root / "_docs")) for f in base.rglob("*.md"))
+
+
+on_disk = sorted(str(f.relative_to(root / "_docs")) for f in (root / "_docs").rglob("*.md"))
+
+
+def entry(rel: str) -> tuple[str, str]:
+    """Curated metadata where it exists, derived where it does not."""
+    if rel in DOCS:
+        return DOCS[rel]
+    if not hasattr(entry, "_cache"):
+        entry._cache = {}
+    if rel not in entry._cache:
+        entry._cache[rel] = derive(rel)
+        print(f"  derived (not curated): {rel}")
+    return entry._cache[rel]
+
 # ---- INDEX.md ----------------------------------------------------------------
 out = [
     "# laya-rs — documentation index",
@@ -234,11 +299,13 @@ for d, t, desc in SECTIONS:
 out += ["", "## Documents", ""]
 for d, t, desc in SECTIONS:
     out.append(f"### {d}")
-    for rel, (title, blurb) in DOCS.items():
-        if rel.startswith(d + "/") and rel != f"{d}/README.md":
-            out.append(f"- [{title}]({rel}) — {blurb}")
-    if f"{d}/README.md" in DOCS:
-        t2, b2 = DOCS[f"{d}/README.md"]
+    for rel in docs_in(d):
+        if rel == f"{d}/README.md":
+            continue
+        title, blurb = entry(rel)
+        out.append(f"- [{title}]({rel}) — {blurb}")
+    if f"{d}/README.md" in on_disk:
+        t2, b2 = entry(f"{d}/README.md")
         out.append(f"- [{t2}]({d}/README.md) — {b2}")
     out.append("")
 
@@ -271,9 +338,14 @@ toc = [
 ]
 for d, _, _ in SECTIONS:
     toc.append(f"## {d}")
-    for rel, (title, _) in DOCS.items():
-        if rel.startswith(d + "/"):
-            toc.append(f"- [{title}]({rel})")
+    for rel in docs_in(d):
+        if rel == f"{d}/README.md":
+            continue
+        title, _ = entry(rel)
+        toc.append(f"- [{title}]({rel})")
+    if f"{d}/README.md" in on_disk:
+        t2, _ = entry(f"{d}/README.md")
+        toc.append(f"- [{t2}]({d}/README.md)")
     toc.append("")
 (root / "_docs/TOC.md").write_text("\n".join(toc))
 print("wrote _docs/TOC.md")
@@ -326,6 +398,19 @@ for f in files:
             if fragment not in heading_slugs(target):
                 broken.append(f"{f.relative_to(root)} -> {link}  (no heading slugs to `{fragment}`)")
             anchors_checked += 1
+# ---- control: no document may be invisible in what we just wrote ------------------
+# This control is the reason the fix exists: an omission from the index produced NO error, so fourteen
+# documents were invisible (some months old) and nobody could tell. It reads the GENERATED file and
+# compares it against the FILESYSTEM, so it cannot pass while a real document is missing.
+_index_text = (root / "_docs/INDEX.md").read_text()
+_invisible = [
+    rel for rel in on_disk
+    if f"]({rel})" not in _index_text and rel not in ("INDEX.md", "TOC.md")
+]
+print(f"coverage: {len(on_disk)} documents on disk, {len(_invisible)} absent from INDEX.md")
+for rel in _invisible:
+    print(f"  INVISIBLE (control FAILED): {rel}")
+
 print(f"\nlink check: {checked} relative links checked, {anchors_checked} of them anchored, "
       f"{len(broken)} broken")
 for b in broken:

@@ -221,7 +221,23 @@ Recorded so nobody plans around them:
 
 ---
 
-## 7. Turning it off deliberately
+## 8. The spec gate — a different question, a different doc
+
+This guide answers *"how do I use laya day to day?"*. A second, narrower question — *"is this project's
+spec set finished?"* — is answered by a **graph**, and it has its own doc:
+[`../05-operations/SPEC-GATE.md`](../05-operations/SPEC-GATE.md).
+
+```
+scripts/spec-all-gate.sh                 ->  ALL DONE (30 specs) (1 skipped)   exit 0
+FAST=1 scripts/spec-gate.sh specs/<N>.md ->  DONE 8/9 criteria                 exit 0   3-4s
+```
+
+It is a **different** token economy from the triage tools above: it saves tokens by answering in *one
+line with an exit status* instead of a transcript a model must read. Same principle, different surface.
+
+---
+
+## 9. Turning it off deliberately
 
 Two escapes, both explicit human actions:
 

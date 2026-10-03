@@ -1,4 +1,4 @@
-# USING LAYA GRAPH DAILY — the spec gate, and what it saves
+# THE SPEC GATE — is the spec set finished, and what does that cost
 
 **Measured 2026-10-02**, on this project, with the installed `laya`. Every number below came from a run,
 not from reading code.

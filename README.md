@@ -39,11 +39,45 @@ join keys for the day a consumer persists a run. See [`specs/07-graph-executor.m
 
 ## The graph executor
 
-`laya graph validate|render|run <flow.json>` runs a flow end to end: a `decide` node's answer is
-lowered to `mcp` + `route` nodes, the `route` node selects an edge by exact `label` match (with a
-**mandatory catch-all**), and the selected branch runs. Independent nodes fan out concurrently up
-to a declared limit; `writes: true` nodes are mutually exclusive; a failure stops the run and
-reports `stopped_early` with the failing node id; a stopped run **exits non-zero**.
+`laya graph validate|render|run <flow.json>` runs a flow end to end. Independent nodes fan out
+concurrently up to a declared limit; `writes: true` nodes are mutually exclusive; a failure stops the
+run and reports `stopped_early` with the failing node id; a stopped run **exits non-zero**.
+
+Node kinds, and the rule that decides between them:
+
+| kind | does | how it branches |
+|---|---|---|
+| `shell` | runs a command | — |
+| `decide` | asks the local head a question | a `route` on the answer's `label` or `band` — **a model call** |
+| `check` | runs a command for its **exit status** | `0` → `pass`, non-zero → `fail`, absent port → `_` — **no model** |
+| `mcp` | calls one of the seven tools | — |
+
+`decide` lowers to `mcp` + `route`; the `route` node selects an edge by exact `label` match with a
+**mandatory catch-all**.
+
+**Comparison → `check`. Judgement → `decide`.** A `check` must never be replaced by a `decide`: the head
+is measurably wrong at numeric boundaries (asked whether an unfinished count equaled zero it answered
+*yes* at confidence 0.11 for a count of one; asked whether a build that exited 7 succeeded it answered
+*yes* at 0.79). A `check` answers those exactly, and it runs with the sidecar **down**. See
+[`_docs/03-reference/GRAPH-DETERMINISM.md`](_docs/03-reference/GRAPH-DETERMINISM.md).
+
+## The spec gate — the graph used daily
+
+`scripts/spec-all-gate.sh` answers *"is this project's spec set finished?"* in **one line with an exit
+status**, and `_docs/02-guides/spec-gate.flow.json` is the same question as a graph: a `check` node runs
+the sweep, and its exit status routes to `release` or to `work_pending`.
+
+```
+scripts/spec-all-gate.sh                            -> ALL DONE (30 specs) (1 skipped)   exit 0
+FAST=1 scripts/spec-gate.sh specs/<N>-*.md          -> DONE 8/9 criteria                 exit 0   3-4s
+laya graph run _docs/02-guides/spec-gate.flow.json  -> check exit 0 -> release · exit 1 -> work_pending
+```
+
+**It does not read the checkboxes** — proven with a control: a criterion that is unticked and failing
+gives the same verdict as the same criterion ticked and failing. Both states are RUN, so `ALL DONE` means
+every criterion executes and passes. The full sweep takes **~13 minutes** (239 criteria, 177 of them
+invoking cargo), so gate the spec you are on while working and sweep the set at release. See
+[`_docs/05-operations/SPEC-GATE.md`](_docs/05-operations/SPEC-GATE.md).
 
 The acceptance test drives the identical path and spawns the real MCP server — it never stubs the
 caller, because a stub would make it a re-enactment rather than a test. It runs as a gate step.

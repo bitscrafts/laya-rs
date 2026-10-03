@@ -1,30 +1,68 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (23) · **Status**: GREEN — `spec set: ALL DONE (30 specs) (1 skipped: no criteria)`.
+**Date**: 2026-10-03 · **Status**: GREEN — `spec set: ALL DONE (30 specs) (1 skipped: no criteria)`.
 
 ```
-scripts/spec-all-gate.sh   ->  ALL DONE (30 specs) (1 skipped)  [fast]   exit 0
-FAST=1 spec-gate.sh <one>  ->  DONE 13/14 criteria passed                 3-4s
-cargo test --workspace     ->  634 passed · 0 failed
+scripts/spec-all-gate.sh    ->  ALL DONE (30 specs) (1 skipped)   exit 0
+FAST=1 spec-gate.sh <one>   ->  DONE 8/9 criteria                 3-4s
+laya graph run _docs/02-guides/spec-gate.flow.json
+                            ->  check exit 0 -> release · exit 1 -> work_pending
+cargo test --workspace      ->  634 passed · 0 failed · clippy 0 · fmt clean
 ```
 
-**The whole-set sweep takes 13m21s** — 239 criteria, **177 of them invoking cargo**. That is the
-toolchain's cost, not the graph's. Gate the spec you are on while working; sweep the set at release.
+## The documentation pass — a DUPLICATE NAME and FOURTEEN INVISIBLE DOCUMENTS
 
-## Five defects the gate found the first time it was used
+Documenting the spec gate turned into an audit, and the audit found two defects that had nothing to do
+with the gate:
 
-**Every one was a defect in the CRITERIA, not in the code** — because "every spec 0 open" was counted
-from **unticked boxes**, and **a ticked criterion can still fail**:
+**1. Two divergent documents shared one name.** `USING-LAYA-DAILY.md` existed in both `02-guides/`
+(the operator's token/triage/gate guide, written 2026-10-02) and `05-operations/` (the spec gate, written
+today). One name, two documents, neither aware of the other — an SSOT violation I introduced myself.
+Fixed by **distinct names with distinct scope**: `02-guides/USING-LAYA-DAILY.md` keeps the daily-driver
+name (renaming *that* one would have contradicted it), and the spec gate became
+**`05-operations/SPEC-GATE.md`**. The operator's guide also had **two sections numbered 7**; the second
+is now 8.
 
-| # | where | what |
-|---|---|---|
-| 1 | spec 13 | pinned an incidental ignored-count that had drifted; failed while the property was true |
-| 2 | specs 15, 19 (5 criteria) | invoked `laya` on `PATH` — absent in a bare shell |
-| 3 | spec 24 (written today) | `grep -n '_tmp'` returns **1 when it finds nothing**, and nothing is the PASS condition |
-| 4 | spec 24 | asserted a directory that never existed; the flows read committed files |
-| 5 | spec 07-part4 | ran a test marked `#[ignore]`; reported `0 passed; 1 ignored` while the test passes with `--include-ignored` |
+**2. Fourteen documents were INVISIBLE in `_docs/INDEX.md` and `_docs/TOC.md`.** Root cause:
+`regen-index.py` kept a **hand-maintained title map**, and a document absent from that map was **silently
+omitted** — no error, and the generated index still looked complete. Four of the fourteen predated today
+(`GRAPH-SEAM`, `RUNNING-LAYA`, `INSTALL-IN-HERMES`, `SUPERVISION`), so this was a long-standing defect,
+not a new one.
 
-All annotated in place, dated. Detail: `_docs/05-operations/USING-LAYA-DAILY.md`.
+Fixed at the root, not by adding entries: uncurated documents now get their **title derived from their
+first heading** and their blurb from their first prose paragraph (the curated map stays as an override,
+but is no longer *required*), and **`docs_in()` rglobs** so depth is not a hiding place — a nested
+`99-archive/.../README.md` was still invisible after the first fix, and the new control caught it.
+
+**The control, and why it matters**: `regen-index.py` now reads back the file it generated and compares
+it against the **filesystem**, printing `coverage: N documents on disk, M absent from INDEX.md`. Proven to
+bite by skipping one document in the loop — the control named `GRAPH-SEAM.md`. Coverage is now **0 absent**.
+
+**My first control break was invalid** (it returned an empty title, which still emitted a link, so the
+probe was never actually invisible and the control correctly did not flag it) — recorded because a break
+that cannot fail is not a control, which is the same defect family as the criteria bugs of the last two
+days.
+
+## Documentation written and updated
+
+| file | what |
+|---|---|
+| `_docs/05-operations/SPEC-GATE.md` | NEW NAME (was the duplicate) — the gate: commands, measured costs, the five criteria defects, the tickmark proof, the limits |
+| `_docs/02-guides/USING-LAYA-DAILY.md` | the operator's guide; section numbering fixed, and a new section pointing at SPEC-GATE.md |
+| `README.md` | a node-kind table (`shell`/`decide`/`check`/`mcp`), the **comparison vs judgement** rule with the boundary measurements, and the spec gate |
+| `_docs/03-reference/GRAPH-SEAM.md` | the same branch-cost table at the point where the routing fields are listed — it had concluded, silently, that every branch costs a model call |
+| `_docs/INDEX.md`, `_docs/TOC.md` | regenerated; **11 previously invisible documents recovered**, plus the nested one |
+| `scripts/regen-index.py` | the root fix: `derive()`/`entry()`, `docs_in()` with rglob, and the coverage control |
+
+## Measured state after the pass
+
+```
+coverage         49 documents on disk, 0 absent from INDEX.md
+links            146 relative links checked, 4 anchored, 0 broken
+doc-honesty      76 docs, every citation resolves
+tests            634 passed · 0 failed · clippy 0 · fmt clean
+deployed == tree laya · laya-mcp · laya-gate
+```
 
 ## The daily command
 

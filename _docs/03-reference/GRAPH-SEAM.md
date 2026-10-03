@@ -105,6 +105,24 @@ had been for the graph to compute the band, which its expression language makes 
 | `margin` | `route_payload.rs` | top1−top2. Spec 04 F3 required it and it **did not exist** — without it a near tie was decided silently, inside a graph whose premise is determinism |
 | `near_tie` | `route_payload.rs` | with `escalate_on_near_tie`, demotes the band so a tie routes to the escalate port with **no graph change**. Default **false**, so the routing change is opt-in and shows in a diff |
 | `confidence`, `saturated` | `route_payload.rs` | carried for the journal and the ledger |
+
+**What can branch, and what it costs (spec 25, 2026-10-02).** The fields above are the *judgement* path,
+and until spec 25 it was the ONLY path: every branch was a `decide`, so every branch was a model call, and
+the head is measurably wrong at numeric boundaries. A `check` node now branches on a **command's exit
+status** with no model in the loop:
+
+| kind | branches on | model call |
+|---|---|---|
+| `decide` | the answer's `label` (or `band`), via a generated `route` node | **yes** |
+| `check` | the command's **exit status**: `0` → `pass`, non-zero → `fail`, absent port → `_` | **no** |
+
+A non-zero exit is an **answer, not a failure**: the node succeeds and the run continues. A command that
+cannot be executed at all is different -- it **fails the node** (*"did not run" ≠ "said no"*). The
+distinction is the whole point, and it is enforced: `run` is required, `_` is required, `allow_failure` is
+refused on a `check`. Proven to need no model by completing a flow with the sidecar `SIGSTOP`ped.
+
+**Rule: comparison → `check`; judgement → `decide`.** See
+[`GRAPH-DETERMINISM.md`](GRAPH-DETERMINISM.md) for the boundary measurements and the spec gate.
 | the label is always a declared option | `route_payload.rs`, test `label_is_always_one_of_the_declared_options` | the property that makes the graph's edge set fixed: whatever the model returns, the label is one of the author's declared options |
 
 **A defect worth recording:** `margin`, `near_tie` and the whole `DecisionPayload` were built and
