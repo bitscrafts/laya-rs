@@ -455,6 +455,32 @@ fn flow_files(dir: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Flows that are OPERATOR tools rather than examples, so they are deliberately not asserted here.
+///
+/// Each one reads live state (the repository, the running sidecar) and has no fixed branch, which is
+/// exactly what this file cannot check hermetically. Listed explicitly, and [`each_unasserted_flow_is_declared`]
+/// fails if one vanishes, so the list cannot quietly hide a flow that stopped working.
+const UNASSERTED: &[&str] = &[
+    // Operator flow (spec 25's `check` used daily): asks whether the whole spec set passes.
+    // Depends on the live repository and runs the full criteria sweep; no fixed expected branch.
+    "_docs/02-guides/spec-gate.flow.json",
+];
+
+/// The exemption list must not silently rot: every declared entry must still exist on disk.
+#[test]
+fn each_unasserted_flow_is_declared() {
+    let on_disk: BTreeSet<String> = flow_files(GUIDES)
+        .union(&flow_files(FIXTURES))
+        .cloned()
+        .collect();
+    for u in UNASSERTED {
+        assert!(
+            on_disk.contains(*u),
+            "`{u}` is declared as unasserted but is not on disk -- remove its row from UNASSERTED"
+        );
+    }
+}
+
 #[test]
 fn every_committed_flow_runs_to_completion() {
     let on_disk: BTreeSet<String> = flow_files(GUIDES)
@@ -462,7 +488,12 @@ fn every_committed_flow_runs_to_completion() {
         .cloned()
         .collect();
     assert!(on_disk.len() >= 16, "found only {on_disk:?}");
-    let covered: BTreeSet<String> = cases().iter().map(|c| c.file.to_string()).collect();
+    let unasserted: BTreeSet<String> = UNASSERTED.iter().map(ToString::to_string).collect();
+    let covered: BTreeSet<String> = cases()
+        .iter()
+        .map(|c| c.file.to_string())
+        .chain(unasserted.iter().cloned())
+        .collect();
     assert_eq!(
         on_disk, covered,
         "a committed flow has no expected outcome, or a row names a flow that is gone"

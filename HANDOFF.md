@@ -1,14 +1,41 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (21) · **Status**: GREEN — **every item on the remaining list is closed.**
-Specs 25, 26, 27 landed; the examples are run by the suite; the flake is fixed at its root.
+**Date**: 2026-10-02 (22) · **Status**: GREEN — documented, deployed, and in daily use.
 
+## The daily command
+
+```sh
+cd /projects/laya-rs && scripts/spec-all-gate.sh          # whole set, FAST, ~seconds
+cd /projects/laya-rs && scripts/spec-gate.sh specs/25-*.md # one spec, ~seconds
+cd /projects/laya-rs && laya graph run _docs/02-guides/spec-gate.flow.json   # the same as a GRAPH
 ```
-HEAD (see below) · tree clean · 0 deleted        deployed == tree
-cargo test --workspace      633 passed · 0 failed (+ 5 in the examples runner)
-cargo clippy --all-targets  0        cargo fmt --all --check  clean
-the two flaky tests         0/20 quiet · 0/20 UNDER LOAD   (was 3/20)
-```
+
+**One line comes back, and the exit status is the answer** — that is the token saving: a model asking
+"is it done?" gets `DONE 9/9 criteria passed`, not a transcript to read.
+
+**`FAST=1` is the default for the sweep** and it **says what it skipped**. Four specs' criteria invoke the
+mutation gate at ~12 minutes each, so a full sweep runs past twelve minutes; FAST is 3–4 seconds per
+spec. Run the full form before a release, FAST while you work. Detail: `_docs/05-operations/USING-LAYA-DAILY.md`.
+
+## Using it immediately found three defects
+
+1. **Spec 13 pinned an incidental count** (`2 ignored`) that had risen to 5, so a true criterion failed.
+   It now pins the property (`0 failed`).
+2. **My own annotation broke a criterion's parsing** — I put the correcting note inside the backtick pair
+   that delimits the command, so the parsed command became a syntax error. Annotations go *outside* the
+   delimiters. Checked across all 33 specs: no other criterion leaks or has bad syntax.
+3. **Spec 26's example runner caught a new flow the moment it was added** — *"a committed flow has no
+   expected outcome"*. The operator flow reads live state and cannot be hermetic, so it is an explicit
+   exemption now, with a test that fails if the exempted file vanishes.
+
+## The trial result: the graph follows and decides
+
+A graph ran a **real spec's real criteria** (spec 25's, extracted from the file) and routed on the result —
+`all_done`, with `one_failed` skipped. A control with one criterion failing routes the other way. That is
+*"follow the specs and decide on them"*, working, with `check` and no model in the loop.
+
+**Still not done by anyone:** a laya graph being the thing that actually gated a commit. Every piece is
+verified; that combination is unexplored.
 
 ## The two remaining items, closed
 

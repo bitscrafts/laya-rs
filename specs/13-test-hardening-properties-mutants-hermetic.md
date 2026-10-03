@@ -136,7 +136,7 @@ asserts presence rather than value. Four changes, ordered by value per effort:
 
 **New, each watched to FAIL on `b0ee704`:**
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance 2>&1 | grep -qE '^test result: ok\. 1 passed; 0 failed; 2 ignored'`: the TWO live tests are opt-in; the third connects only to a closed loopback port and is hermetic, so it must RUN. The original criterion demanded `3 ignored`, and that count made a hermetic test get skipped to satisfy an arithmetic — the criterion was serving a number instead of a property
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance 2>&1 | grep -qE '^test result: ok\. 1 passed; 0 failed'` _(CORRECTED 2026-10-02: previously also pinned the ignored count at 2; it is incidental and had risen to 5 as more live tests were marked ignored, so pinning it made a true criterion fail)_
 - [x] `cd /projects/laya-rs && LAYA_ACCEPTANCE=1 cargo test -p laya-graph --test acceptance -- --include-ignored 2>&1 | grep -qE '^test result: ok\. [0-9]+ passed'`: the control — the live tests must RUN when opted in, not merely be marked: R1 (2026-10-02: 3 passed when live, 2 failed when not; 4 passed after spec 11 added a case to the same binary — the count is deliberately not pinned, the property is)
 - [x] `cd /projects/laya-rs && bash scripts/mutants-gate.sh`: R2 (2026-10-02: 194 mutants, 174 caught, 20 unviable, 0 missed, exit 0; before this work the equivalent run exited 2 with 18 missed and 9 timeouts)
 - [x] `cd /projects/laya-rs && cargo test -p laya-core --lib payload_invariants_hold_for_random_distributions 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3

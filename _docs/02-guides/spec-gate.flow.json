@@ -1,0 +1,28 @@
+{
+  "flow": "spec-gate",
+  "version": 1,
+  "timeout": 3600,
+  "nodes": [
+    {
+      "id": "gate",
+      "kind": "check",
+      "run": "scripts/spec-all-gate.sh",
+      "ports": { "pass": "release", "fail": "work_pending", "_": "escalate" }
+    },
+    {
+      "id": "release",
+      "kind": "shell",
+      "run": "echo 'DECISION: every spec is finished'"
+    },
+    {
+      "id": "work_pending",
+      "kind": "shell",
+      "run": "echo 'DECISION: specs remain unfinished -- continue work'"
+    },
+    {
+      "id": "escalate",
+      "kind": "shell",
+      "run": "echo 'DECISION: the gate did not run -- a human decides'"
+    }
+  ]
+}
