@@ -250,3 +250,30 @@ a zero deadline could fire, making its timeout test vacuous until a 200 ms `Slow
 
 **Status: open, documented, not attributed to any change.** Candidate for a small spec; it is behind
 spec 23 in priority because it costs a flaky CI run rather than a wrong answer.
+
+---
+
+## FIXED 2026-10-02 — and the mechanism I recorded here was WRONG
+
+**Superseded wording, kept:** earlier in this document the cause is written as *"the two affected tests
+are both assertions about ordering under a wall-clock race"*, with the `fail_slowly()` `sleep 0.2`
+described as what the scheduler's first pass races. **That was my hypothesis and it was not the cause.**
+
+**The measured cause (spec 27, worker's debug print):** fan-out permits were acquired **inside each
+spawned task**, so at a limit of one the node that obtained the only slot was **whichever task the tokio
+runtime polled first**. Under load a sibling took the slot before the node that then failed. The 0.2 s
+sleep only made the window wide enough to observe; it was not the mechanism.
+
+**The fix:** the permit is claimed in `dispatch`, **in id order at spawn time**, so dispatch order is a
+function of the graph rather than of the runtime's polling. Concurrency is unchanged — a node with no free
+slot still queues inside its task.
+
+**Measured after the fix:** **0/20 runs with no load, 0/20 under four busy-loop generators** (was 3/20
+under load at `10fc381`). The two tests now wait on a **signal** from the failing node instead of a
+duration, and a control proves the signal is required.
+
+**The lesson, which is the same one this session kept producing:** *observed once* and *explained* are
+different things. I had a plausible story — a stopwatch race — and it was wrong in the part that
+mattered, while the fix that worked came from instrumenting the failure rather than reasoning about it.
+The old wording above is left visible rather than deleted, per the project rule that the disagreement is
+the finding.

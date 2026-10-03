@@ -53,14 +53,14 @@ last proves the test is genuinely synchronised rather than accidentally green.
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_queued_siblings_from_starting 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_independent_nodes_still_run_concurrently 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] **stability**: 20 consecutive runs of the two tests, **0 failures**, and the same 20 **under load**
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_queued_siblings_from_starting 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_independent_nodes_still_run_concurrently 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] **stability**: 20 consecutive runs of the two tests, **0 failures**, and the same 20 **under load**
       (4 busy-loop generators on this host), reported with the counts
-- [ ] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
 
 ## Guardrails
 
@@ -78,3 +78,56 @@ last proves the test is genuinely synchronised rather than accidentally green.
 `_docs/05-operations/TEST-HARNESS-FLAKE.md` records: **3 failures in 20 runs at commit `10fc381` under 4
 busy-loop generators**, and **0/20 pre- and post-change at light load**. The affected tests are the two
 above. Do not spend the budget re-measuring; spend it making them deterministic.
+
+---
+
+## Verification of this spec (independent, run here 2026-10-02 after the worker finished)
+
+Worker did not commit (HEAD `ee2b922`, 0 deleted). **14 checks passed, 0 failed.**
+
+### The fix is a ROOT fix, and it is not the mechanism I hypothesised
+
+I recorded the cause as the `sleep 0.2` racing the scheduler's first pass. **That was wrong.** The worker
+measured the real cause: **fan-out permits were acquired *inside* each spawned task**, so with a limit of
+one the node that got the only slot was whichever task the runtime happened to poll first. Under load a
+debug print showed a sibling taking the slot before the failing node.
+
+The fix moves the permit claim into `dispatch`, **in id order at spawn time**:
+
+```rust
+// Claim a free fan-out slot HERE, in id order, rather than inside the task: tasks poll in
+// whatever order the runtime picks, so a later id could otherwise take the only slot
+// before the earlier one and the "failed node stops its queued siblings" ordering would
+// depend on the scheduler's mood, not on the graph.
+let held = Arc::clone(&fanout).try_acquire_owned().ok();
+```
+
+That is a production change, not a test workaround: **dispatch order is now a function of the graph**
+rather than of the runtime's polling — the same property spec 17 established for *routing*, extended to
+*scheduling*. A node with no free slot still queues inside its task, so concurrency is preserved.
+
+### Stability — the acceptance criterion
+
+```
+20 consecutive runs, no load          failures: 0 / 20
+20 runs under 4 busy-loop generators  failures: 0 / 20      (was 3/20 before this spec)
+generators killed by exact pid
+```
+
+### The controls
+
+| control | result |
+|---|---|
+| `the_control_a_late_failure_still_stops_later_siblings` | PASS — the halt survives past the first pass |
+| `the_control_independent_nodes_still_run_concurrently` | PASS — **the fix did not serialise the engine** |
+| `the_control_the_signal_is_required` | PASS — proves the test waits on the signal, not the clock |
+
+The second is the guard against the cheap wrong answer ("make the race go away by making it single-file").
+
+### And the whole gate
+
+```
+cargo test --workspace   633 passed / 0 failed
+clippy 0 · fmt clean
+spec 26's example runner still green
+```

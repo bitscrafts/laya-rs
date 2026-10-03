@@ -36,7 +36,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::error::RunError;
@@ -519,7 +519,21 @@ fn dispatch(
         let write_lock = Arc::clone(&gates.write_lock);
         let halt = Arc::clone(&gates.halt);
         let mcp = Arc::clone(&opts.mcp);
-        joins.spawn(run_one(node, run_id, fanout, write_lock, halt, mcp, origin));
+        // Claim a free fan-out slot HERE, in id order, rather than inside the task: tasks poll in
+        // whatever order the runtime picks, so a later id could otherwise take the only slot
+        // before the earlier one and the "failed node stops its queued siblings" ordering would
+        // depend on the scheduler's mood, not on the graph. A node with no free slot still
+        // queues inside its task.
+        let held = Arc::clone(&fanout).try_acquire_owned().ok();
+        joins.spawn(run_one(
+            node,
+            run_id,
+            (fanout, held),
+            write_lock,
+            halt,
+            mcp,
+            origin,
+        ));
     }
     Ok(None)
 }
@@ -669,18 +683,23 @@ fn nodes_without_record(
 async fn run_one(
     node: GraphNode,
     run_id: String,
-    fanout: Arc<Semaphore>,
+    (fanout, held): (Arc<Semaphore>, Option<OwnedSemaphorePermit>),
     write_lock: Arc<Semaphore>,
     halt: Arc<AtomicBool>,
     mcp: Arc<dyn McpCaller>,
     origin: Instant,
 ) -> Outcome {
     let spawned = Instant::now();
-    let Ok(_fanout_permit) = fanout.acquire_owned().await else {
-        return Outcome::Ran(
-            failed_record(run_id, node.id, "internal: fan-out semaphore closed"),
-            String::new(),
-        );
+    let _fanout_permit = if let Some(permit) = held {
+        permit
+    } else {
+        let Ok(permit) = fanout.acquire_owned().await else {
+            return Outcome::Ran(
+                failed_record(run_id, node.id, "internal: fan-out semaphore closed"),
+                String::new(),
+            );
+        };
+        permit
     };
     let _write_permit = if node.writes {
         match write_lock.acquire_owned().await {
@@ -962,6 +981,30 @@ mod tests {
 
     fn touch(id: &str, dir: &std::path::Path) -> GraphNode {
         shell(id, &format!("touch {}", dir.join(id).display()))
+    }
+
+    /// A node that proves it ran by touching `dir/id`, but only once `signal` exists. The wait
+    /// polls for a FILE, so what it waits on is an event, not a duration; `polls` only bounds how
+    /// long a test that never gets its signal hangs before the node gives up (exit 3, no marker).
+    fn after_signal(
+        id: &str,
+        dir: &std::path::Path,
+        signal: &std::path::Path,
+        polls: u32,
+    ) -> GraphNode {
+        shell(
+            id,
+            &format!(
+                "i=0; while [ ! -e {sig} ]; do i=$((i+1)); [ $i -gt {polls} ] && exit 3; sleep 0.05; done; touch {mark}",
+                sig = signal.display(),
+                mark = dir.join(id).display(),
+            ),
+        )
+    }
+
+    /// A failing node that signals it has started before it fails.
+    fn fail_after_signalling(id: &str, signal: &std::path::Path) -> GraphNode {
+        shell(id, &format!("touch {}; exit 1", signal.display()))
     }
 
     fn opts(run_id: &str, limit: usize) -> RunOptions {
@@ -1527,19 +1570,25 @@ mod tests {
 
     // ---- spec 09: halt flag, accounting, cycles -----------------------------
 
-    fn fail_slowly() -> GraphNode {
-        shell("a", "sleep 0.2; exit 1")
+    /// `a`: signals that it has started, then fails.
+    fn fail_slowly(signal: &std::path::Path) -> GraphNode {
+        fail_after_signalling("a", signal)
     }
 
     #[tokio::test]
     async fn a_failure_stops_queued_siblings_from_starting() {
+        // Each sibling waits for `a`'s signal before it would touch its marker, so the ordering is
+        // controlled by the graph: a sibling that took the only slot first would wait on a signal
+        // that cannot come, and a sibling that ran after the failure would find the signal and
+        // touch its marker. Neither is decided by a clock.
         let dir = tmp_dir("halt");
+        let signal = dir.join("a.started");
         let graph = Graph {
             nodes: vec![
-                fail_slowly(),
-                touch("b", &dir),
-                touch("c", &dir),
-                touch("d", &dir),
+                fail_slowly(&signal),
+                after_signal("b", &dir, &signal, 200),
+                after_signal("c", &dir, &signal, 200),
+                after_signal("d", &dir, &signal, 200),
             ],
             edges: vec![],
         };
@@ -1558,7 +1607,8 @@ mod tests {
     #[tokio::test]
     async fn the_control_allow_failure_does_not_halt_siblings() {
         let dir = tmp_dir("nohalt");
-        let mut a = fail_slowly();
+        let signal = dir.join("a.started");
+        let mut a = fail_slowly(&signal);
         a.allow_failure = true;
         let graph = Graph {
             nodes: vec![a, touch("b", &dir), touch("c", &dir), touch("d", &dir)],
@@ -1857,11 +1907,16 @@ mod tests {
         // a queued sibling must not start; with `allow_failure` it must.
         let dir = tmp_dir("timeout-halt");
         for (allow, label) in [(false, "strict"), (true, "lenient")] {
-            let mut slow = with_timeout(shell("n1", "sleep 30"), 0.5);
+            let signal = dir.join(format!("{label}.started"));
+            let mut slow = with_timeout(
+                shell("n1", &format!("touch {}; sleep 30", signal.display())),
+                0.5,
+            );
             slow.allow_failure = allow;
-            let marker = dir.join(label);
+            let sibling = format!("n2-{label}");
+            let marker = dir.join(&sibling);
             let graph = Graph {
-                nodes: vec![slow, shell("n2", &format!("touch {}", marker.display()))],
+                nodes: vec![slow, after_signal(&sibling, &dir, &signal, 200)],
                 edges: vec![],
             };
             let report = run_bounded(&graph, opts(label, 1)).await.expect("run");
@@ -1873,6 +1928,106 @@ mod tests {
             );
             assert_eq!(report.stopped_early, !allow, "{label}: {report:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_control_a_late_failure_still_stops_later_siblings() {
+        // `a` runs alone in the first pass; `b`, `c` and `d` only become ready when it completes,
+        // so they are dispatched in a LATER pass. `b` takes the one slot and fails; `c` and `d`
+        // are queued behind it and must not start. A halt checked only at the top of the first
+        // pass would let them run.
+        let dir = tmp_dir("late");
+        let signal = dir.join("b.started");
+        let graph = Graph {
+            nodes: vec![
+                touch("a", &dir),
+                fail_after_signalling("b", &signal),
+                after_signal("c", &dir, &signal, 200),
+                after_signal("d", &dir, &signal, 200),
+            ],
+            edges: vec![edge("a", "b"), edge("a", "c"), edge("a", "d")],
+        };
+        let report = run_bounded(&graph, opts("s27-late", 1)).await.expect("run");
+        assert!(dir.join("a").exists(), "the first pass must have run `a`");
+        assert!(signal.exists(), "`b` must have started and failed");
+        assert!(report.stopped_early, "{report:?}");
+        assert_eq!(report.failed_node.as_deref(), Some("b"));
+        for id in ["c", "d"] {
+            assert!(
+                !dir.join(id).exists(),
+                "`{id}` ran after a later-pass failure"
+            );
+        }
+        assert_eq!(report.not_started, vec!["c", "d"], "{report:?}");
+    }
+
+    #[tokio::test]
+    async fn the_control_independent_nodes_still_run_concurrently() {
+        // Each node waits for the OTHER's start signal before it finishes, so both can only
+        // succeed if they were running at the same time. A serialised engine leaves the first
+        // one waiting on a node that has not started, and it gives up.
+        let dir = tmp_dir("concurrent");
+        let (a_up, b_up) = (dir.join("a.up"), dir.join("b.up"));
+        let meet = |id: &str, mine: &std::path::Path, theirs: &std::path::Path| {
+            shell(
+                id,
+                &format!(
+                    "touch {mine}; i=0; while [ ! -e {theirs} ]; do i=$((i+1)); [ $i -gt 200 ] && exit 3; sleep 0.05; done; touch {done}",
+                    mine = mine.display(),
+                    theirs = theirs.display(),
+                    done = dir.join(format!("{id}.done")).display(),
+                ),
+            )
+        };
+        let graph = Graph {
+            nodes: vec![meet("a", &a_up, &b_up), meet("b", &b_up, &a_up)],
+            edges: vec![],
+        };
+        let report = run_bounded(&graph, opts("s27-concurrent", 2))
+            .await
+            .expect("run");
+        assert!(!report.stopped_early, "{report:?}");
+        for id in ["a", "b"] {
+            assert!(
+                dir.join(format!("{id}.done")).exists(),
+                "`{id}` did not run alongside its peer: {report:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_control_the_signal_is_required() {
+        // The siblings in the tests above wait on a FILE. Prove that: with the signal withheld a
+        // sibling never touches its marker (it gives up, exit 3), and with the signal present it
+        // does. Were the wait a clock, both arms would end the same way.
+        let dir = tmp_dir("signal");
+        let withheld = dir.join("never");
+        let given = dir.join("given");
+        let graph = Graph {
+            nodes: vec![
+                after_signal("without", &dir, &withheld, 20),
+                shell("emit", &format!("touch {}", given.display())),
+                after_signal("with", &dir, &given, 200),
+            ],
+            edges: vec![],
+        };
+        let report = run_bounded(&graph, opts("s27-signal", 3))
+            .await
+            .expect("run");
+        assert!(
+            !dir.join("without").exists(),
+            "a node ran without its signal"
+        );
+        let record = report.records.iter().find(|r| r.node_id == "without");
+        assert_eq!(
+            record.and_then(|r| r.exit_code),
+            Some(3),
+            "it must have given up waiting: {report:?}"
+        );
+        assert!(
+            dir.join("with").exists(),
+            "a node did not run with its signal"
+        );
     }
 
     struct SlowCaller(u64);

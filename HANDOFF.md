@@ -1,16 +1,35 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (20) · **Status**: GREEN — **the graph can now follow and decide on specs.**
-Spec 25 landed the deterministic branch; the intervention's blocker is closed.
+**Date**: 2026-10-02 (21) · **Status**: GREEN — **every item on the remaining list is closed.**
+Specs 25, 26, 27 landed; the examples are run by the suite; the flake is fixed at its root.
 
 ```
-HEAD ea01681 · tree clean · 0 deleted          deployed == tree (laya 63c69af7, laya-mcp, laya-gate)
-cargo test --workspace      625 passed · 0 failed
+HEAD (see below) · tree clean · 0 deleted        deployed == tree
+cargo test --workspace      633 passed · 0 failed (+ 5 in the examples runner)
 cargo clippy --all-targets  0        cargo fmt --all --check  clean
-check-doc-citations.py      73 docs, every citation resolves
-regen-index.py              124 links, 4 anchored, 0 broken
-verify the DEPLOYED path:   bash scripts/smoke-deployed.sh   (specs 16, 18, 20, 21, 22, 25)
+the two flaky tests         0/20 quiet · 0/20 UNDER LOAD   (was 3/20)
 ```
+
+## The two remaining items, closed
+
+**The examples are run by the suite** (spec 26, `2200d9a`). One test validated every committed flow and
+nothing ran one, so "the examples work" rested on a script in scratch that a clone does not get. That gap
+had hidden three real defects, including the literal-in-the-prompt one. `tests/examples.rs` now runs all
+16 flows hermetically with a scripted caller and asserts **the exact set of nodes that ran and the exact
+set skipped** — a check that only looked for failures would have stayed green through the very break it
+exists to catch. Proven by breaking it: changing one decide's port makes it fail, naming the flow.
+
+**The examples now read the value their own command produced** (`eec8958`). Three prompts stated the count
+as a literal while their `count_words` node ran and was discarded — so running them against a different
+document changed nothing. The fix also corrected a wrong answer: the long-document control had been
+reporting a medium classification for a 400-word document because its prompt said thirteen.
+
+**The flake is fixed at its root** (spec 27). **My recorded mechanism was wrong.** I had blamed the
+`sleep 0.2` racing the scheduler's first pass; the real cause was that **fan-out permits were acquired
+inside each spawned task**, so the only slot at a limit of one went to whichever task the runtime polled
+first. The fix claims the permit **in id order at spawn time**, making dispatch order a function of the
+graph rather than of the runtime's mood — spec 17's property, extended from routing to scheduling. 0/20
+quiet and 0/20 under load, with a control proving the engine was not serialised.
 
 ## The primitive that was missing, now present — `kind: "check"`
 
