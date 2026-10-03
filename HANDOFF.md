@@ -1,6 +1,30 @@
 # HANDOFF — laya-rs
 
-**Date**: 2026-10-02 (22) · **Status**: GREEN — documented, deployed, and in daily use.
+**Date**: 2026-10-02 (23) · **Status**: GREEN — `spec set: ALL DONE (30 specs) (1 skipped: no criteria)`.
+
+```
+scripts/spec-all-gate.sh   ->  ALL DONE (30 specs) (1 skipped)  [fast]   exit 0
+FAST=1 spec-gate.sh <one>  ->  DONE 13/14 criteria passed                 3-4s
+cargo test --workspace     ->  634 passed · 0 failed
+```
+
+**The whole-set sweep takes 13m21s** — 239 criteria, **177 of them invoking cargo**. That is the
+toolchain's cost, not the graph's. Gate the spec you are on while working; sweep the set at release.
+
+## Five defects the gate found the first time it was used
+
+**Every one was a defect in the CRITERIA, not in the code** — because "every spec 0 open" was counted
+from **unticked boxes**, and **a ticked criterion can still fail**:
+
+| # | where | what |
+|---|---|---|
+| 1 | spec 13 | pinned an incidental ignored-count that had drifted; failed while the property was true |
+| 2 | specs 15, 19 (5 criteria) | invoked `laya` on `PATH` — absent in a bare shell |
+| 3 | spec 24 (written today) | `grep -n '_tmp'` returns **1 when it finds nothing**, and nothing is the PASS condition |
+| 4 | spec 24 | asserted a directory that never existed; the flows read committed files |
+| 5 | spec 07-part4 | ran a test marked `#[ignore]`; reported `0 passed; 1 ignored` while the test passes with `--include-ignored` |
+
+All annotated in place, dated. Detail: `_docs/05-operations/USING-LAYA-DAILY.md`.
 
 ## The daily command
 

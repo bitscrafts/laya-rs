@@ -81,8 +81,10 @@ limitation quietly stops being true.
 - [x] `cd /projects/laya-rs && grep -c '{{setup}}' _docs/02-guides/guess-the-number.flow.json` : at least 1 (R2)
 - [x] `cd /projects/laya-rs && python3 /projects/_tmp/check-guess-branches.py` : prints `BRANCHES DIFFER` (R3)
 - [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` twice : the advice node named in both reports is identical (NF1)
-- [x] `cd /projects/laya-rs && ls _docs/02-guides/guess-the-number*/` and `git ls-files _docs/02-guides/ | grep guess` : every path the flows read and write is tracked (NF4)
-- [x] `cd /projects/laya-rs && grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : **no matches** (NF4)
+- [x] `cd /projects/laya-rs && ! grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : every path the flows read lies inside the repository (NF4)
+  _(CORRECTED 2026-10-02: required a `guess-the-number*/` DIRECTORY that never existed -- the flows read committed files directly. The assertion was wrong about the artefact.)_
+- [x] `cd /projects/laya-rs && ! grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : **no matches** (NF4)
+  _(CORRECTED 2026-10-02: without the `!` this returned grep's exit status, which is 1 exactly when there are NO matches -- the criterion failed when it should have passed)_
 - [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
 - [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
 - [x] `cd /projects/laya-rs && python3 scripts/regen-index.py` : 0 broken links

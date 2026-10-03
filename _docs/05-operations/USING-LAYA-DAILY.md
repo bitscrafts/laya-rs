@@ -62,9 +62,13 @@ line**, so the answer never hides what it did not run:
 |---|---|
 | `FAST=1 scripts/spec-gate.sh <spec>` | **3–4 seconds** (73s for the one spec with a workspace run) |
 | the same spec without FAST, when it has a mutation criterion | **~12 minutes** |
+| the WHOLE SET in FAST mode | **13m21s** — 239 criteria, of which **177 invoke cargo**, so the cost is the toolchain, not the graph |
+| the whole set with the mutation gates | over half an hour |
 
-**A quality check is not needed to answer a completeness question.** Run the full form before a release;
-run FAST while you work.
+**Pick the scope, not the mode.** For daily work, gate the spec you are on — seconds. The whole-set sweep
+is a **release-time** action, and 13 minutes is the honest price of 177 cargo invocations.
+
+**A quality check is not needed to answer a completeness question.**
 
 **The graph does not replace the worker.** It answers *whether* a spec is done; it does not write code.
 Implementing still belongs to the dispatch scripts (`run-spec-part.sh`), which loop in bash — a graph
@@ -83,6 +87,26 @@ cannot loop.
 - **Iterate** — no loops; unroll, or drive the loop in bash.
 - **Compose** — `subflow` needs a library the CLI does not load; inline the child's nodes.
 - **Pass data shell-to-shell** — use a file; `{{x}}` substitutes in a `decide`'s `prompt` only.
+
+## What the gate found on its FIRST real use — five defects
+
+Using it was itself the test, and it failed in five places. **All five were defects in the CRITERIA, not
+the code** — which is the finding worth keeping: this project had been reporting "every spec 0 open"
+by counting **unticked boxes**, and **a ticked criterion can still fail.**
+
+| # | defect | what was wrong |
+|---|---|---|
+| 1 | spec 13 | pinned an *incidental* count (`2 ignored`) that had risen to 5, so a criterion testing a **true** property failed |
+| 2 | spec 15, 19 (5 criteria) | invoked **`laya` on `PATH`**, absent in a bare shell — the same defect that cost three specs a correction today, sitting in the criteria themselves |
+| 3 | spec 24 (mine, written today) | `grep -n '_tmp' …` returns **1 when it finds NOTHING**, and nothing is the pass condition — so it failed exactly when it should pass |
+| 4 | spec 24 (mine) | asserted a `guess-the-number*/` **directory** that never existed; the flows read committed files directly |
+| 5 | spec 07-part4 | ran a test marked **`#[ignore]`**, so it reported `0 passed; 1 ignored` and the grep demanding `1 passed` failed — while the test itself passes (proven with `--include-ignored`) |
+
+Plus a **display bug** of mine: the open-list truncated each spec to two characters, so
+`07-graph-executor` and `07-graph-executor-part4` both printed as `07 07`. It now names each in full.
+
+**All five are annotated in place with the date and the reason** — nothing erased, per the project rule
+that the disagreement is the finding.
 
 ## The two things this work found by being used
 

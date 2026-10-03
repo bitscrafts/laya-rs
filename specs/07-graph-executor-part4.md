@@ -173,7 +173,7 @@ it.**
 
 **New in this part** (each run against the pre-implementation tree and watched to fail):
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance the_control_a_forced_label_reaches_the_other_branch 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R-ACC's control: the routing is real
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance -- --include-ignored the_control_a_forced_label_reaches_the_other_branch` _(CORRECTED 2026-10-02: the test is marked ignored, so without `--include-ignored` it was never run and the criterion failed for the wrong reason; the grep demanded `1 passed` from a run that reported `0 passed; 1 ignored`)_ 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R-ACC's control: the routing is real
 - [x] `cd /projects/laya-rs && curl -sf http://10.10.10.217:8083/health >/dev/null && cargo test -p laya-graph --test acceptance` — R-ACC: the live end-to-end flow. **Needs the backbone**; when `:8083` is down this FAILS rather than skipping, because an unmeasured acceptance test is not an acceptance test
 - [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R19/R20. **Scoped to the `graph` filter on purpose**: a bare `cargo test -p laya-cli` criterion was measured to pass pre-implementation on the crate's *existing* 16 tests, certifying nothing. The `graph` filter matches zero tests before this part, so the `[1-9]` guard does its job
 - [x] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -qE '07-graph-executor-part4.md.*IMPLEMENTED'` — this spec is discovered AND no longer pending

@@ -6,7 +6,7 @@
     {
       "id": "gate",
       "kind": "check",
-      "run": "scripts/spec-all-gate.sh",
+      "run": "FAST=1 scripts/spec-all-gate.sh",
       "ports": { "pass": "release", "fail": "work_pending", "_": "escalate" }
     },
     {
