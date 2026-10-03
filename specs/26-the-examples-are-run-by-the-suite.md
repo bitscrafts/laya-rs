@@ -84,15 +84,15 @@ certified one.
 
 ## Exit Criteria
 
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --test examples 2>&1 | grep -qE '^test result: ok\. [1-9][0-9]* passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --test examples every_committed_flow_reaches_its_declared_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && cargo test -p laya-graph --test examples the_count_driven_flows_diverge_on_the_two_documents 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [ ] `cd /projects/laya-rs && grep -c 'examples' scripts/verify-all.sh` : at least 1 (R4)
-- [ ] **with the sidecar stopped**, `cargo test -p laya-graph --test examples` : still `ok`, 0 failed (NF1)
-- [ ] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [ ] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
-- [ ] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [ ] **the break-it proof** is in the report: a deliberately broken flow made the test red, then restored
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test examples 2>&1 | grep -qE '^test result: ok\. [1-9][0-9]* passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test examples every_committed_flow_reaches_its_declared_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test examples the_count_driven_flows_diverge_on_the_two_documents 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cd /projects/laya-rs && grep -c 'examples' scripts/verify-all.sh` : at least 1 (R4)
+- [x] **with the sidecar stopped**, `cargo test -p laya-graph --test examples` : still `ok`, 0 failed (NF1)
+- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
+- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
+- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] **the break-it proof** is in the report: a deliberately broken flow made the test red, then restored
 
 ## Guardrails
 
@@ -104,3 +104,71 @@ certified one.
 - Do NOT claim a criterion you did not run. **Report the break-it proof with its output.**
 - Do NOT commit. Leave the work in the tree.
 - Do NOT delete anything pre-existing; `mv` aside and say why.
+
+---
+
+## Verification of this spec (independent, run here 2026-10-02 after the worker finished)
+
+Worker did not commit (HEAD `21efe90`, 0 deleted). **10 checks passed.**
+
+### R1/R2 — the examples are run, and the branch is asserted
+
+```
+$ cargo test -p laya-graph --test examples
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+```
+
+The test file references runs/skips/expected **69 times** — it asserts *which* branch each flow takes,
+not merely that nothing failed. The expected sets are declared per flow, e.g.:
+
+```
+p7: a node behind a pruned dependency is skipped
+    file: crates/laya-graph/tests/fixtures/p7-join.flow.json
+    ran:     ["prep", "d", "short_path"]
+    skipped: ["long_path", "needs_long"]
+```
+
+### THE CONTROL — proved to fail correctly, which is the part that matters
+
+The check that makes this file worth having is that it can go RED. It can:
+
+```
+BREAK: p7-join's decide `d` port "yes" was "long_path", changed to "needs_long"
+
+$ cargo test -p laya-graph --test examples
+  test every_committed_flow_reaches_its_declared_branch ... FAILED
+  panicked at crates/laya-graph/tests/examples.rs:495
+  test result: FAILED. 4 passed; 1 failed
+
+RESTORE:
+  test result: ok. 5 passed; 0 failed        (fixture byte-identical to HEAD)
+```
+
+**A test that only checked "no node failed" would have stayed green through that break** — which is why
+R2 exists, and this is the evidence that it does.
+
+### NF1 — hermetic, proven by suspending the sidecar
+
+```
+sidecar pid 168492 -> SIGSTOP
+cargo test -p laya-graph --test examples  ->  ok. 5 passed; 0 failed
+```
+
+It passes with the model server **suspended**: no head, no network, no `laya-mcp`. That is what makes it
+survive a clone, and it is the only way to demonstrate it — reading the code could not.
+
+### R4 and the gate
+
+```
+scripts/verify-all.sh references the examples test 3 times   PASS
+cargo test --workspace   630 passed / 0 failed
+clippy 0 · fmt clean
+```
+
+### My own error, recorded
+
+My first control attempt **did not bite**, and I reported it as a FAIL of the worker's test. It was my
+break that was wrong: I pointed every port of `p7-join` at its first node, but `p7-join` has no `route`
+node — port keys live on the `decide`, and my loop found none, so the file was unchanged and the test was
+correctly green. **A control must actually change the artefact it claims to change.** Re-run with a change
+that reaches the decide, it bites immediately (above). Recorded rather than quietly retried.

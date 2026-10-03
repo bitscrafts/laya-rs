@@ -69,6 +69,18 @@ echo "########## 4. FMT (must be clean) ##########"
 if cargo fmt --all --check; then echo "fmt: CLEAN"; else FAILS+=("cargo fmt --all --check"); echo "  >>> FAIL: fmt not clean"; fi
 echo
 
+echo "########## 4b. THE EXAMPLES RUN (spec 26: every committed flow, hermetically) ##########"
+# Validation proves a flow parses; only a run proves which branch it takes. A zero-test pass
+# (`ok. 0 passed`) must not satisfy this, so the passed count is required to be non-zero.
+run_examples() {
+  local out
+  out=$(cargo test -p laya-graph --test examples 2>&1); local rc=$?
+  echo "$out" | grep -E '^test |^test result'
+  [ $rc -eq 0 ] && echo "$out" | grep -qE '^test result: ok\. [1-9][0-9]* passed'
+}
+chk "the examples run (laya-graph --test examples)" run_examples
+echo
+
 echo "########## 5. DOC LINKS (must be 0 broken) ##########"
 chk "regen-index (doc links)" python3 "$(dirname "$0")/regen-index.py"
 echo
