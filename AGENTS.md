@@ -103,8 +103,14 @@ pulls syn 2 and 3) with its reason in the workspace manifest.
   standing test bed is the **`autoresearch-loop` skill**
   (`/root/.hermes/skills/software-development/autoresearch-loop/`, selftest-proven
   2026-10-06): its KEEP seam is a real commit path this project's gate may refuse —
-  wire `laya-gate` into that seam so kept commits pass through laya, exercising DENY
-  and recording outcomes as a by-product of every loop run.
+  wired (driver records laya's verdict per experiment row; enforcement flips on
+  calibration proof). Status 2026-10-06: spec 28 deployed (decision_id on every
+  payload, outcome joins verified live); spec 29 = gate_deny is next.
+- **The saving lane is enforced, not optional (SPEC-B live)**: read_file of a large
+  askable artifact is block-once-then-allow with a paste-ready `ask_file` call
+  (`/root/.hermes/hooks/laya-ask-nudge.sh`, delegated from the gate hook; selftest
+  22/22). Silent 100 KB reads instead of a laya ask are the behaviour this rule
+  forbids; explicit override = `LAYA_NUDGE_DISABLE=1`.
 
 ## TDD — non-negotiable
 

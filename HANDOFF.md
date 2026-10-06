@@ -997,7 +997,27 @@ including the inverted-pair and equal-pair rejections.
 └── scripts/regen-index.py, check-real-crates.sh      ← regen INDEX/TOC + verify
 ```
 
-## Next steps (in order)
+## Deploy day — 2026-10-06 afternoon (this session)
+
+- **Binaries deployed live** (`scripts/deploy-binaries.sh`): laya, laya-gate, laya-mcp all
+  CHANGED→MATCH against `386f012`; priors preserved as `.old-20261006T145846Z`. Sidecar
+  untouched; head READY after swap.
+- **decision_id is in production**: deployed `laya-gate` payloads carry the ledger identity
+  (verified live: `.decision_id` = `d␟151…`/`d␟174…`); `laya ledger outcome` joins hook-written
+  ids (`outcomes: 0 → 4` during the day; first production outcome rows ever).
+- **Hook one-liners live** (edited in place, per-call effective, no gateway restart):
+  `--run-id "${SESSION:-hook-$$}"` (rows join to sessions) + PASS lines carry `id=`.
+- **SPEC-B read-nudge live** (Hermes-side, `/root/.hermes/hooks/laya-ask-nudge.sh`, delegated
+  from laya-gate section 5): read_file ≥64 KiB askable artifact → block-once-then-allow with a
+  paste-ready `mcp__laya__ask_file` payload; exclusions configurable; selftest 22/22
+  (`nudge-selftest.sh`). Closes G3's enforcement gap.
+- **Autoresearch keep-seam wired** (Hermes-side driver): every loop experiment asks laya
+  `keep?` via `decide` and records verdict+confidence on its TSV row; metric alone decides;
+  gate_deny (spec 29) + calibration-gated enforcement land later. Driver selftest 16/16.
+- **Verify commands**: `LAYA_LEDGER_DIR=/var/lib/laya-ledger laya ledger stats` (outcomes>0);
+  `tail laya.log` rows show `id=`; `bash /root/.hermes/hooks/nudge-selftest.sh`.
+
+## Next steps## Next steps (in order)
 
 1. **`laya-mcp` — the MCP stdio server (spec 04).** Its readiness precondition is
    now proven end to end (`laya doctor`), so the server can wire the same path at

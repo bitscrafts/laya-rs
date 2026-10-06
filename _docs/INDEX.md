@@ -77,6 +77,7 @@ in exactly one place; this index points at it, never restates it.
 - [The review brief](06-research/02a-analysis-brief.md) — The exact prompt the reviewer ran against, so the review is reproducible.
 - [Four architecture questions (threading, config, graph spec, scheduler)](06-research/03-four-architecture-questions.md) — Discussion only: the priority queue as admission control and a missed fourth parallelism axis; where config should live and why redb does not speed the load; our own graph specification and mermaid export; and whether to build a scheduler.
 - [04 — JEV / TypeSafe AI ("System One") — the upstream video, reviewed for ideas](06-research/04-jev-typesafe-ai-video-review.md) — Source: "JEV / TypeSafe AI API & Rust - Let make a rust lb" — Jeremy Chone (@jchone), live 2026-09-19, 2h44m (9,863 s), https://www.youtube.com/live/pU73lYF7R1I.
+- [LAYA SEAM REVIEW + FIX PLAN — 2026-10-06](06-research/05-laya-seam-review-2026-10-06.md) — <!-- Filed 2026-10-06T14:30Z by the Hermes orchestrator (Marcelo Correa). Produced by: pi + glm-5.3:cloud (ollama-cloud), the two-lane ANALYSIS lane (read-only tool grant),
 - [Research](06-research/README.md) — Numbered research write-ups: convention and index.
 
 ### 99-archive
@@ -96,4 +97,3 @@ change anywhere else cannot move this project silently.
 
 Specs are not docs — they are the implementation contract, and they live in
 `specs/` with TDD tables and runnable exit criteria. See [`../specs/`](../specs/).
-- [`06-research/05-laya-seam-review-2026-10-06.md`](06-research/05-laya-seam-review-2026-10-06.md) — the laya usage-mandate seam review (pi+glm-5.3, 2026-10-06): G1 outcomes=0, G2 deny-unreachable, G3 ask_files=adoption-0; SPEC-A..E ranked.

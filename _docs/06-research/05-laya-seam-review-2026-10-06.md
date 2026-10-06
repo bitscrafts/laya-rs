@@ -8,6 +8,17 @@
      respected; worker claims spot-checked (hook :87-90 fingerprint, SKIP rows, ledger stats) — all held.
      Orchestrator verdict: ACCEPTED as the fix-plan of record. SPEC-A is the single next change.
      Nothing in this document is authorised work until specced, gated and committed. -->
+> **DEPLOY-DAY STATUS (2026-10-06 ~15:00Z, supersedes the open-state above):**
+> SPEC-A's laya-rs half = implemented as **spec 28**, gate green, committed `386f012`,
+> deployed live (decision_id verified in production payloads; outcome joins verified —
+> `outcomes: 0→4`); CLI ingest-before-read was the spec gap the worker found (reproduced
+> 3×, fixed). SPEC-B = **live same day** (`laya-ask-nudge.sh` delegated from the gate
+> hook; block-once-then-allow; selftest 22/22). SPEC-E stays open (the pi workhorse lane
+> has no laya wiring); SPEC-A's autoresearch half = keep-seam wired in the driver (verdict
+> recorded per row; enforcement on calibration proof); SPEC-C = spec 29, next; SPEC-D
+> superseded (calibration corpus now produced by construction at the seam). Full state:
+> `HANDOFF.md` § Deploy day.
+
 # LAYA SEAM REVIEW + FIX PLAN — 2026-10-06
 
 Reviewer: read-only worker. Deliverable: this report. No repo edits, no commits.
