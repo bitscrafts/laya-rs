@@ -1,5 +1,23 @@
 # HANDOFF — laya-rs
 
+## 2026-10-06 — laya usage mandate: PI REVIEW RUN (analysis lane), fix plan filed
+
+- User mandate 2026-10-06: laya always + automatic, saving tokens MANDATORY (rule 11 in AGENTS.md).
+- Two-lane pi dispatch (analysis lane, glm-5.3:cloud read-only): report filed at
+  `_docs/06-research/05-laya-seam-review-2026-10-06.md` (provenance header inside), full text in amem
+  `laya/review/seam-2026-10-06/` (verified retrievable), raw session/log in /projects/_tmp/laya-seam-plan/.
+- Findings: P1 CORRECTED (pi worker lane has NO laya wiring — the mandate is currently Hermes-only);
+  G1 outcomes=0 (join key destroyed by run-id "hook-$$"; write path exists unused); G2 deny production-
+  unreachable (allowlist-forces-Ask; deny needs allowlisted+confident-No); G3 ask_files adoption 0
+  (43x token saving unused); SKIP window dedupes DIFFERENT writes (94 rows); model judges a constant
+  string for 3 of 4 gated tools (1329 near-worthless rows); fail-closed sound (10 outage blocks Oct 3-4).
+- Ranked fix specs: SPEC-A keep-seam + decision_id (closes G1+G2, single next change) / SPEC-B
+  read-nudge enforcement / SPEC-C gate_deny hard-deny class / SPEC-D SKIP-fingerprint / SPEC-E pi-lane.
+- NEXT (orchestrator): author SPEC-A..(C/B/D) in specs/ (planner), TDD RED-first, implement via
+  the workhorse lane (pi-workhorse.sh), gate laya-rs, then deploy+verify (hook is HERMES-side: restart
+  gateway after hook edits).
+
+
 **Date**: 2026-10-03 · **Status**: GREEN — `spec set: ALL DONE (30 specs) (1 skipped: no criteria)`.
 
 ```

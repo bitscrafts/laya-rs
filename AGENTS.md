@@ -80,6 +80,32 @@ is **forbidden**. `cargo xtask gate` = fmt + clippy (`-D warnings`) + test, all
 zero. There is one documented upstream allowance (`multiple_crate_versions`, rmcp
 pulls syn 2 and 3) with its reason in the workspace manifest.
 
+### 11. Laya usage is ALWAYS and AUTOMATIC — saving provider tokens is MANDATORY
+
+(User mandate 2026-10-06, verbatim: *"laya must be used always and automatically"*,
+*"saving tokens is mandatory!"* — correcting a report that counted only manual calls.)
+
+- **The automatic path must stay wired**: the `pre_tool_call` gate hook (fail-closed,
+  every `terminal`/`write_file`/`patch`/`execute_code` of every session) is the
+  mandatory-usage mechanism — an agent never bypasses it; `LAYA_GATE_DISABLE` and
+  `HERMES_SAFE_MODE` are human escape hatches only. Wiring check: `laya.log` grows per
+  state-changing call.
+- **The retrieval path must be preferred**: a typed `laya ask`/`ask_files` question that
+  can answer over the read roots (`/projects:/root`) REPLACES reading the artifact into
+  context (measured: 417,039 B of files → 9,678 B of answers, 0 provider tokens per
+  call). `ask` never blocks and never writes — using it is free.
+- **Usage and savings are measured, not assumed**: ledger outcomes get recorded
+  (`laya ledger outcome <id> --correct|--wrong`) after real decisions; a session that
+  read large artifacts without a single `ask` is a defect, auditable via
+  `laya.log` + the ledger.
+- **The gate's negative branches must be exercised**: DENY never fired in production
+  (5072 decisions) and outcomes sat at 0 — an always-pass gate is decoration. The
+  standing test bed is the **`autoresearch-loop` skill**
+  (`/root/.hermes/skills/software-development/autoresearch-loop/`, selftest-proven
+  2026-10-06): its KEEP seam is a real commit path this project's gate may refuse —
+  wire `laya-gate` into that seam so kept commits pass through laya, exercising DENY
+  and recording outcomes as a by-product of every loop run.
+
 ## TDD — non-negotiable
 
 **RED before GREEN.** Write the failing test, watch it fail, then implement.

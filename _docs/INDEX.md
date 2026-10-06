@@ -96,3 +96,4 @@ change anywhere else cannot move this project silently.
 
 Specs are not docs — they are the implementation contract, and they live in
 `specs/` with TDD tables and runnable exit criteria. See [`../specs/`](../specs/).
+- [`06-research/05-laya-seam-review-2026-10-06.md`](06-research/05-laya-seam-review-2026-10-06.md) — the laya usage-mandate seam review (pi+glm-5.3, 2026-10-06): G1 outcomes=0, G2 deny-unreachable, G3 ask_files=adoption-0; SPEC-A..E ranked.
