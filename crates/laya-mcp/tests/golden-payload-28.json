@@ -1,0 +1,20 @@
+{
+  "keys_after_decision_id": [
+    "allowlist_entry",
+    "allowlisted",
+    "band",
+    "confidence",
+    "decision",
+    "destructive_signals",
+    "irreversible",
+    "label",
+    "margin",
+    "model_decision",
+    "near_tie",
+    "p",
+    "question_id",
+    "saturated",
+    "signals_note"
+  ],
+  "note": "The PRE-CHANGE key set of the gate payload, captured 2026-10-06 from `laya-gate \"git status\" --no-ledger` on the built binary (the live path), sorted. VALUES are deliberately NOT frozen: they are live model outputs that vary run to run, so a shape control pins the KEYS — the shape a rename or re-shape would break for every existing consumer. The assertion is: keys(after) == keys(golden) + {decision_id}."
+}

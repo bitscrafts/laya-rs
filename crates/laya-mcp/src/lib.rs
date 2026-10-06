@@ -1052,7 +1052,7 @@ pub fn gate_payload(args: &RawArgs, state: &ServerState) -> Result<GateOutcome, 
     let started = std::time::Instant::now();
     let action = args.action.clone().unwrap_or_default();
     let irreversible = args.irreversible.unwrap_or(false);
-    let payload = match judge_command(&action, irreversible, state) {
+    let mut payload = match judge_command(&action, irreversible, state) {
         Ok(p) => p,
         Err(e) => {
             // The head answered but its answer could not be read. That is a gate that could not
@@ -1089,7 +1089,7 @@ pub fn gate_payload(args: &RawArgs, state: &ServerState) -> Result<GateOutcome, 
         label_override: Some(&verdict_label),
         ..RowSpec::default()
     };
-    let ledger_note = record_decision_for(
+    let recorded_row = record_decision_for(
         state,
         &payload,
         Timing {
@@ -1101,9 +1101,16 @@ pub fn gate_payload(args: &RawArgs, state: &ServerState) -> Result<GateOutcome, 
         &spec,
     );
 
+    // The identity travels IN the payload, so every consumer of the payload — the MCP `gate`
+    // tool, the `laya-gate` binary, the hook printing it — inherits it without a wrapper (spec
+    // 28, F2/F3). `null` when no row was written: no-ledger mode, or a failed write.
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("decision_id".into(), json!(recorded_row.identity()));
+    }
+
     Ok(GateOutcome {
         payload,
-        ledger_note,
+        ledger_note: recorded_row.note,
         latency_ms,
     })
 }
@@ -1317,9 +1324,36 @@ struct RowSpec<'a> {
     label_override: Option<&'a str>,
 }
 
+/// The result of one recorded decision.
+///
+/// `identity` is the ledger row's `Record::identity()` when a row was written, `None` when
+/// none was (no-ledger mode, or the write failed). It is the join key `laya ledger outcome`
+/// resolves — never an invented id — so a payload that carries it can be answered back to the
+/// ledger row it came from.
+#[derive(Debug, Clone)]
+pub struct Recorded {
+    /// The recorded row's identity, when one was written.
+    pub identity: Option<String>,
+    /// A note when the row could not be written, for the caller to surface.
+    pub note: Option<String>,
+}
+
+impl Recorded {
+    /// `None` when no row was written (no-ledger mode or a write failure), else the identity.
+    #[must_use]
+    pub fn identity(&self) -> Option<String> {
+        if self.note.is_some() {
+            None
+        } else {
+            self.identity.clone()
+        }
+    }
+}
+
 /// Append one ledger row, and never fail the call because of it.
 ///
-/// Returns a short note when the record could not be written, so the caller can surface it. The
+/// Returns the recorded row's `Record::identity()` — the join key `laya ledger
+/// outcome` resolves — or a short note when the record could not be written. The
 /// DECISION is not affected: a decision layer that refused to decide because its bookkeeping was
 /// broken would trade the whole function for the log. But it is reported rather than swallowed,
 /// because a ledger that has silently stopped recording is worse than one that never did —
@@ -1330,8 +1364,13 @@ fn record_decision_for(
     timing: Timing,
     state_hash: &str,
     spec: &RowSpec<'_>,
-) -> Option<String> {
-    let dir = state.ledger_dir.as_ref()?;
+) -> Recorded {
+    let Some(dir) = state.ledger_dir.as_ref() else {
+        return Recorded {
+            identity: None,
+            note: None,
+        };
+    };
     let band = payload
         .get("band")
         .and_then(serde_json::Value::as_str)
@@ -1413,9 +1452,17 @@ fn record_decision_for(
         p: payload.get("p").and_then(serde_json::Value::as_f64),
         score: payload.get("score").and_then(serde_json::Value::as_f64),
     };
-    match laya_store::append_segment(dir, &laya_store::Record::Decision(row)) {
-        Ok(_) => None,
-        Err(e) => Some(format!("the decision was not recorded: {e}")),
+    match laya_store::append_segment(dir, &laya_store::Record::Decision(row.clone())) {
+        // The row's identity — the join key `laya ledger outcome` resolves (spec 28, F1). Not
+        // an invented id: the same bytes the store recognises the decision by.
+        Ok(_) => Recorded {
+            identity: Some(laya_store::Record::Decision(row).identity()),
+            note: None,
+        },
+        Err(e) => Recorded {
+            identity: None,
+            note: Some(format!("the decision was not recorded: {e}")),
+        },
     }
 }
 
@@ -1494,8 +1541,8 @@ fn record_answers(
             answer_entry: Some(&a.entry),
             ..base.clone()
         };
-        if let Some(n) = record_decision_for(state, &a.payload, timing, state_hash, &spec) {
-            note = Some(n);
+        if let Some(r) = record_decision_for(state, &a.payload, timing, state_hash, &spec).note {
+            note = Some(r);
         }
     }
     note
@@ -1567,6 +1614,7 @@ fn record_nonanswer(
         &state_sha256(&json!(why)),
         &spec,
     )
+    .note
 }
 
 /// The pinned Laya version, recorded in every row for provenance.
@@ -2217,6 +2265,7 @@ fn ask_files_via_sidecar(args: &RawArgs, state: &ServerState) -> Result<CallTool
                         ..RowSpec::default()
                     },
                 )
+                .note
             }
         };
         if note.is_some() {

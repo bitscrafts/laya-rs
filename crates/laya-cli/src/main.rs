@@ -264,7 +264,7 @@ fn ledger(args: &[String]) -> ExitCode {
         // anyone who wants the store exactly as it stands.
         "stats" => ledger_stats(&dir, &store, no_compact),
         "tail" => ledger_tail(&dir, &store, args, no_compact),
-        "outcome" => ledger_outcome(&store, args),
+        "outcome" => ledger_outcome(&dir, &store, args, no_compact),
         other => {
             eprintln!("laya: unknown ledger subcommand `{other}`");
             ExitCode::FAILURE
@@ -381,7 +381,19 @@ fn ledger_tail(
 /// The record that does not exist anywhere else in the system, and the reason this command is
 /// worth having at all: `calibrate` needs `(confidence, correct)` pairs, and the ledger
 /// otherwise knows only what was decided, never whether it was right.
-fn ledger_outcome(store: &std::path::Path, args: &[String]) -> ExitCode {
+///
+/// Pending segments are ingested first, as `stats` and `tail` do. Without it, the identity a
+/// just-recorded decision hands back lives in a segment the store has not seen, so the outcome
+/// write fails with `UnknownDecision` seconds after the decision was made — the join path
+/// spec 28 exists to open would only work after a manual `compact` (spec 28's exit criterion
+/// pinned exactly this failure)
+fn ledger_outcome(
+    dir: &std::path::Path,
+    store: &std::path::Path,
+    args: &[String],
+    no_compact: bool,
+) -> ExitCode {
+    ingest_before_reading(dir, store, no_compact);
     let Some(decision) = args.get(1).filter(|a| !a.starts_with("--")) else {
         eprintln!("laya: `ledger outcome` needs the decision id as its first argument");
         return ExitCode::FAILURE;
@@ -476,6 +488,98 @@ mod tests {
     )]
 
     use super::*;
+
+    #[test]
+    fn an_outcome_for_a_pending_segment_decision_joins() {
+        // Spec 28's live failure, pinned: the identity `laya-gate` hands back lives in a
+        // PENDING segment until `compact` runs. `outcome` must ingest before writing — the
+        // same behaviour `stats` and `tail` already have — or the join path closes the moment
+        // it opens, and the outcome write orphans.
+        let dir = std::env::temp_dir().join(format!(
+            "laya-cli-pending-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let row = laya_store::Record::Decision(laya_store::DecisionRow {
+            ts: "epoch+1".to_string(),
+            ts_nanos: 1,
+            wall_nanos: 1,
+            tool: "gate".to_string(),
+            run_id: None,
+            node_id: None,
+            question_id: "spec28".to_string(),
+            question_type: "noul".to_string(),
+            label: "allow".to_string(),
+            confidence: None,
+            band: "mid".to_string(),
+            margin: None,
+            near_tie: false,
+            probabilities: None,
+            saturated: false,
+            laya_version: "0.3.5".to_string(),
+            state_sha256: "x".to_string(),
+            head_sha256: None,
+            backbone_sha256: None,
+            bucket_clamped: None,
+            latency_ms: 7,
+            executed: Some(false),
+            gate_decision: Some("allow".to_string()),
+            model_decision: None,
+            destructive_signals: None,
+            command_sha256: None,
+            p: None,
+            score: None,
+        });
+        let identity = row.identity();
+        let _ = laya_store::append_segment(&dir, &row).expect("append");
+        // NO compact: the decision is in the pending segment only.
+        let rc = ledger_outcome(
+            &dir,
+            &dir.join(laya_store::STORE_FILE),
+            &args(&["outcome", &identity, "--correct", "--source", "test"]),
+            false,
+        );
+        assert_eq!(
+            rc,
+            ExitCode::SUCCESS,
+            "an outcome for a decision still in a pending segment must join after ingest"
+        );
+    }
+
+    #[test]
+    fn an_orphan_outcome_is_refused_by_the_cli() {
+        // Spec 28 F4, pinned at the CLI seam: `laya ledger outcome <id>` for an identity that
+        // matches no decision row exits non-zero — an outcome pointing at nothing would be
+        // invisible data masquerading as evidence. The store refuses it
+        // (`StoreError::UnknownDecision`); the CLI must surface the refusal, not eat it.
+        let dir = std::env::temp_dir().join(format!(
+            "laya-cli-orphan-{}-{}",
+            std::process::id(),
+            std::time::Instant::now().elapsed().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let store = dir.join(laya_store::STORE_FILE);
+        let rc = ledger_outcome(
+            &dir,
+            &store,
+            &args(&[
+                "outcome",
+                "d\u{1f}999\u{1f}no-such-decision\u{1f}q\u{1f}ask",
+                "--correct",
+                "--source",
+                "test",
+            ]),
+            false,
+        );
+        assert_eq!(
+            rc,
+            ExitCode::FAILURE,
+            "an orphan outcome must fail the command"
+        );
+    }
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| (*s).to_string()).collect()

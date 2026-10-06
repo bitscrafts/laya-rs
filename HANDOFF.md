@@ -1,5 +1,38 @@
 # HANDOFF — laya-rs
 
+## 2026-10-06 — spec 28 IMPLEMENTED: `decision_id` in the gate payload (G1 closed at the source)
+
+- **What**: implemented `specs/28-decision-identity-is-visible.md` TDD-first. RED confirmed
+  (5 gate_payload tests failing with production unchanged), then GREEN. 6 new tests total:
+  `crates/laya-mcp/tests/gate_identity.rs` (5) + 2 CLI tests in `crates/laya-cli/src/main.rs`.
+- **Key semantics**: `record_decision_for` now returns `Recorded { identity, note }` — the
+  ledger row's own `Record::identity()` (the join key `laya ledger outcome` resolves), not an
+  invented id. `gate_payload` inserts `decision_id` (null when no-ledger/failed write). The
+  `laya-gate` binary needed NO edit (criterion 4 verified: `git diff --quiet` passes).
+- **Anti-vacuous control**: `decision_id_equals_record_identity` reads the segment back and is
+  **byte-equal** to the row's identity. Shape control `known_good_payload_unchanged` pins the
+  pre-change KEY SET (captured from the live binary) + `decision_id` only; values not frozen
+  (live model outputs).
+- **F4 orphan refusal**: `record_outcome` already validated (`StoreError::UnknownDecision`);
+  pinned at the CLI seam. `laya-gate.rs` untouched.
+- **One live defect found and fixed beyond the spec's F1–F5 list**: `laya ledger outcome <id>`
+  read the store WITHOUT ingesting pending segments first (`stats`/`tail` do). Since the
+  identity a just-recorded decision hands back lives in a pending segment, the exact join path
+  this spec opens failed with `UnknownDecision` seconds after the decision — reproducer:
+  `laya-gate 'ls' → laya ledger outcome <id>` exited 1 three times live before the fix. Fixed
+  in `ledger_outcome` (main.rs) via the existing `ingest_before_reading`, test
+  `an_outcome_for_a_pending_segment_decision_joins` pins it (control: orphan still refused).
+- **Deployed**: release-built `laya` + `laya-gate` → `/root/.local/bin/` (old binaries backed
+  up in `_tmp/`). All 5 spec 28 exit criteria verified LIVE, exit criteria 1–4 passed, `cargo
+  xtask gate` PASS (fmt+clippy+test zero) and `/root/.pi-orchestration/lib/quality-gate.sh`
+  exit 0. Ledger shows `outcomes: 2` (first outcomes ever recorded — G1 join closed).
+- **Also touched**: `laya-mcp/src/lib.rs` (`Recorded` struct, payload insert, note plumbing in
+  `record_answers`/`record_nonanswer`/`ask_files`), golden fixture `tests/golden-payload-28.json`.
+- **NEXT (orchestrator)**: review + commit; wire the hook (`/root/.hermes/hooks/laya-gate.sh`)
+  to consume `.decision_id` for outcome recording after deploy (spec 28 guardrail — Hermes-side,
+  not done here); then spec 29 (policy hard-deny). Test suite now 640+; spec-13's old criterion
+  may need its count refreshed.
+
 ## 2026-10-06 — laya usage mandate: PI REVIEW RUN (analysis lane), fix plan filed
 
 - User mandate 2026-10-06: laya always + automatic, saving tokens MANDATORY (rule 11 in AGENTS.md).
