@@ -24,9 +24,9 @@ require a >25 ms sustained improvement, which noise must not fake.
 <!-- autoresearch-config
 TAG=gate-lat
 METRIC_SCRIPT=scripts/ar-metric-gate-latency.sh
-WORKER_CMD=STUB
+WORKER_CMD=pi -p "Read {spec} — it is the METHOD you follow. Read the last 5 rows of {tsv} (what was tried, what won). In the repo checkout at {worktree}, make EXACTLY ONE improvement edit to the allowed target files only. Write one line describing your hypothesis to {worktree}/.ar-hypothesis.md. Do not run git. Do not run the metric script. Do not touch any other file."
 ALLOWED_TARGETS=README.md
-MAX_EXPERIMENTS=6
+MAX_EXPERIMENTS=24
 WINDOW_END_UTC=2026-10-08T06:00:00Z
 KEEP_THRESHOLD=25
 EXPERIMENT_TIMEOUT_SECS=240
@@ -38,7 +38,7 @@ autoresearch-config:
   METRIC_SCRIPT: scripts/ar-metric-gate-latency.sh
   WORKER_CMD: pi            # STUB first for mechanics; then glm-5.3-flash:cloud
   ALLOWED_TARGETS: README.md
-  MAX_EXPERIMENTS: 6
+  MAX_EXPERIMENTS: 24
   WINDOW_END_UTC: "2026-10-08T06:00:00Z"
   KEEP_THRESHOLD: "25"      # ms; p50 must beat best by this much to keep
   EXPERIMENT_TIMEOUT_SECS: 240

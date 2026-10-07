@@ -1060,3 +1060,39 @@ python3 scripts/regen-index.py            # regen INDEX/TOC + verify every link
 bash scripts/check-real-crates.sh         # the zero-warning proof
 ```
 
+
+## autoresearch gate-lat — 2026-10-07
+
+2026-10-07T09:54:00Z seq=0 status=baseline value=145 best=145 baseline established
+2026-10-07T09:54:00Z seq=1 status=violation value=145 best=145 out-of-scope path: target.txt (from "?? target.txt") (reverted)
+2026-10-07T09:54:00Z seq=2 status=crash value=145 best=145 worker rc=1; tail: /root/.hermes/skills/software-development/autoresearch-loop/scripts/stu
+2026-10-07T09:54:00Z seq=3 status=crash value=145 best=145 worker rc=7; tail: stub: deliberate crash 
+2026-10-07T09:54:00Z seq=4 status=violation value=145 best=145 out-of-scope path: rogue.txt (from "?? rogue.txt") (reverted)
+2026-10-07T09:54:00Z seq=5 status=crash value=145 best=145 worker rc=1; tail: /root/.hermes/skills/software-development/autoresearch-loop/scripts/stu
+2026-10-07T09:54:00Z seq=6 status=discard value=145 best=145 worker made no changes
+2026-10-07T09:56:21Z seq=7 status=crash value= best=145 worker rc=1; tail: Suggestions:   • Check provider documentation for this error 
+2026-10-07T09:56:27Z seq=8 status=crash value= best=145 worker rc=1; tail: Suggestions:   • Check provider documentation for this error 
+2026-10-07T09:56:32Z seq=9 status=crash value= best=145 worker rc=1; tail: Suggestions:   • Check provider documentation for this error 
+2026-10-07T09:56:41Z seq=10 status=crash value= best=145 worker rc=1; tail: Suggestions:   • Check provider documentation for this error 
+2026-10-07T09:56:46Z seq=11 status=crash value= best=145 worker rc=1; tail: Suggestions:   • Check provider documentation for this error 
+2026-10-07T09:56:52Z seq=12 status=crash value= best=145 worker rc=1; tail: Suggestions:   • Check provider documentation for this error 
+2026-10-07T09:58:09Z seq=0 status=baseline value=141 best=141 baseline established
+2026-10-07T09:58:37Z seq=1 status=discard value=170 best=141 Gate p50 is dominated by the head's 460-token CPU forward (~481 ms), which an offline READ
+2026-10-07T10:00:41Z seq=2 status=discard value=175 best=141 Hypothesis: an honest README doc-row beats a silent no-op — a "Gate latency (measured)" 
+2026-10-07T10:02:17Z seq=3 status=discard value=169 best=141 A recorded per-call ledger append adds ~25-30 ms to every laya-gate verdict (full ~170-230
+2026-10-07T10:02:42Z seq=4 status=discard value=174 best=141 Hypothesis (doc-row): in-loop improvement of p50 gate latency is impossible from README.md
+2026-10-07T10:08:49Z seq=5 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:09:06Z seq=6 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:09:24Z seq=7 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:09:41Z seq=8 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:09:59Z seq=9 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:10:16Z seq=10 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:10:34Z seq=11 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:10:51Z seq=12 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:11:09Z seq=13 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:11:27Z seq=14 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:11:44Z seq=15 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:12:02Z seq=16 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:12:19Z seq=17 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:12:37Z seq=18 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T10:12:54Z seq=19 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
