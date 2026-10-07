@@ -1096,3 +1096,49 @@ bash scripts/check-real-crates.sh         # the zero-warning proof
 2026-10-07T10:12:19Z seq=17 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
 2026-10-07T10:12:37Z seq=18 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
 2026-10-07T10:12:54Z seq=19 status=crash value= best=141 worker rc=1; tail:   • Wait a moment and try again   • Consider using a different mode
+2026-10-07T20:41:28Z seq=20 status=discard value=186 best=141 Minimal one-line README doc-row (3 lines vs prior 170-word sections): a tiny edit minimize
+2026-10-07T20:44:05Z seq=21 status=keep value=2 best=2 Hypothesis: an allowed README edit cannot move gate p50 by any real mechanism — judge_co
+2026-10-07T20:44:21Z seq=22 status=discard value=2 best=2 Hypothesis: no README edit can move gate p50 (judge_command sends {"action": cmd} and neve
+2026-10-07T20:44:40Z seq=23 status=discard value=178 best=2 Hypothesis: p50 gate latency is decomposable only at the runtime level (sidecar round-trip
+2026-10-07T20:44:57Z seq=24 status=discard value=161 best=2 The metric (p50 of 5 laya-gate calls) is runtime-owned — judge_command reads only {"acti
+
+
+## 2026-10-07 — spec 30 loop: v1 series VOIDED by the scorer defect it found; v2 running
+
+- The loop's real product: the metric v1 swallowed gate-failure rc — dead sidecar => p50=2ms
+  => bogus keep of a no-op README edit ("70x"). EVERYTHING the loop did after that keep was
+  contaminated. v2 metric: fail on rc!=0 + 50ms floor. Series archived (v1-VOID); branch
+  deleted; TAG=gate-lat2; fresh 24-row budget. The worker's own finding stands and is now
+  recorded ON the repo: gate state = {"action"} only, README can't move p50.
+- Loop mechanics proven in anger: resume-after-kill, violation handling, crash handling,
+  keep/discard, laya_keep= calibration tags on every row, scorer-lock crash on scorer change.
+- Driver fixes this round: metric-in-worktree fallback; worker env pinned (expired OAuth).
+## autoresearch gate-lat2 — 2026-10-07
+
+2026-10-07T20:46:46Z seq=0 status=baseline value=178 best=178 baseline established
+2026-10-07T20:47:03Z seq=1 status=discard value=160 best=178 Doc-only record on README: capture measured baseline (p50 178 ms, series gate-lat2) and th
+2026-10-07T20:47:52Z seq=2 status=discard value=187 best=178 README gate example quotes snapshot counts ("ALL DONE (30 specs)", "DONE 8/9") that have a
+2026-10-07T20:48:10Z seq=3 status=discard value=160 best=178 Hypothesis: README's "seven MCP tools" section under-claims — the tool surface is pinned
+2026-10-07T20:48:45Z seq=4 status=discard value=202 best=178 README's "sidecar" section still described the Python/torch head as live and said spec 03 
+2026-10-07T20:49:06Z seq=5 status=discard value=188 best=178 Layout table overclaims `crates/laya-head` as the live pure-Rust head while the sidecar se
+2026-10-07T20:50:45Z seq=6 status=discard value=177 best=178 Doc-only edit (README, tool-list section): add the gate's fail-closed answers-`ask` contra
+2026-10-07T20:51:56Z seq=7 status=discard value=184 best=178 Hypothesis (doc-only, README "sidecar" section): annotate the superseded "Spec 03 removes 
+2026-10-07T20:52:12Z seq=8 status=discard value=160 best=178 Doc-only hypothesis (README "sidecar" section): the closing line "Spec 03 (P4) removes bot
+2026-10-07T20:53:11Z seq=9 status=discard value=154 best=178 README sample line said "ALL DONE (30 specs) (1 skipped)" while the live gate (scripts/spe
+2026-10-07T20:53:25Z seq=10 status=discard value=153 best=178 Layout table claimed `laya-head` is "the 26.5M decision head in pure Rust (no Python, no t
+2026-10-07T20:54:57Z seq=11 status=discard value=169 best=178 Hypothesis (doc-only, README "Ledger" table): the claim "compact — THE ONLY WRITER" is c
+2026-10-07T20:57:04Z seq=12 status=keep value=139 best=139 README node-kind table flattened check's exit semantics to "non-zero → fail"; per GRAPH-
+
+
+## 2026-10-07 21:00Z — spec 30 loop COMPLETE (v2 series honest, 1 verified keep)
+
+- v2 (TAG=gate-lat2, metric v2 = rc-fail + 50ms floor): 13 rows, 1 real keep seq 12
+  (b0611c6, README node-kind table — check's timeout/signal/126/127 semantics documented;
+  139 ms), live metric re-verified 180 ms post-run (no noise-keep). v1 voided by the loop's
+  own catch (metric swallowed gate rc -> bogus 2ms keep; series archived
+  results-gate-lat.v1-VOID-bogus-keep-2edbede.tsv, branch deleted). Calibration rows with
+  laya_keep= conf on every experiment = the outcome corpus accumulating (G1's data).
+- Branch autoresearch/gate-lat2 awaits review/merge (README-only, safe); specs/ read-only held.
+- Driver permanent fixes banked: metric-in-worktree fallback; worker env pinned (expired OAuth).
+- THE WORKER'S FINDING (recorded on the repo by the keep): gate state = {"action"} only, no
+  repo reads -> README/runtime docs cannot move p50; real latency work = P4 Rust head port.

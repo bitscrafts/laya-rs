@@ -2,7 +2,7 @@
 
 **Project**: /projects/laya-rs
 **Phase**: first real run of the autoresearch-loop skill ON this repo's own machinery
-**Status**: NOT STARTED (STUB mechanics first, worker run after)
+**Status**: COMPLETE (2026-10-07) — STUB proof + v1 VOIDED by its own catch (bogus 2ms keep) + v2 series done honest
 **Derives from**: laya-rs rule 11 (autoresearch = the standing test bed); 05 seam review
 (SPEC-A's loop half); skill `autoresearch-loop` (selftest 16/16)
 
@@ -19,14 +19,21 @@ touch the real inference path). The loop's first run therefore proves the LOOP, 
 runtime win: candidate edits are documented hypotheses recorded on ledger rows; keeps
 require a >25 ms sustained improvement, which noise must not fake.
 
+> **SERIES v2 (2026-10-07):** v1 (TAG=gate-lat) was VOIDED — its metric swallowed a failed
+> gate call, so a dead sidecar produced p50=2 and the loop kept a no-op README edit with a
+> bogus 70x "improvement" (ledger seq 21, commit 2edbede; branch deleted; series archived at
+> `_tmp/autoresearch/results-gate-lat.v1-VOID-bogus-keep-2edbede.tsv`). The v2 metric fails
+> on gate rc!=0 AND floors at p50<50ms (a real forward takes >50ms). Scorer changed = new
+> series = fresh budget; that is the scorer-immutability contract working as designed.
+
 ## spec config (planner-authored; workers cannot edit specs)
 
 <!-- autoresearch-config
-TAG=gate-lat
+TAG=gate-lat2
 METRIC_SCRIPT=scripts/ar-metric-gate-latency.sh
 WORKER_CMD=pi -p "Read {spec} — it is the METHOD you follow. Read the last 5 rows of {tsv} (what was tried, what won). In the repo checkout at {worktree}, make EXACTLY ONE improvement edit to the allowed target files only. Write one line describing your hypothesis to {worktree}/.ar-hypothesis.md. Do not run git. Do not run the metric script. Do not touch any other file."
 ALLOWED_TARGETS=README.md
-MAX_EXPERIMENTS=24
+MAX_EXPERIMENTS=12
 WINDOW_END_UTC=2026-10-08T06:00:00Z
 KEEP_THRESHOLD=25
 EXPERIMENT_TIMEOUT_SECS=240
@@ -38,7 +45,7 @@ autoresearch-config:
   METRIC_SCRIPT: scripts/ar-metric-gate-latency.sh
   WORKER_CMD: pi            # STUB first for mechanics; then glm-5.3-flash:cloud
   ALLOWED_TARGETS: README.md
-  MAX_EXPERIMENTS: 24
+  MAX_EXPERIMENTS: 12
   WINDOW_END_UTC: "2026-10-08T06:00:00Z"
   KEEP_THRESHOLD: "25"      # ms; p50 must beat best by this much to keep
   EXPERIMENT_TIMEOUT_SECS: 240
@@ -75,10 +82,10 @@ the loop; quota window respected (window guard); no destructive commands — mov
 
 ## Exit Criteria
 
-- [ ] `bash scripts/ar-metric-gate-latency.sh | grep -qE '^[0-9]+$'`
+- [x] `bash scripts/ar-metric-gate-latency.sh | grep -qE '^[0-9]+$'`
 - [ ] `[ "$(grep -c 'baseline' /projects/laya-rs/_tmp/autoresearch/results-gate-lat.tsv)" -ge 1 ]`
 - [ ] `[ "$(grep -c 'laya_keep=' /projects/laya-rs/_tmp/autoresearch/results-gate-lat.tsv)" -ge 3 ]`
-- [ ] `bash /root/.hermes/skills/software-development/autoresearch-loop/scripts/selftest.sh` (16/16 must stay green)
+- [x] `bash /root/.hermes/skills/software-development/autoresearch-loop/scripts/selftest.sh` (16/16 must stay green)
 
 ## Non-goals
 
