@@ -1017,6 +1017,22 @@ including the inverted-pair and equal-pair rejections.
 - **Verify commands**: `LAYA_LEDGER_DIR=/var/lib/laya-ledger laya ledger stats` (outcomes>0);
   `tail laya.log` rows show `id=`; `bash /root/.hermes/hooks/nudge-selftest.sh`.
 
+## Spec 29 — a policy can hard-deny (LANDED 2026-10-07, uncommitted → orchestrator)
+
+- Implemented (worker lane, glm-5.3-flash via pi-workhorse run, 107 calls): `gate_deny`
+  verdict in laya-core policy (empty deny list default; `deny_beats_ask`,
+  `default_policy_denies_nothing` — nothing is denied until the orchestrator's config names
+  the pattern), reason-channel mapping at the MCP seam, golden payload updated, new
+  gate_deny.rs integration tests (incl. deny-beats-…-stronger order tests).
+- Criteria: 3/3 PASS (gate incl. fmt/clippy/test; 4-test filter; grep). My two criterion
+  defects fixed on the fly (count predicate; deny_beats_allow's `&&` self-defeat noted in
+  spec — property carried by gate_deny.rs).
+- Non-blocking findings recorded (review): the reason-string test reads the verdict not the
+  string; policy is hardcoded `default()` so the deployed deny list stays a code seam until
+  a follow-up spec adds a policy-file loader; no allowlist widening (direction preserved).
+- NEXT: orchestrator commit; deploy fresh binaries; DENY branch finally production-reachable
+  via laya-gate (--irreversible path); then first autoresearch loop (gate latency metric).
+
 ## Next steps## Next steps (in order)
 
 1. **`laya-mcp` — the MCP stdio server (spec 04).** Its readiness precondition is

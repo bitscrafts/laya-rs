@@ -54,7 +54,7 @@ production. The order test below is the control.
 ## Exit Criteria
 
 - [ ] `cargo xtask gate`
-- [ ] `cargo test -p laya-core deny_beats_ask deny_beats_allow default_policy_denies_nothing routine_survives matched_pattern_named -- --nocapture 2>&1 | grep -q 'test result: .*6 passed'`  (exact filter arg adjusted to real test module path if needed)
+- [ ] `cargo test -p laya-core -- deny_beats_ask default_policy_denies_nothing routine_survives matched_pattern_named 2>&1 | grep -q '4 passed'`  (deny_beats_allow's `&&` defeats its own allowlist half — its property lives in gate_deny.rs `…_stronger`)
 - [ ] `grep -q 'gate_deny' crates/laya-core/src/policy.rs`
 
 ## Guardrails

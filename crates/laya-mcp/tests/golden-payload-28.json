@@ -5,6 +5,8 @@
     "band",
     "confidence",
     "decision",
+    "decision_id",
+    "deny_pattern",
     "destructive_signals",
     "irreversible",
     "label",
@@ -16,5 +18,5 @@
     "saturated",
     "signals_note"
   ],
-  "note": "The PRE-CHANGE key set of the gate payload, captured 2026-10-06 from `laya-gate \"git status\" --no-ledger` on the built binary (the live path), sorted. VALUES are deliberately NOT frozen: they are live model outputs that vary run to run, so a shape control pins the KEYS — the shape a rename or re-shape would break for every existing consumer. The assertion is: keys(after) == keys(golden) + {decision_id}."
+  "note": "The PRE-CHANGE key set of the gate payload, captured 2026-10-06 from `laya-gate \"git status\" --no-ledger` on the built binary (the live path), sorted, plus the two additive fields later specs carried in with test-visible evidence: decision_id (spec 28) and deny_pattern (spec 29, F4 — present on EVERY verdict, null when no deny fired). VALUES are deliberately NOT frozen: they are live model outputs that vary run to run, so a shape control pins the KEYS — the shape a rename or re-shape would break for every existing consumer. The assertion is: keys(after) == keys(golden)."
 }

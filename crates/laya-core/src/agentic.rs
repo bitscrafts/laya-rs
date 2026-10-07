@@ -521,6 +521,10 @@ pub struct GateVerdict {
     pub allowlist_entry: Option<String>,
     /// The destructive patterns found in `command` (R4).
     pub signals: Vec<DestructiveSignal>,
+    /// The `gate_deny` pattern that matched, when the verdict is a hard deny (spec 29, F4).
+    /// `None` on every other verdict — so a deny with no named pattern is a bug, not an
+    /// audit question.
+    pub deny_pattern: Option<String>,
 }
 
 /// What the model alone would decide, ignoring the allowlist, the destructive-pattern check
@@ -538,18 +542,68 @@ fn model_only_decision(model: Option<ModelVerdict>, policy: &Policy) -> GateDeci
     }
 }
 
+/// Match `command` against `deny`, a list of **case-sensitive literal substrings**
+/// (spec 29, F3 — decided here: no globs, no regex; a literal needle is what the hook's
+/// `destructive_signals` prose treats as the convention, and a literal is the only
+/// convention an auditor can re-check by eye).
+///
+/// Checked on BOTH the command as written AND its normalised form
+/// ([`normalise_command`]) — the same two-pass the destructive signals use. The pattern
+/// side is never rewritten: the pattern is the needle the operator wrote, and the
+/// reported match is that same string (rewriting it would make the reported match and
+/// the written rule two different strings — audited, that is a bug).
+///
+/// Collapsed/normalised forms cover the respellings (`rm  -rf` collapses to `rm -rf`;
+/// `rm --recursive --force` normalises to `rm -r -f`), but a split-cluster like
+/// `rm -r -f` stays split, so the pattern is ALSO tested token-wise: a pattern whose
+/// whitespace-tokenised words are a contiguous slice of the command's words matches,
+/// the same prefix semantics [`allowlist_match`] applies in the other direction.
+///
+/// Returns the pattern that matched, so the deny verdict can name its rule (F4).
+#[must_use]
+fn deny_match(command: &str, deny: &[String]) -> Option<String> {
+    if deny.is_empty() {
+        return None;
+    }
+    let normalised = normalise_command(command);
+    deny.iter()
+        .find(|pattern| {
+            let needle = pattern.as_str();
+            command.contains(needle)
+                || normalised.contains(needle)
+                // Token-wise NORMALISED prefix match: normalise BOTH sides, then accept
+                // the normalised pattern's words as the command's first words. This is
+                // what makes `rm -rf` deny `rm -r -f /tmp/x` — normalise splits the
+                // cluster to `rm -r -f` on both sides, so the words line up.
+                || {
+                    let pattern_norm = normalise_command(pattern);
+                    let pattern_tokens: Vec<&str> = pattern_norm.split_whitespace().collect();
+                    let command_norm_tokens: Vec<&str> =
+                        normalised.split_whitespace().collect();
+                    !pattern_tokens.is_empty()
+                        && command_norm_tokens.get(..pattern_tokens.len())
+                            == Some(pattern_tokens.as_slice())
+                }
+        })
+        .cloned()
+}
+
 /// The one decision function (R6): I/O-free, so it is testable without a model or a
 /// network, and the only thing `laya-mcp` calls to decide `allow`/`deny`/`ask`.
 ///
 /// **`allow` requires a positive allowlist match (R1); the model may only downgrade.** The
 /// order, from the architecture diagram:
 ///
-/// 1. A destructive pattern (R4, on the normalised command) forces `ask`, whatever else is
+/// 1. A `gate_deny` MATCH forces `Deny` (spec 29, F2) — BEFORE the allowlist question,
+///    because the allowlist otherwise forces `Ask` on everything it does not allow, which
+///    made the deny branch checked later structurally unreachable in production (G2). Deny
+///    beats ask and beats allow: policy's hard refusals do not consult the model.
+/// 2. A destructive pattern (R4, on the normalised command) forces `ask`, whatever else is
 ///    true — it may be a legitimate cleanup, so a human confirms rather than a blanket deny.
-/// 2. `irreversible` forces `ask` (R5), allowlisted or not.
-/// 3. No allowlist match (R1/R2) forces `ask` — the model is never consulted for a command it
+/// 3. `irreversible` forces `ask` (R5), allowlisted or not.
+/// 4. No allowlist match (R1/R2) forces `ask` — the model is never consulted for a command it
 ///    was never allowed to grant.
-/// 4. Otherwise the model decides, and ONLY the model: a confident `yes` with no near tie
+/// 5. Otherwise the model decides, and ONLY the model: a confident `yes` with no near tie
 ///    allows, a confident `no` denies, anything else (including an unreachable model, R6)
 ///    asks.
 #[must_use]
@@ -559,6 +613,18 @@ pub fn gate_verdict(
     irreversible: bool,
     policy: &Policy,
 ) -> GateVerdict {
+    // FIRST (spec 29, F2): policy's own harddeny list. A match denies the command
+    // regardless of band, label, allowlist membership, or the model at all.
+    if let Some(pattern) = deny_match(command, &policy.gate_deny) {
+        return GateVerdict {
+            decision: GateDecision::Deny,
+            model_decision: model_only_decision(model, policy),
+            allowlisted: allowlist_match(command, &policy.gate_allow).is_some(),
+            allowlist_entry: allowlist_match(command, &policy.gate_allow),
+            signals: destructive_signals(command),
+            deny_pattern: Some(pattern),
+        };
+    }
     let signals = destructive_signals(command);
     let allowlist_entry = allowlist_match(command, &policy.gate_allow);
     let allowlisted = allowlist_entry.is_some();
@@ -576,6 +642,7 @@ pub fn gate_verdict(
         allowlisted,
         allowlist_entry,
         signals,
+        deny_pattern: None,
     }
 }
 
@@ -1191,6 +1258,127 @@ mod tests {
         let policy = Policy::default();
         let v = gate_verdict("git status", None, false, &policy);
         assert_eq!(v.decision, GateDecision::Ask, "{v:?}");
+    }
+
+    // ---- spec 29: gate_deny, hard-deny beats ask and allow ------------------
+
+    #[test]
+    fn deny_beats_ask() {
+        // THE order control. The command is NOT allowlisted, so the pre-existing rule
+        // forces `Ask` — the defect this spec exists to close (5083 decisions, 0 denies).
+        // A `gate_deny` checked after the allowlist question can never fire on exactly
+        // the commands it exists for, so this test proves the deny check runs FIRST.
+        let policy = Policy {
+            gate_deny: vec!["rm -rf".to_string()],
+            ..Policy::default()
+        };
+        let v = gate_verdict(
+            "rm -rf /tmp/x",
+            Some(ModelVerdict::yes(0.99)),
+            false,
+            &policy,
+        );
+        assert_eq!(v.decision, GateDecision::Deny, "{v:?}");
+    }
+
+    #[test]
+    fn deny_beats_allow() {
+        // The deny wins even when the command's FIRST half allowlists cleanly — so the
+        // deny check must also sit ahead of the model-only decision, not just the ask.
+        let policy = Policy {
+            gate_deny: vec!["rm -rf".to_string()],
+            ..Policy::default()
+        };
+        let v = gate_verdict(
+            "git status && rm -rf /tmp/x",
+            Some(ModelVerdict::no(0.9)),
+            false,
+            &policy,
+        );
+        assert_eq!(v.decision, GateDecision::Deny, "{v:?}");
+    }
+
+    #[test]
+    fn routine_survives() {
+        // The mandatory near-miss (AGENTS rule "controls are mandatory"). `mv` is the
+        // routine class — this workspace's own hard rule is `mv`, not `rm`. A deny
+        // list that swallows it is a broken one.
+        let policy = Policy {
+            gate_deny: vec!["rm -rf".to_string()],
+            ..Policy::default()
+        };
+        let v = gate_verdict("mv a b", Some(ModelVerdict::yes(0.99)), false, &policy);
+        assert_eq!(v.decision, GateDecision::Ask, "{v:?}");
+        assert!(v.deny_pattern.is_none(), "{v:?}");
+    }
+
+    #[test]
+    fn matched_pattern_named() {
+        // F4: the verdict must carry WHY. `Deny` alone is opaque — an auditor has to be
+        // able to read the matched text without re-running the gate.
+        let policy = Policy {
+            gate_deny: vec!["rm -rf".to_string()],
+            ..Policy::default()
+        };
+        let v = gate_verdict(
+            "rm -rf /tmp/x",
+            Some(ModelVerdict::yes(0.99)),
+            false,
+            &policy,
+        );
+        assert_eq!(v.deny_pattern.as_deref(), Some("rm -rf"), "{v:?}");
+    }
+
+    #[test]
+    fn deny_makes_allowlist_membership_irrelevant_and_deny_beats_allow_is_stronger() {
+        // The second half of F2: allow beats NOTHING here. Even when the command is
+        // genuinely on the allowlist AND the model confidently says yes, the deny
+        // pattern still wins.
+        let policy = Policy {
+            gate_deny: vec!["git reset --hard".to_string()],
+            gate_allow: vec!["git reset".to_string()],
+            ..Policy::default()
+        };
+        let v = gate_verdict(
+            "git reset --hard HEAD",
+            Some(ModelVerdict::yes(0.99)),
+            false,
+            &policy,
+        );
+        assert_eq!(v.decision, GateDecision::Deny, "{v:?}");
+        assert_eq!(v.deny_pattern.as_deref(), Some("git reset --hard"), "{v:?}");
+    }
+
+    #[test]
+    fn deny_survives_respelling() {
+        // The destructive_signals precedent: the same command, spelled differently,
+        // must not escape the deny by a different spelling. Normalisation is what
+        // makes this real (agentic.rs's `normalise_command`).
+        let policy = Policy {
+            gate_deny: vec!["rm -rf".to_string()],
+            ..Policy::default()
+        };
+        for cmd in ["rm -r -f /tmp/x", "rm --recursive --force /tmp/x"] {
+            assert_eq!(
+                gate_verdict(cmd, Some(ModelVerdict::yes(0.99)), false, &policy).decision,
+                GateDecision::Deny,
+                "`{cmd}` must deny"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_gate_deny_denies_nothing_at_the_verdict_level() {
+        // The control at the verdict seam: a DEFAULT policy (empty deny list) answers
+        // `Ask` for `rm -rf`, unchanged from today. Fails any "always deny" build.
+        let v = gate_verdict(
+            "rm -rf /tmp/x",
+            Some(ModelVerdict::yes(0.99)),
+            false,
+            &Policy::default(),
+        );
+        assert_eq!(v.decision, GateDecision::Ask, "{v:?}");
+        assert!(v.deny_pattern.is_none(), "{v:?}");
     }
 
     // ---- the question block -------------------------------------------------

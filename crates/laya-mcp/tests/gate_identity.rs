@@ -135,6 +135,9 @@ fn known_good_payload_unchanged() {
         .expect("golden keys")
         .iter()
         .map(|k| k.as_str().expect("a key is a string"))
+        // `decision_id` is the golden's own name now; it was chained as the additive
+        // field when spec 28 froze the shape, and spec 29 added `deny_pattern` to the
+        // frozen list itself.
         .chain(std::iter::once("decision_id"))
         .collect();
     let dir = tempdir("golden");

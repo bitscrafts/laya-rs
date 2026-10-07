@@ -97,6 +97,13 @@ pub enum PolicyError {
     /// A `noul` threshold lies outside `0.0..=1.0`.
     #[error("noul_threshold = {0} is outside 0.0..=1.0")]
     NoulThresholdOutOfRange(f64),
+    /// A `gate_deny` entry is the empty string, which would match every command
+    /// (spec 29: an empty-pattern deny is "deny everything" by accident).
+    #[error("gate_deny[{index}] is empty: the empty pattern matches EVERY command")]
+    EmptyDenyPattern {
+        /// Which entry.
+        index: usize,
+    },
     /// The config could not be parsed.
     #[error("policy config is not valid TOML: {0}")]
     Toml(String),
@@ -166,6 +173,22 @@ pub struct Policy {
     /// The default is a small read-only set: enough to let an agent orient itself without a
     /// human in the loop, and nothing that writes or deletes.
     pub gate_allow: Vec<String>,
+    /// Patterns `gate_verdict` HARD-DENIES, matched as **case-sensitive literal
+    /// substrings** of the command text — no globs, no regex, spec 29 F3. (Globs and regex
+    /// make a rule a puzzle to audit; a literal needle is greppable and provable.)
+    ///
+    /// Evaluated BEFORE the allowlist question (spec 29 F2): the deny fires even when the
+    /// input is also allowlisted, and even when the model says yes. **Deny beats ask** —
+    /// the allowlist otherwise forces `Ask` on everything it does not allow, which made a
+    /// deny branch checked later structurally unreachable in production (G2: 5083
+    /// decisions, 0 denies).
+    ///
+    /// An **empty** list is a valid policy and means "deny nothing" (spec 29 F5, same
+    /// precedent as an empty allowlist): a deployment that has not deliberately enabled
+    /// hard-deny must see today's ask-not-deny behaviour, unchanged. The deployed enable
+    /// (`rm -rf`, `of=/dev/`, `git reset --hard`, `git push --force`) is a separate,
+    /// orchestrator-reviewed config change, decoupled from this code ship.
+    pub gate_deny: Vec<String>,
     /// How long `ask` lets its command run before killing it and reporting `timed_out: true`
     /// (spec 08, R8). A hung command must not stall the serial server.
     pub ask_deadline_secs: u64,
@@ -218,6 +241,9 @@ impl Default for Policy {
             escalate_on_near_tie: false,
             escalate_on_saturation: false,
             gate_allow: default_gate_allow(),
+            // F5, spec 29: the default policy hard-denies NOTHING. Enablement is the
+            // orchestrator's separate, reviewed config change.
+            gate_deny: Vec::new(),
             ask_deadline_secs: 60,
         }
     }
@@ -261,6 +287,13 @@ impl Policy {
         }
         if !(0.0..=1.0).contains(&self.noul_threshold) {
             return Err(PolicyError::NoulThresholdOutOfRange(self.noul_threshold));
+        }
+        // A deny pattern is a LITERAL SUBSTRING needle (spec 29, F3). The empty string is
+        // a substring of every command, so one empty entry would turn the deny list into
+        // "deny everything" — a misconfiguration that must be caught at load, not observed
+        // as every call being refused.
+        if let Some(ix) = self.gate_deny.iter().position(String::is_empty) {
+            return Err(PolicyError::EmptyDenyPattern { index: ix });
         }
         // BOTH threshold pairs must be well-ordered, not just the choice/score
         // pair — a noul pair with low >= high makes the Mid band unreachable for
@@ -762,5 +795,65 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(p.gate_allow, vec!["ls".to_string(), "pwd".to_string()]);
         assert_eq!(p.ask_deadline_secs, 5);
+    }
+
+    // ---- gate_deny (spec 29) -----------------------------------------------
+
+    #[test]
+    fn default_policy_denies_nothing() {
+        let p = Policy::default();
+        assert!(
+            p.gate_deny.is_empty(),
+            "F5: the default policy ships with an EMPTY deny list — deny nothing"
+        );
+        assert!(
+            p.validate().is_ok(),
+            "an empty deny list must pass validation (a config that ships broken is worse \
+             than nothing)"
+        );
+    }
+
+    #[test]
+    fn an_empty_deny_list_is_valid_and_is_not_replaced() {
+        // The control: a deployment that deliberately sets `gate_deny = []` must not
+        // silently regain a default deny set. Empty stays empty, whatever the default is.
+        let p = Policy {
+            gate_deny: Vec::new(),
+            ..Policy::default()
+        };
+        assert_eq!(p.gate_deny.len(), 0);
+        assert!(p.validate().is_ok(), "an empty deny list is a valid policy");
+    }
+
+    #[test]
+    fn empty_vec_valid_and_toml_roundtrip() {
+        // Both directions BOTH ways: an empty `gate_deny` survives a TOML write-back
+        // (and does not appear as a surprise key), and a populated one round-trips
+        // byte-for-byte. (policy.rs:760-765 is the round-trip precedent.)
+        let p = Policy::from_toml("gate_deny = []").unwrap_or_default();
+        assert_eq!(p.gate_deny, Vec::<String>::new());
+        let text = toml::to_string(&p).unwrap_or_default();
+        assert_eq!(p, Policy::from_toml(&text).unwrap_or_default());
+
+        let p = Policy::from_toml("gate_deny = [\"rm -rf\", \"of=/dev/\"]").unwrap_or_default();
+        assert_eq!(
+            p.gate_deny,
+            vec!["rm -rf".to_string(), "of=/dev/".to_string()]
+        );
+        let text = toml::to_string(&p).unwrap_or_default();
+        let back = Policy::from_toml(&text).unwrap_or_default();
+        assert_eq!(back, p, "a populated deny list round-trips");
+    }
+
+    #[test]
+    fn gate_deny_rejects_an_empty_pattern_entry() {
+        // Same bar as the allowlist's entries (F1): a pattern with no content matches
+        // everything, so a config that contains one is a configuration error that must
+        // be caught at load, not observed at judge time.
+        let p = Policy {
+            gate_deny: vec![String::new()],
+            ..Policy::default()
+        };
+        assert!(p.validate().is_err(), "an empty pattern entry is rejected");
     }
 }

@@ -1193,6 +1193,16 @@ fn judge_command(
                             }
                             o.insert("decision".into(), json!(verdict.decision));
                             o.insert("model_decision".into(), json!(verdict.model_decision));
+                            // Spec 29, F4: a hard deny names its pattern in the payload.
+                            // `reason` is the refusal-reason channel, so the same fact
+                            // lands there too — a consumer reading either sees it.
+                            o.insert("deny_pattern".into(), json!(verdict.deny_pattern));
+                            if let Some(pattern) = &verdict.deny_pattern {
+                                o.insert(
+                                    "reason".into(),
+                                    json!(format!("policy hard-deny: matched {pattern:?}")),
+                                );
+                            }
                             o.insert(
                                 "destructive_signals".into(),
                                 serde_json::to_value(&verdict.signals)
