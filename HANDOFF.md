@@ -1,5 +1,22 @@
 # HANDOFF — laya-rs
 
+## 2026-10-09 03:19Z — status refresh (nothing in flight; docs updated)
+
+- Both trees clean; loop #1 (spec 30) complete with v2 honest series (1 verified keep b0611c6);
+  spec 28+29 deployed live (decision_id + gate_deny); SPEC-B nudge live; rule 11 fully
+  mechanism-backed (see AGENTS.md).
+- Ledger: 7,416 decisions lifetime, 5 outcomes joined, hook rows growing daily (always-on ✓).
+- Branch autoresearch/gate-lat2: README-only keep verified — MERGE IS PENDING
+  (one-line review then `git merge` is the orchestrator's next action).
+- OPEN (authored-ready, no blockers):
+  1. **policy-file loader spec** (spec 29's follow-up: deny list = orchestrator CONFIG, not a
+     code edit; `judge_command` currently hardcodes `laya_core::Policy::default()` in
+     laya-mcp lib.rs + laya-cli).
+  2. **SPEC-E**: laya wiring into the pi worker lane (the "always and automatically"
+     mandate currently holds only for Hermes sessions — pi workers type most code).
+- NOT blocking: docs all current as of this commit (INDEX 148 links 0 broken, TOC regen'd).
+
+
 ## 2026-10-06 — spec 28 IMPLEMENTED: `decision_id` in the gate payload (G1 closed at the source)
 
 - **What**: implemented `specs/28-decision-identity-is-visible.md` TDD-first. RED confirmed
