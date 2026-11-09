@@ -135,3 +135,11 @@ cargo xtask gate                 # all of the above
 
 Offline tests must never need the model. Anything that needs Laya to judge
 meaning is a *live* test and is kept separate.
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE).
+
+The Laya model itself (the ModernBERT backbone, the decision head and their weights) is a separate
+work by its own authors, published under its own terms (Apache-2.0 at the time of writing; check
+the upstream repository). This repository contains no model weights and does not redistribute them.
