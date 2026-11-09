@@ -119,21 +119,41 @@ fn reason_channel_names_the_pattern_when_the_core_policy_denies() {
 }
 
 #[test]
-fn laya_gate_binary_exits_deny_code_on_a_hard_deny() {
-    // The hook's contract (laya-gate.rs "exit: 0 allow | 1 ask | 2 deny"). Proven here
-    // against BUILT-BINARY output for the ask case; the deny exit code path is the same
-    // `match decision.as_str()` arm the payload drives.
+fn laya_gate_binary_never_allows_a_command_without_an_allowlist_match() {
+    // The hook's contract (laya-gate.rs header): exit 0 allow | 1 ask | 2 deny | 3 unjudgeable.
+    //
+    // This test used to assert exit 1 ("asks") for `mv a b`, which was true only where a sidecar
+    // happened to be reachable: on the developer's box the head answered ask (exit 1), in CI there
+    // is no sidecar so the verdict is unjudgeable (exit 3) — the assertion was measuring the
+    // environment, not the contract. What must hold on every machine is the fail-closed invariant:
+    // with no positive allowlist match the gate may ask, deny or admit it could not judge, but it
+    // must never allow.
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_laya-gate"))
         .arg("mv a b")
         .arg("--no-ledger")
-        .env_remove("LAYA_URL")
+        .env("LAYA_URL", "http://127.0.0.1:1/")
         .env_remove("LAYA_GATE_DISABLE")
         .output()
         .expect("laya-gate runs");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        matches!(out.status.code(), Some(1..=3)),
+        "an unlisted command may ask, deny or be unjudgeable — never allow (exit 0): {stdout}"
+    );
+
+    let payload: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("a JSON verdict: {e}: {stdout}"));
     assert_eq!(
-        out.status.code(),
-        Some(1),
-        "an undecidable command asks (exit 1), it does not deny: {:?}",
-        String::from_utf8_lossy(&out.stdout)
+        payload
+            .get("allowlisted")
+            .and_then(serde_json::Value::as_bool),
+        Some(false),
+        "the command is not on the allowlist: {payload}"
+    );
+    assert_ne!(
+        payload.get("decision").and_then(serde_json::Value::as_str),
+        Some("allow"),
+        "the decision must not be allow: {payload}"
     );
 }
