@@ -148,6 +148,7 @@ const fn budget_of(case: &SequenceCase) -> Budget {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "live test: needs the Laya checkpoint tokenizer.json on this machine; run with: cargo test -p laya-head --test tokenizer_differential -- --ignored"]
 fn every_corpus_string_tokenizes_to_exactly_the_reference_ids() {
     let fixture = fixture();
     let tokenizer = tokenizer_from_fixture(&fixture.meta);
@@ -184,6 +185,7 @@ fn every_corpus_string_tokenizes_to_exactly_the_reference_ids() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "live test: needs the Laya checkpoint tokenizer.json on this machine; run with: cargo test -p laya-head --test tokenizer_differential -- --ignored"]
 fn every_sequence_builds_to_exactly_the_reference_ids_and_markers() {
     let fixture = fixture();
     let tokenizer = tokenizer_from_fixture(&fixture.meta);
@@ -306,6 +308,7 @@ fn the_recorded_head_prefix_is_what_the_port_would_build() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "live test: needs the Laya checkpoint tokenizer.json on this machine; run with: cargo test -p laya-head --test tokenizer_differential -- --ignored"]
 fn the_special_token_ids_match_the_checkpoint() {
     let fixture = fixture();
     let tokenizer = tokenizer_from_fixture(&fixture.meta);
@@ -340,6 +343,7 @@ fn the_special_token_ids_match_the_checkpoint() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "live test: needs the Laya checkpoint tokenizer.json on this machine; run with: cargo test -p laya-head --test tokenizer_differential -- --ignored"]
 fn the_control_an_ordinary_word_is_not_affected_by_the_added_vocabulary() {
     // The added vocabulary is 116 entries wide; a port that matched it too eagerly would break
     // ordinary text. `"hello world"` must be plain BPE.
@@ -408,6 +412,7 @@ fn the_control_the_mask_token_text_is_absent_from_the_sequence_the_reference_bui
 }
 
 #[test]
+#[ignore = "live test: needs the Laya checkpoint tokenizer.json on this machine; run with: cargo test -p laya-head --test tokenizer_differential -- --ignored"]
 fn the_split_pattern_needs_its_lookahead_and_the_port_has_it() {
     // The regression the pattern is documented for. `"a   b"` must split into `a`, `'  '`,
     // `' b'` — the `\s+(?!\S)` lookahead is what stops `\s+` from swallowing all three spaces,
@@ -428,6 +433,7 @@ fn the_split_pattern_needs_its_lookahead_and_the_port_has_it() {
 }
 
 #[test]
+#[ignore = "live test: needs the Laya checkpoint tokenizer.json on this machine; run with: cargo test -p laya-head --test tokenizer_differential -- --ignored"]
 fn a_tokenizer_with_the_wrong_normalizer_is_refused_rather_than_guessed() {
     // A port that ignored an unsupported normalizer would return plausible ids computed with the
     // wrong text. Checked against a near-miss: NFD must be refused, NFC must load.
