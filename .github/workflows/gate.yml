@@ -1,0 +1,27 @@
+name: gate
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: fmt + clippy -D warnings + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the channel and the rustfmt/clippy components,
+      # so CI runs the same bar a contributor runs locally. Nothing here can drift.
+      - name: toolchain
+        run: rustc -V && cargo -V
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo xtask gate
+        run: cargo xtask gate
