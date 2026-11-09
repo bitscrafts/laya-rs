@@ -1,5 +1,7 @@
 # laya-rs
 
+[![gate](https://github.com/bitscrafts/laya-rs/actions/workflows/gate.yml/badge.svg)](https://github.com/bitscrafts/laya-rs/actions/workflows/gate.yml)
+
 A Rust **System-1 decision layer**: Laya over MCP stdio, feeding deterministic DAG
 `route` nodes.
 
