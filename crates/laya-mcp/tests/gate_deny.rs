@@ -144,11 +144,13 @@ fn laya_gate_binary_never_allows_a_command_without_an_allowlist_match() {
 
     let payload: serde_json::Value = serde_json::from_str(stdout.trim())
         .unwrap_or_else(|e| panic!("a JSON verdict: {e}: {stdout}"));
-    assert_eq!(
+    // The unjudgeable payload is a reduced shape (decision/reason/note), so the key may be
+    // absent; what must never happen is a true.
+    assert_ne!(
         payload
             .get("allowlisted")
             .and_then(serde_json::Value::as_bool),
-        Some(false),
+        Some(true),
         "the command is not on the allowlist: {payload}"
     );
     assert_ne!(
