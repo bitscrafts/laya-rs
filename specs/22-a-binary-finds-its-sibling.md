@@ -1,4 +1,5 @@
 # Spec 22 — a binary finds its sibling
+#: depends=- status=- block=-
 
 ## Overview
 

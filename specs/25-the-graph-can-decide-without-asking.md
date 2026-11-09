@@ -1,4 +1,5 @@
 # Spec 25 — the graph can decide without asking
+#: depends=- status=- block=-
 
 ## Overview
 

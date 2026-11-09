@@ -1,4 +1,5 @@
 # Spec 24 — the guessing game runs on the graph
+#: depends=- status=- block=-
 
 ## Overview
 

@@ -1,4 +1,5 @@
 # laya-rs — spec-07: graph executor (part 4/4) — the CLI surface, and the acceptance test
+#: depends=- status=done block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: last by dependency — the acceptance test is what converts the whole design from argument into evidence, and it needs parts 1–3 landed.

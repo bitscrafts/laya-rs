@@ -1,4 +1,5 @@
 # Spec 18 — `{{node_id}}`: a shell's output can inform a decision
+#: depends=- status=- block=-
 
 ## Overview
 

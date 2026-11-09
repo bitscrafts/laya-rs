@@ -1,4 +1,5 @@
 # Spec 23 — the scheduler cannot wait forever
+#: depends=- status=- block=-
 
 ## Overview
 

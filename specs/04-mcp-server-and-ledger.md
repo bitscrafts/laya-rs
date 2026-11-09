@@ -1,4 +1,5 @@
 # Spec: 04 — The MCP stdio server and the ledger (P1)
+#: depends=- status=done block=-
 
 ## Overview
 One Rust binary (`laya-rs`) speaking **MCP over stdio**, so Hermes, pi, Claude Code,

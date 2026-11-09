@@ -1,4 +1,5 @@
 # Spec 20 — the flow format is a contract, not a wish
+#: depends=- status=- block=-
 
 ## Overview
 

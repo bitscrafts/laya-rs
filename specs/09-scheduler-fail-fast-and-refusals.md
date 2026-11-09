@@ -1,4 +1,5 @@
 # laya-rs — spec-09: the scheduler keeps the promises spec 07 made — fail-fast, cycles, payload shape
+#: depends=- status=pending block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: P1. These are correctness defects in landed code, reproduced through the public API. None of them is reachable through `laya graph run` on a *validated* flow except R1, and R1 is.

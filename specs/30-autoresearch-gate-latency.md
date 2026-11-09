@@ -1,4 +1,5 @@
 # Spec: 30 — Autoresearch loop #1: laya gate latency
+#: depends=- status=done block=-
 
 **Project**: /projects/laya-rs
 **Phase**: first real run of the autoresearch-loop skill ON this repo's own machinery

@@ -1,4 +1,5 @@
 # Spec 21 — lift the refusals that spec 17 made stale, and finish the decide's failure policy
+#: depends=- status=- block=-
 
 ## Overview
 

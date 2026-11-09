@@ -1,4 +1,5 @@
 # laya-rs — spec-08: `allow` requires a deterministic allowlist; `ask` validates before it executes
+#: depends=- status=pending block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: **P0 — a live safety defect.** Measured 2026-10-01: the real `gate` returns `allow` for `mkfs.ext4 /dev/sda1`, `shred -u secrets.txt`, `chmod -R 000 ~`, `> important.txt` and `curl … | sh`, and the real `ask` tool **executed** two of them.

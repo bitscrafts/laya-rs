@@ -1,4 +1,5 @@
 # Spec: 03 — The Rust head port (P4)
+#: depends=- status=done block=-
 
 ## Overview
 Replace the Python decision path with a pure-Rust implementation of Laya's

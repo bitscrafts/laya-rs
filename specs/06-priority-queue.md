@@ -1,4 +1,5 @@
 # Spec: 06 — Priority scheduling and the single-writer queue
+#: depends=- status=done block=-
 
 ## Overview
 **User question (verbatim):** *"on redb collisions, could be used a priority queue?"*

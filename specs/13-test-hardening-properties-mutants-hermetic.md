@@ -1,4 +1,5 @@
 # laya-rs — spec-13: test hardening — hermetic default suite, a mutation gate, offline property and fuzz tests
+#: depends=- status=pending block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: P1 for R1–R2 (cheap, and each closes a measured hole); P2 for R3–R5.

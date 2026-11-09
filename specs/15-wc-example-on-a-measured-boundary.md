@@ -1,4 +1,5 @@
 # Spec 15 — the `wc` example, rebuilt on a measured boundary
+#: depends=- status=- block=-
 
 ## Overview
 The first `wc` example routed on a 3-option `choice` and produced the **same** label for a 13-word

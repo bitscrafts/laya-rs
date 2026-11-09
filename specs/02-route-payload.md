@@ -1,4 +1,5 @@
 # Spec: 02 — The route-shaped decision payload
+#: depends=- status=done block=-
 
 ## Overview
 `laya-rs` must hand a DAG's `route` node a payload whose `label` and `band` are

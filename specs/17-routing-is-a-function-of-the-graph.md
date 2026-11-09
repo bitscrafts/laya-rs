@@ -1,4 +1,5 @@
 # Spec 17 — routing must be a function of the graph, not of the file's array order
+#: depends=- status=- block=-
 
 ## Overview
 

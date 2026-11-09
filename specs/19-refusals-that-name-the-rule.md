@@ -1,4 +1,5 @@
 # Spec 19 — make the broken shapes fail loudly, and correct the record
+#: depends=- status=- block=-
 
 ## Overview
 

@@ -1,4 +1,5 @@
 # Spec: 05 — Laya must be running (mandatory preflight)
+#: depends=- status=done block=-
 
 ## Overview
 **User directive (verbatim):** *"it will be mandatory the app to check for laya be

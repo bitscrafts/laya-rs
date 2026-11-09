@@ -1,4 +1,5 @@
 # laya-rs — spec-14: the tool contract matches the model — questions, refusals, and a contract test
+#: depends=- status=pending block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: P0 for R1–R3 (each is a caller-visible failure on the advertised surface); P1 for R4–R5.

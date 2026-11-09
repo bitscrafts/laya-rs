@@ -1,4 +1,5 @@
 # Spec: 29 — A policy can hard-deny (gate_deny beats ask)
+#: depends=- status=pending block=-
 
 **Project**: /projects/laya-rs
 **Phase**: P4 enforcement — closes G2 (deny production-unreachable: 5083 decisions, 0 denies)

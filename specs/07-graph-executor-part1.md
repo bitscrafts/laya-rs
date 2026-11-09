@@ -1,4 +1,5 @@
 # laya-rs — spec-07: graph executor (part 1/4) — the flow, its refusals, and the lowering
+#: depends=- status=done block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: the foundation everything else in spec 07 builds on; pure and process-free, so it is the safest part to land first.

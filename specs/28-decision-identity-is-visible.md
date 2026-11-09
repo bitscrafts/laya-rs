@@ -1,4 +1,5 @@
 # Spec: 28 — The decision identity is visible (decision_id in the gate payload)
+#: depends=- status=pending block=-
 
 **Project**: /projects/laya-rs
 **Phase**: P4 observability — closes G1 (outcomes=0, no calibration feedback) at the source

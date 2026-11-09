@@ -1,4 +1,5 @@
 # Spec: 01 — Decision payload and policy (the pure core)
+#: depends=- status=done block=-
 
 ## Overview
 The pure, testable heart of laya-rs: the question/answer contract (`laya-abi`),

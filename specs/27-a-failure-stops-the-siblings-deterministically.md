@@ -1,4 +1,5 @@
 # Spec 27 — a failure stops the siblings deterministically
+#: depends=- status=- block=-
 
 ## Overview
 

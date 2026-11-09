@@ -1,4 +1,5 @@
 # Spec: 07 — The graph executor (a generic DAG, with Laya as the predicate)
+#: depends=- status=pending block=-
 
 ## Overview
 

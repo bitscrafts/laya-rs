@@ -1,4 +1,5 @@
 # Spec 26 — the examples are run by the suite, not by hand
+#: depends=- status=- block=-
 
 ## Overview
 

@@ -1,4 +1,5 @@
 # laya-rs — spec-07: graph executor (part 3/4) — the scheduler, and running nodes
+#: depends=- status=done block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: this is where a graph stops being a document and starts doing work — and where every failure mode that "looks like success" lives.
