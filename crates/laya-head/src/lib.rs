@@ -1,6 +1,10 @@
 //! `laya-head` — the Laya decision head in pure Rust.
 //!
-//! **STATUS: NOT STARTED.** Spec [`specs/03-rust-head.md`](../../../specs/03-rust-head.md)
+//! **STATUS: COMPLETE** (spec 03, 2026-09-30): the tokenizer, the forward pass and the
+//! decision path are all here, checked against the reference implementation by the
+//! differential tests in `tests/` (the tokenizer and forward tests read a checkpoint
+//! tokenizer from this machine and are `#[ignore]`d as live tests; run them with
+//! `cargo test -p laya-head -- --ignored`). Spec [`specs/03-rust-head.md`](../../../specs/03-rust-head.md)
 //! is the contract, including every correction the adversarial review forced.
 //!
 //! Why this crate exists: the head is **26.5M parameters of pure linear algebra**
@@ -8,7 +12,7 @@
 //! whole decision layer can be Rust with **no Python and no torch**. That also
 //! removes the `tokenizers`/`transformers` version conflict that already bit us once.
 //!
-//! **Three corrections that must land before any code here** (all from the review,
+//! **Three corrections that shaped this code** (all from the review,
 //! `_docs/04-development/DESIGN-AMENDMENTS-2026-09-29.md`):
 //!
 //! * **`clamp_temperature` is mandatory, not optional** (blocker B2). The raw
