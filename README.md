@@ -94,9 +94,11 @@ prevent.
 
 ## The sidecar, and what it costs
 
-The decision HEAD needs torch, so it runs as a **pinned, persistent Python sidecar** over a unix
-socket — a per-call interpreter spawn measured 23–24 s, which is untenable. Two consequences
-worth knowing before you rely on it:
+`laya decide` runs the whole decision head in Rust, in-process, with no Python (`crates/laya-head`,
+checked against the reference implementation). The MCP server and the gate hook have not moved yet:
+they still reach the head through a **pinned, persistent Python sidecar** over a unix socket, which
+is the open work. The sidecar is persistent because a per-call interpreter spawn measured 23–24 s.
+Two consequences worth knowing before you rely on it:
 
 * it is **strictly serial** (one connection, a blocking loop); the backbone is 5.8× parallel,
   the head is not. `ask_files` therefore asks sequentially and reports `parallel: false`;

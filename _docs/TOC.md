@@ -42,9 +42,6 @@ reading order.
 - [The decision ledger](05-operations/DECISION-LEDGER.md)
 - [Observability — what can be seen, and what could not](05-operations/OBSERVABILITY.md)
 - [Readiness and the priority queue](05-operations/READINESS-AND-QUEUE.md)
-- [Restart state — 2026-10-02](05-operations/RESTART-2026-10-02.md)
-- [Resume prompt — 2026-10-02 (read this first after the restart)](05-operations/RESUME-PROMPT-2026-10-02.md)
-- [Resuming the opus analysis session](05-operations/RESUMING-OPUS.md)
 - [THE SPEC GATE — is the spec set finished, and what does that cost](05-operations/SPEC-GATE.md)
 - [Supervising the decision head](05-operations/SUPERVISION.md)
 - [A flake in the test harness — ETXTBSY on the fake MCP server](05-operations/TEST-HARNESS-FLAKE.md)
@@ -60,7 +57,3 @@ reading order.
 - [04 — JEV / TypeSafe AI ("System One") — the upstream video, reviewed for ideas](06-research/04-jev-typesafe-ai-video-review.md)
 - [LAYA SEAM REVIEW + FIX PLAN — 2026-10-06](06-research/05-laya-seam-review-2026-10-06.md)
 - [Research](06-research/README.md)
-
-## 99-archive
-- [One-shot scripts (archived)](99-archive/one-shot-scripts-2026-09-30/README.md)
-- [Archive](99-archive/README.md)

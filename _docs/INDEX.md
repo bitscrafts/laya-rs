@@ -18,7 +18,6 @@ in exactly one place; this index points at it, never restates it.
 | `04-development/` | design decisions, the review amendments, implementation notes |
 | `05-operations/` | the ledger, budgets, running the server |
 | `06-research/` | numbered research write-ups (design v1, the review, prior-art trails) |
-| `99-archive/` | superseded material, kept with its consequence labelled |
 
 ## Documents
 
@@ -61,9 +60,6 @@ in exactly one place; this index points at it, never restates it.
 - [The decision ledger](05-operations/DECISION-LEDGER.md) — The redb ledger: schema, single-writer model, budgets, querying.
 - [Observability — what can be seen, and what could not](05-operations/OBSERVABILITY.md) — Measured state of observability in the deployment: the ledger that was silently off, the operating configuration, the measured cost per call, and the questions still unanswerable.
 - [Readiness and the priority queue](05-operations/READINESS-AND-QUEUE.md) — How 'is Laya running?' is answered, and where a priority queue earns its place.
-- [Restart state — 2026-10-02](05-operations/RESTART-2026-10-02.md) — What is deployed with hashes verified against the tree, the verification order, and the four things deliberately left unfinished.
-- [Resume prompt — 2026-10-02 (read this first after the restart)](05-operations/RESUME-PROMPT-2026-10-02.md) — The conversation's state in one page: the one open item (whether the gate fires for a live session), the exact before/after check that answers it, what was finished, the token measurement, and the traps that cost time.
-- [Resuming the opus analysis session](05-operations/RESUMING-OPUS.md) — How to continue the claude+opus review session instead of starting fresh: the session id, the overridable BRIEF/REPORT variables, the exit code that means a dispatch failed, and the two failure modes that cost a round on 2026-10-02 -- blocked tools answering from prior context, and a prompt that hardcoded the round-1 brief while the preflight printed the override.
 - [THE SPEC GATE — is the spec set finished, and what does that cost](05-operations/SPEC-GATE.md) — Measured 2026-10-02, on this project, with the installed laya. Every number below came from a run, not from reading code.
 - [Supervising the decision head](05-operations/SUPERVISION.md) — How the Laya sidecar stays up across crashes and reboots, and why it is supervised on the host rather than inside this container.
 - [A flake in the test harness — ETXTBSY on the fake MCP server](05-operations/TEST-HARNESS-FLAKE.md) — The suite is not deterministic: fake_server names its scratch file from the process id plus a tag, every test shares one pid, so two tests with the same tag write and exec the same path and the kernel refuses with Text file busy. Measured 1 failure in ~20 binary runs, load-dependent, and proven not to come from the change that was being verified.
@@ -79,10 +75,6 @@ in exactly one place; this index points at it, never restates it.
 - [04 — JEV / TypeSafe AI ("System One") — the upstream video, reviewed for ideas](06-research/04-jev-typesafe-ai-video-review.md) — Source: "JEV / TypeSafe AI API & Rust - Let make a rust lb" — Jeremy Chone (@jchone), live 2026-09-19, 2h44m (9,863 s), https://www.youtube.com/live/pU73lYF7R1I.
 - [LAYA SEAM REVIEW + FIX PLAN — 2026-10-06](06-research/05-laya-seam-review-2026-10-06.md) — <!-- Filed 2026-10-06T14:30Z by the Hermes orchestrator (Marcelo Correa). Produced by: pi + glm-5.3:cloud (ollama-cloud), the two-lane ANALYSIS lane (read-only tool grant),
 - [Research](06-research/README.md) — Numbered research write-ups: convention and index.
-
-### 99-archive
-- [One-shot scripts (archived)](99-archive/one-shot-scripts-2026-09-30/README.md) — These are the fix- / add- / wire- / introspect- scripts used while building this project. They edited the source in place and have already been applied.
-- [Archive](99-archive/README.md) — Superseded material, kept with its consequence labelled.
 
 ## This project is self-contained
 

@@ -153,30 +153,11 @@ DOCS = {
         "path and the kernel refuses with Text file busy. Measured 1 failure in ~20 binary runs, "
         "load-dependent, and proven not to come from the change that was being verified."
     ),
-    "05-operations/RESUMING-OPUS.md": (
-        "Resuming the opus analysis session",
-        "How to continue the claude+opus review session instead of starting fresh: the session id, "
-        "the overridable BRIEF/REPORT variables, the exit code that means a dispatch failed, and the "
-        "two failure modes that cost a round on 2026-10-02 -- blocked tools answering from prior "
-        "context, and a prompt that hardcoded the round-1 brief while the preflight printed the "
-        "override."
-    ),
     "05-operations/TOKEN-ECONOMY.md": (
         "Token economy — what it saves, what it costs, how it was measured",
         "The measured answer: 101,840 tokens saved per triage round (43x), 0 tokens of context cost "
         "on allow/ask, and 178 tokens ever on two blocks. Includes the 263x-overstated first "
         "measurement and why a phrase match is not attribution."
-    ),
-    "05-operations/RESUME-PROMPT-2026-10-02.md": (
-        "Resume prompt — 2026-10-02 (read this first after the restart)",
-        "The conversation's state in one page: the one open item (whether the gate fires for a live "
-        "session), the exact before/after check that answers it, what was finished, the token "
-        "measurement, and the traps that cost time."
-    ),
-    "05-operations/RESTART-2026-10-02.md": (
-        "Restart state — 2026-10-02",
-        "What is deployed with hashes verified against the tree, the verification order, and the four "
-        "things deliberately left unfinished."
     ),
     "06-research/01-design.md": (
         "Design (v1) — superseded in part",
@@ -250,18 +231,37 @@ def derive(rel: str) -> tuple[str, str]:
     return (title, blurb)
 
 
+def _publishable() -> set[str]:
+    """Paths git would publish: tracked or untracked-but-not-ignored. A document under an ignored
+    directory (e.g. `_docs/99-archive/`) exists on disk but not on GitHub, so indexing it would
+    make the public index link to files a visitor cannot open."""
+    import subprocess
+    out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z", "--", "_docs"],
+                         cwd=root, capture_output=True, text=True, check=True).stdout
+    return {p for p in out.split("\0") if p.endswith(".md")}
+
+
+PUBLISHABLE = _publishable()
+
+
 def docs_in(section: str) -> list[str]:
-    """Every .md under _docs/<section>/, sorted -- the FILESYSTEM is the source of truth, not the map."""
+    """Every publishable .md under _docs/<section>/, sorted -- the FILESYSTEM is the source of truth, not the map."""
     base = root / "_docs" / section
     if not base.is_dir():
         return []
     # rglob, not glob: a document nested in a subdirectory is still a document. Measured 2026-10-03 --
     # glob at one level left `99-archive/one-shot-scripts-2026-09-30/README.md` invisible, and the
     # coverage control named it.
-    return sorted(str(f.relative_to(root / "_docs")) for f in base.rglob("*.md"))
+    return sorted(str(f.relative_to(root / "_docs")) for f in base.rglob("*.md")
+                  if str(f.relative_to(root)) in PUBLISHABLE)
 
 
-on_disk = sorted(str(f.relative_to(root / "_docs")) for f in (root / "_docs").rglob("*.md"))
+on_disk = sorted(str(f.relative_to(root / "_docs")) for f in (root / "_docs").rglob("*.md")
+                 if str(f.relative_to(root)) in PUBLISHABLE)
+
+# A section whose every document is ignored (the archive) must not appear: an empty heading and a table
+# row for a folder a visitor cannot open are how a public index lies.
+SECTIONS = [s for s in SECTIONS if docs_in(s[0])]
 
 
 def entry(rel: str) -> tuple[str, str]:
