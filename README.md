@@ -1,6 +1,11 @@
 # laya-rs
 
 [![gate](https://github.com/bitscrafts/laya-rs/actions/workflows/gate.yml/badge.svg)](https://github.com/bitscrafts/laya-rs/actions/workflows/gate.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![rust: 1.95](https://img.shields.io/badge/rust-1.95-orange.svg)](rust-toolchain.toml)
+[![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-yellow.svg)](#the-sidecar-and-what-it-costs)
+[![MCP: stdio](https://img.shields.io/badge/MCP-stdio-informational.svg)](#the-seven-mcp-tools)
+[![last commit](https://img.shields.io/github/last-commit/bitscrafts/laya-rs/master.svg)](https://github.com/bitscrafts/laya-rs/commits/master)
 
 A Rust **System-1 decision layer**: Laya over MCP stdio, feeding deterministic DAG
 `route` nodes.
