@@ -28,3 +28,7 @@ graphify-out/
 # current directory, so any `laya ledger ...` run from the checkout creates a
 # redb store here. It is device-local state, never part of the project.
 /.laya/
+
+# Python bytecode
+__pycache__/
+*.pyc
