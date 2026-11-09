@@ -1,0 +1,15 @@
+# The bar must not move when the machine's toolchain moves.
+#
+# The workspace declares `rust-version = "1.95"` and `cargo xtask gate` promises
+# "fmt + clippy -D warnings + test, all zero". Without a pin that promise is only
+# true for whichever clippy happened to be installed: on 2026-11-09, rustc 1.99.1
+# rejected 20 findings from lints that did not exist under 1.95
+# (`assert_is_empty`, `manual_assert_eq`, `suboptimal_flops`,
+# `chunks_exact_to_as_chunks`) although no code changed.
+#
+# Pinning here makes the gate reproducible on every machine and in CI, because
+# both read this file.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
