@@ -84,6 +84,25 @@ impl HttpEmbedder {
         &self.endpoint
     }
 
+    /// Point at a llama.cpp server with an explicit request budget.
+    ///
+    /// The default of two minutes suits a cold first call, but a gate or a graph node cannot wait
+    /// that long on a backbone that has hung: a caller that needs a fast answer says how long it
+    /// will wait, and a backbone that does not answer in that time is a `Transport` error.
+    #[must_use]
+    pub fn with_timeout(endpoint: impl Into<String>, timeout: std::time::Duration) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            timeout,
+        }
+    }
+
+    /// The whole-request budget this embedder will wait.
+    #[must_use]
+    pub const fn timeout(&self) -> std::time::Duration {
+        self.timeout
+    }
+
     /// One `/embedding` call. Returns the flat `[seq, d]` values for the single sequence sent.
     ///
     /// # Errors
@@ -336,5 +355,82 @@ mod tests {
         // either way it is a difference worth removing rather than relying on.
         let e = HttpEmbedder::new("http://10.10.10.217:8083/");
         assert_eq!(e.endpoint(), "http://10.10.10.217:8083/");
+    }
+
+    // ---- the timeout is the caller's to choose ------------------------------------------------
+    //
+    // MEASURED 2026-11-09: against a server that accepts and never answers, `laya decide` ran until
+    // the caller's own 25 s cap killed it, because the 2-minute default was the only bound there
+    // was. A gate or a graph node cannot wait two minutes on a dead backbone. These tests drive a
+    // REAL socket (a hung one, a prompt one, a slow one), not a constant.
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    /// A one-shot HTTP server. `delay` before answering; `None` = accept and never answer.
+    fn serve_once(delay: Option<Duration>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut buf = [0_u8; 8192];
+            let _ = stream.read(&mut buf);
+            match delay {
+                None => std::thread::sleep(Duration::from_secs(30)), // hung: holds the socket open
+                Some(d) => {
+                    std::thread::sleep(d);
+                    let body = r#"[{"embedding":[[0.5,0.25]]}]"#;
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+            }
+        });
+        url
+    }
+
+    #[test]
+    fn a_hung_backbone_fails_within_the_timeout_it_was_given() {
+        let url = serve_once(None);
+        let e = HttpEmbedder::with_timeout(url, Duration::from_millis(300));
+        let started = Instant::now();
+        let err = e.call(&[1, 2, 3]).unwrap_err();
+        let took = started.elapsed();
+        assert!(matches!(err, EmbedError::Transport(_)), "got: {err}");
+        assert!(
+            took < Duration::from_secs(3),
+            "gave up after {took:?}, not ~300 ms"
+        );
+    }
+
+    #[test]
+    fn control_a_prompt_backbone_still_answers_under_a_short_timeout() {
+        // The near-miss: the same short timeout must NOT refuse a server that answers in time.
+        let url = serve_once(Some(Duration::ZERO));
+        let e = HttpEmbedder::with_timeout(url, Duration::from_secs(5));
+        assert_eq!(e.call(&[1, 2]).unwrap(), vec![0.5, 0.25]);
+    }
+
+    #[test]
+    fn control_a_slow_but_in_time_backbone_is_not_cut_short() {
+        // Answers after 150 ms against a 3 s budget: a timeout that fired early would fail this.
+        let url = serve_once(Some(Duration::from_millis(150)));
+        let e = HttpEmbedder::with_timeout(url, Duration::from_secs(3));
+        assert_eq!(e.call(&[1, 2]).unwrap(), vec![0.5, 0.25]);
+    }
+
+    #[test]
+    fn the_default_timeout_is_unchanged() {
+        // A caller that never sets one keeps today's behaviour (the cold-cache first call needs it).
+        assert_eq!(
+            HttpEmbedder::new("http://x").timeout(),
+            Duration::from_mins(2)
+        );
     }
 }

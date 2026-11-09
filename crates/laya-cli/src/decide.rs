@@ -65,6 +65,10 @@ pub struct DecideArgs {
     pub head: PathBuf,
     /// The tokenizer path.
     pub tokenizer: PathBuf,
+    /// How long one backbone request may take, in milliseconds. `None` keeps the embedder's own
+    /// default (two minutes, sized for a cold first call). A gate or a graph node that cannot wait
+    /// that long on a hung backbone sets this.
+    pub timeout_ms: Option<u64>,
 }
 
 impl DecideArgs {
@@ -81,6 +85,7 @@ impl DecideArgs {
             url: endpoint.to_string(),
             head: PathBuf::from(DEFAULT_HEAD),
             tokenizer: PathBuf::from(DEFAULT_TOKENIZER),
+            timeout_ms: None,
         };
         let mut i = 0;
         while i < rest.len() {
@@ -100,6 +105,18 @@ impl DecideArgs {
                 Some("--tokenizer") => {
                     args.tokenizer = PathBuf::from(take(rest, &mut i, "--tokenizer")?);
                 }
+                Some("--timeout-ms") => {
+                    let raw = take(rest, &mut i, "--timeout-ms")?;
+                    // A positive whole number only: zero would fail every call at once, and a
+                    // typo must not silently fall back to the two-minute default.
+                    let ms = raw.parse::<u64>().ok().filter(|&n| n > 0).ok_or_else(|| {
+                        format!(
+                            "laya decide: --timeout-ms needs a positive whole number of \
+                             milliseconds, got `{raw}`"
+                        )
+                    })?;
+                    args.timeout_ms = Some(ms);
+                }
                 Some("-" | "--stdin") => {
                     args.stdin = true;
                     i += 1;
@@ -107,7 +124,7 @@ impl DecideArgs {
                 Some(other) => {
                     return Err(format!(
                         "laya decide: unrecognised argument `{other}`\n\
-                         usage: laya decide --state STATE --question JSON [--url URL] [--head PATH]\n\
+                         usage: laya decide --state STATE --question JSON [--url URL] [--head PATH] [--timeout-ms N]\n\
                          \x20      laya decide -    (reads {{\"state\":…,\"question\":…}} from stdin)"
                     ));
                 }
@@ -117,7 +134,7 @@ impl DecideArgs {
         if !args.stdin && args.question.is_empty() {
             return Err(
                 "laya decide: --question is required (or use `-` to read a JSON object from stdin)\n\
-                 usage: laya decide --state STATE --question JSON [--url URL] [--head PATH]"
+                 usage: laya decide --state STATE --question JSON [--url URL] [--head PATH] [--timeout-ms N]"
                     .to_string(),
             );
         }
@@ -277,7 +294,10 @@ pub fn decide(args: &DecideArgs) -> Result<String, (String, u8)> {
     })?;
 
     // 3. The path itself.
-    let embedder = HttpEmbedder::new(&args.url);
+    let embedder = args.timeout_ms.map_or_else(
+        || HttpEmbedder::new(&args.url),
+        |ms| HttpEmbedder::with_timeout(&args.url, std::time::Duration::from_millis(ms)),
+    );
     let run = head
         .run(&config, &tokenizer, &embedder, &state_text, &question)
         .map_err(|e| {
@@ -381,6 +401,30 @@ mod tests {
         assert_eq!(a.url, "http://y");
         assert_eq!(a.head, PathBuf::from("/tmp/h"));
         assert_eq!(a.tokenizer, PathBuf::from("/tmp/t"));
+    }
+
+    #[test]
+    fn without_a_timeout_flag_the_embedder_keeps_its_default() {
+        // The near-miss: a caller that never asks for a budget must get today's behaviour.
+        let a = DecideArgs::parse(&args(&["-"]), "http://x").expect("must parse");
+        assert_eq!(a.timeout_ms, None);
+    }
+
+    #[test]
+    fn a_timeout_flag_is_taken_in_milliseconds() {
+        let a = DecideArgs::parse(&args(&["-", "--timeout-ms", "1500"]), "http://x")
+            .expect("must parse");
+        assert_eq!(a.timeout_ms, Some(1500));
+    }
+
+    #[test]
+    fn a_zero_or_non_numeric_timeout_is_refused_by_name() {
+        // Zero would fail every call at once; a typo would silently fall back to two minutes.
+        for bad in ["0", "abc", "-5", "1.5"] {
+            let err = DecideArgs::parse(&args(&["-", "--timeout-ms", bad]), "http://x")
+                .expect_err("must fail");
+            assert!(err.contains("--timeout-ms"), "{bad}: got {err}");
+        }
     }
 
     #[test]
