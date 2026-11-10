@@ -32,8 +32,10 @@ Measured when this was written (criteria run, not the card trusted):
 
 ## Open
 
-- [Issue #1](https://github.com/bitscrafts/laya-rs/issues/1): the install guide. Written; closes
-  when the branch is pushed.
+- [Issue #1](https://github.com/bitscrafts/laya-rs/issues/1): the install guide. Done and closed.
+  No open issues; no pull requests.
+- CI on `master`: the `gate` and `docs` workflows pass. `release.yml` has never run (it needs a
+  `v*` tag, which the owner pushes).
 - Live checks in `scripts/live/` need the model server and the head; they report UNMEASURED
   rather than pass when it is down. Two specs (08, 14) still fail on them.
 - Spec 24 needs a built `target/debug/laya`: its criteria say so only implicitly.
