@@ -1,0 +1,34 @@
+name: docs
+
+# The documentation is generated and checked, so a change that leaves it stale or broken fails here.
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: index and table of contents are current
+        run: |
+          python3 scripts/regen-index.py
+          git diff --exit-code -- _docs/INDEX.md _docs/TOC.md
+      - name: fetch the pinned model source the citations point into
+        run: bash scripts/fetch-model-source.sh
+      - name: every link resolves and every citation points at something real
+        run: python3 scripts/check-doc-citations.py
+      - name: commit messages name no tool
+        run: |
+          for c in $(git rev-list --max-count=20 HEAD); do
+            git log -1 --format=%B "$c" > "$RUNNER_TEMP/msg"
+            bash scripts/check-commit-msg.sh "$RUNNER_TEMP/msg" || echo "::warning::$c names a tool"
+          done
