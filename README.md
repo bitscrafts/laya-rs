@@ -14,13 +14,14 @@ Laya is a small (421M backbone + 26.5M head) calibrated decision model. Unlike a
 LLM it does not generate text — you send a state and typed questions, and get typed
 answers with probabilities in one parallel pass. This workspace wraps it so that:
 
-* **one Rust binary speaks MCP over stdio**, so Hermes, pi, Claude Code, skills and
-  hooks all consume the *same* tool surface with no network listener;
+* **one Rust binary speaks MCP over stdio**, so any MCP host, skill or hook consumes the *same*
+  tool surface with no network listener;
 * every decision lands in a **redb ledger** as a JSON document;
 * the decision payload is **route-shaped** (`label`, `band`, `confidence`), so a DAG
   branch is `route on = "$.payload.label"` and the **graph owns every edge** — the
   model can only select among ports that already exist.
 
+Install and first answer: [`_docs/02-guides/INSTALL.md`](_docs/02-guides/INSTALL.md).
 Design: [`_docs/06-research/01-design.md`](_docs/06-research/01-design.md).
 Corrections (read first): [`_docs/04-development/DESIGN-AMENDMENTS-2026-09-29.md`](_docs/04-development/DESIGN-AMENDMENTS-2026-09-29.md).
 Analysis: [`_docs/06-research/02-analysis-glm-5.3.md`](_docs/06-research/02-analysis-glm-5.3.md).

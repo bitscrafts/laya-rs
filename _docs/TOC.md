@@ -10,6 +10,7 @@ reading order.
 - [Graph example — the guessing game, and the boundary it is built to state](02-guides/GRAPH-EXAMPLE-GUESSING.md)
 - [Graph example — the `wc` word count, and what it exposed](02-guides/GRAPH-EXAMPLE-WORDCOUNT.md)
 - [Installing Laya in Hermes](02-guides/INSTALL-IN-HERMES.md)
+- [Install and first answer](02-guides/INSTALL.md)
 - [Running Laya + llama.cpp](02-guides/RUNNING-LAYA.md)
 - [USING LAYA DAILY — the operator's guide](02-guides/USING-LAYA-DAILY.md)
 - [Guides](02-guides/README.md)

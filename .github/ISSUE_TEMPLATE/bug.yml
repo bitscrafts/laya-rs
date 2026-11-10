@@ -19,6 +19,6 @@ body:
     id: version
     attributes:
       label: Version
-      description: "Output of `laya --version` or the commit hash."
+      description: "The commit hash you built from (`git rev-parse --short HEAD`). `laya` has no `--version` flag yet."
     validations:
       required: true
