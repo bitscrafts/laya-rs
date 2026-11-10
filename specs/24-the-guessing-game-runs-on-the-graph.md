@@ -14,7 +14,7 @@ A cycle is refused (`RunError::Cycle`, measured 2026-10-02), `retry` is refused,
 construct exists. So **the graph plays exactly one round.** Where the iteration lives is a design
 decision this example must state, not hide.
 
-**Project**: /projects/laya-rs · **Phase**: 24 — the graph as a usable surface
+**Project**: laya-rs · **Phase**: 24 — the graph as a usable surface
 
 ## Requirements
 

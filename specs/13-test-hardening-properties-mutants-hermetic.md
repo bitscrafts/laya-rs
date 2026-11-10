@@ -1,7 +1,7 @@
 # laya-rs — spec-13: test hardening — hermetic default suite, a mutation gate, offline property and fuzz tests
 #: depends=- status=pending block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: P1 for R1–R2 (cheap, and each closes a measured hole); P2 for R3–R5.
 - **Status**: SPECIFIED — not yet dispatched
 - **Source**: architecture review 2026-10-01 (`REPORT.md` §4); mutation run `mutants/mutants.out/`
@@ -53,7 +53,7 @@ asserts presence rather than value. Four changes, ordered by value per effort:
   skips) when the backbone is down. That keeps N7/G23 of spec 07.
 - **R2: a mutation gate.** `scripts/mutants-gate.sh` runs `cargo mutants --cargo-test-arg=--lib` on
   `crates/laya-core/src/{policy,agentic,route_payload}.rs` and `crates/laya-graph/src/sched.rs`, into
-  an output dir under `/projects/_tmp/`, and exits with cargo-mutants' code. It is added to
+  an output dir under `_tmp/`, and exits with cargo-mutants' code. It is added to
   `verify-all.sh` as a **separate, opt-in step** (`--with-mutants`), because it takes minutes. The
   tests that kill today's missed mutants are part of this spec (TDD table).
   **The script must set `TMPDIR` and pass `--gitignore true`, and both are load-bearing.** By default
@@ -62,7 +62,7 @@ asserts presence rather than value. Four changes, ordered by value per effort:
   root filesystem and the run died with `No space left on device` while copying
   `nvidia/cusparselt/lib/libcusparseLt.so.0`, leaving a 6.0 GB orphan behind and root `/` at 95%.
   Root `/` has ~22 GB free; `/projects` has ~188 GB. So the script uses
-  `TMPDIR=/projects/_tmp/mutants-tmp`, passes `--gitignore true`, and removes the copy it creates.
+  `TMPDIR=_tmp/mutants-tmp`, passes `--gitignore true`, and removes the copy it creates.
   A gate that can fill the disk and then fail at random is worse than no gate: the failure lands on
   whichever run is unlucky rather than on the change being tested.
 - **R3: offline property tests** (seeded LCG, ≥ 256 cases each, the seed printed on failure):

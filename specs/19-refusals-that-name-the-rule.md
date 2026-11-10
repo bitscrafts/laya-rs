@@ -8,7 +8,7 @@ plus the corrections the review requires to documents that currently state the w
 item here is small; together they mean a flow author cannot write a flow that silently mis-executes
 without being told which rule they broke.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 19 — refusals that name the rule, and an honest record
 **Depends on**: nothing (independent of 17/18; can land first)
 **Source**: `_docs/04-development/OPUS-REVIEW-GENERIC-GRAPHS.md` R4, R5, §6.
@@ -52,7 +52,7 @@ Four corrections, each **annotated with the date and the measurement**, never si
 
 ### R4 — a checked-in regression fixture for the array-order defect
 The two probe flows that demonstrate the defect (`p6-file-order` and `p6c-file-order-control`) are in
-`/projects/_tmp/`. They must be **copied into the repo** as `crates/laya-graph/tests/fixtures/`, so the
+`_tmp/`. They must be **copied into the repo** as `crates/laya-graph/tests/fixtures/`, so the
 defect is reproducible by anyone who clones the repo and not only on this machine. Add the live
 acceptance test that asserts they now produce the **same** executed-node set (spec 17 R1's criterion)
 or, until spec 17 lands, that they produce **different** sets — so the defect is *pinned* either way.
@@ -81,7 +81,7 @@ reject flows that are fine. A validator that refuses everything passes rows 1–
 - [x] `cargo test -p laya-graph --lib the_control_a_well_formed_flow_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `./target/debug/laya graph validate _docs/02-guides/wc-classify-chained.flow.json` _(CORRECTED 2026-10-02: named `laya` on PATH, which a bare shell does not have; the tree's own binary is the thing to test)_ : still valid (the working example survives every new refusal)
 - [x] `git ls-files crates/laya-graph/tests/fixtures/ | grep -c 'p6'` : the two order fixtures are **checked in**
-- [x] the four doc corrections exist and each carries its date and measurement: `cd /projects/laya-rs && grep -l '2026-10-02' _docs/04-development/HEAD-QUESTION-SHAPE-LIMITS.md _docs/02-guides/GRAPH-EXAMPLE-WORDCOUNT.md _docs/03-reference/GRAPH-SPEC.md | wc -l` → 3
+- [x] the four doc corrections exist and each carries its date and measurement: `cd laya-rs && grep -l '2026-10-02' _docs/04-development/HEAD-QUESTION-SHAPE-LIMITS.md _docs/02-guides/GRAPH-EXAMPLE-WORDCOUNT.md _docs/03-reference/GRAPH-SPEC.md | wc -l` → 3
 - [x] `cargo test --workspace`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
 - [x] `python3 scripts/check-doc-citations.py` : every citation resolves

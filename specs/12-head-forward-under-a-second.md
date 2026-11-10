@@ -1,7 +1,7 @@
 # laya-rs — spec-12: the head's forward pass under one second at seq 460, with no change in decisions
 #: depends=- status=done block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: P2, but it unlocks the biggest missed opportunity (`REPORT.md` §6): serving decisions from the proven Rust head in-process, which removes the unsupervised Python sidecar from the hot path.
 - **Status**: SPECIFIED — not yet dispatched
 - **Source**: architecture review 2026-10-01 (`REPORT.md` §1.4); measurements `notes/bench-head.txt` (scratch crate `bench/`, outside the repo)

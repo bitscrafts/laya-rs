@@ -12,7 +12,7 @@ This is a **harness** defect, not a product defect: no node runs late, and the a
 dispatch ordering. But it is a defect, and this project's own standard is that a test whose control is a
 stopwatch is a test that will fail elsewhere.
 
-**Project**: /projects/laya-rs · **Phase**: 27 — deterministic dispatch
+**Project**: laya-rs · **Phase**: 27 — deterministic dispatch
 
 ## Requirements
 

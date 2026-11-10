@@ -1,7 +1,7 @@
 # laya-rs — spec-07: graph executor (part 1/4) — the flow, its refusals, and the lowering
 #: depends=- status=done block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: the foundation everything else in spec 07 builds on; pure and process-free, so it is the safest part to land first.
 - **Status**: **IMPLEMENTED (2026-10-01)** — the flow, its refusals and the lowering; 18 tests, commit `a9e9310`.
 - **Source**: graph capability discussion — `_docs/03-reference/GRAPH-SPEC.md` + `_docs/06-research/03-four-architecture-questions.md` §3 (2026-09-30)

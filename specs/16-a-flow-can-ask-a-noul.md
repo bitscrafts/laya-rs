@@ -17,7 +17,7 @@ So the head's clean arithmetic is unreachable from any flow, and every flow writ
 boundary errors at every threshold it tests. This spec adds the field and wires it, so a flow author
 can choose the shape.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 16 — the flow surface can express what the head is good at
 
 ## Requirements

@@ -20,7 +20,7 @@ So a scheduler that never settles a node **waits forever instead of reporting**,
 with no test name in the output — the reason `cargo-mutants` classifies it separately and the gate exits
 **3** rather than **2**.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 23 — a hang becomes a named failure
 **Source**: `_docs/04-development/SCHEDULER-SINGLE-GUARD.md` (measured from the gate's own preserved
 artefacts, 2026-10-02).
@@ -74,7 +74,7 @@ Rows 1 and 3 are the ones the mutants would exercise; rows 2, 4 and 5 are the ma
 - [x] `cargo test -p laya-graph --lib the_control_a_consistent_table_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib a_scheduler_that_cannot_settle_a_node_reports_which_one 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib the_control_a_satisfiable_graph_completes 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] **the mutants stop hanging** — `cd /projects/laya-rs && bash scripts/mutants-gate.sh` : `timeout.txt` is now **empty** and `missed.txt` is empty. Paste both counts. **This is the criterion the spec exists for**, and it must be the real run, not a subset.
+- [x] **the mutants stop hanging** — `cd laya-rs && bash scripts/mutants-gate.sh` : `timeout.txt` is now **empty** and `missed.txt` is empty. Paste both counts. **This is the criterion the spec exists for**, and it must be the real run, not a subset.
 - [x] `cargo test --workspace`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
 - [x] `cargo fmt --all --check` : clean
@@ -105,7 +105,7 @@ starting** — and note that the mutation-gate row can only be judged by reading
 ### The headline criterion, judged by the ARTEFACTS and not the exit code
 
 ```
-/projects/_tmp/mutants-out-laya-rs/mutants.out/
+_tmp/mutants-out-laya-rs/mutants.out/
   missed.txt    0 bytes     <- zero survivors
   timeout.txt   0 bytes     <- THE TWO HANGS ARE GONE
   caught.txt    216 mutants <- was 193, so the two hanging mutants are now CAUGHT

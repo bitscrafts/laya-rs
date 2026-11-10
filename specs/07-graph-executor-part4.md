@@ -1,7 +1,7 @@
 # laya-rs — spec-07: graph executor (part 4/4) — the CLI surface, and the acceptance test
 #: depends=- status=done block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: last by dependency — the acceptance test is what converts the whole design from argument into evidence, and it needs parts 1–3 landed.
 - **Status**: **IMPLEMENTED (2026-10-01)** — the `laya graph` CLI surface (`validate`/`render`/`run`) and R-ACC: a real flow routes a decision through the live backbone and the real `laya-mcp`, with the two fixtures reaching DIFFERENT branches. 59 tests in `laya-graph` (incl. 3 acceptance).
 - **Source**: graph capability discussion — `_docs/06-research/03-four-architecture-questions.md` §3.4, §5 item 6 ("one real flow end to end with `laya-mcp` as judge") (2026-09-30)

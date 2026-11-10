@@ -1,7 +1,7 @@
 # laya-rs — spec-07: graph executor (part 3/4) — the scheduler, and running nodes
 #: depends=- status=done block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: this is where a graph stops being a document and starts doing work — and where every failure mode that "looks like success" lives.
 - **Status**: **IMPLEMENTED (2026-10-01)** — the scheduler, `shell`/`mcp` executors, run records; 51 tests in the crate, commit `574354b`.
 - **Source**: graph capability discussion — `_docs/03-reference/GRAPH-SPEC.md` Stage 4; `_docs/06-research/03-four-architecture-questions.md` §3.4, §3.5 (2026-09-30)

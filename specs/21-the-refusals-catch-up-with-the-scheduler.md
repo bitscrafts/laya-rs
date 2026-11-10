@@ -16,7 +16,7 @@ A refusal that outlives its reason is the same defect class as a field that does
 a deliberate rule and is an accident of sequence. And `allow_failure` on a decide is now **worse than
 refused** — it is accepted, looks like it is honoured for one beat, and then the run stops.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 21 — the refusals catch up with the scheduler
 **Depends on**: spec 17 (`ac9e94f`) — done.
 **Source**: measured here on 2026-10-02; `specs/20-the-format-is-a-contract.md` row 8.

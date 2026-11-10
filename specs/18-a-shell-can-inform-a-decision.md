@@ -11,7 +11,7 @@ received at run time can inform a decision. That is the gap that makes graphs **
 This spec adds the smallest mechanism that closes it: **one restricted placeholder, `{{node_id}}`**,
 meaning *the trimmed stdout of a node in this decide's `depends_on`*. Not an expression language.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 18 — graphs become general
 **Depends on**: spec 17 (a scheduler that honours `depends_on` before a decide runs).
 **Source**: `_docs/04-development/OPUS-REVIEW-GENERIC-GRAPHS.md` R2.
@@ -84,7 +84,7 @@ watching it go red, and restoring.
 - [x] `cargo test -p laya-graph --lib an_unlisted_reference_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib a_failed_referent_skips_the_decide_rather_than_asking_over_empty 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib a_literal_prompt_without_placeholders_is_unchanged 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] **a real end-to-end `wc` example that genuinely depends on `wc`** exists and is run: write `/projects/laya-rs/_docs/02-guides/wc-classify-measured.flow.json` where the shell emits ONLY the number (`wc -w < file`) and the decide's **`prompt` is the state** `The word count in the file is {{count}} words.` and its **`question` is separate**: `Is it greater than 300?`. Do NOT put the question in the prompt -- `prompt` is the state handed to the head, `question` is what it is asked. Run it on both documents and paste both reports showing the branches **differ**.
+- [x] **a real end-to-end `wc` example that genuinely depends on `wc`** exists and is run: write `_docs/02-guides/wc-classify-measured.flow.json` where the shell emits ONLY the number (`wc -w < file`) and the decide's **`prompt` is the state** `The word count in the file is {{count}} words.` and its **`question` is separate**: `Is it greater than 300?`. Do NOT put the question in the prompt -- `prompt` is the state handed to the head, `question` is what it is asked. Run it on both documents and paste both reports showing the branches **differ**.
 - [x] `./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the older committed example still runs
 - [x] `cargo test --workspace`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
@@ -155,6 +155,6 @@ makes spec 20's interim refusal of that field **stale** — filed as spec 21.
 
 ### Note: this criterion named `laya` (the PATH binary), which is STALE
 
-`/root/.local/bin/laya` was built at 14:27 and is not a build of this tree. Both CLI criteria that
+`laya` was built at 14:27 and is not a build of this tree. Both CLI criteria that
 named it have been re-pointed at `./target/debug/laya` and verified that way. **A criterion must name
 the binary it tests** — this is the third spec in this batch to need that correction.

@@ -22,7 +22,7 @@ The band is not a usable signal either: `low` holds both a correct answer (0.060
 selects the port. Every failing case above is expressible in a single line of shell — `[ "$n" = 0 ]`,
 `cargo test`, `[ "$guess" = "$secret" ]` — so one primitive closes all of them.
 
-**Project**: /projects/laya-rs · **Phase**: 25 — the graph decides on its own
+**Project**: laya-rs · **Phase**: 25 — the graph decides on its own
 
 ## Requirements
 

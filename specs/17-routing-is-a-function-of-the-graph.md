@@ -12,7 +12,7 @@ pruned, or run **neither** of two branches a decision selected — all while exi
 Project rule 2 in `AGENTS.md` is *"the graph owns every edge — the model never does"*. Today the
 **array order** owns the edges.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 17 — the scheduler owns the edges
 **Source**: `_docs/04-development/OPUS-REVIEW-GENERIC-GRAPHS.md` (C1, C2, C5, D1), re-verified by the
 orchestrator with `laya graph run` on 2026-10-02.
@@ -28,7 +28,7 @@ Three runs, all exiting 0, `stopped_early: false`, `not_started: []`:
 | `p13-shared-target` | two decides both porting to `handle_yes`/`handle_no` | **neither handler ran** | both handlers |
 | `p7-join` | `needs_long` `depends_on` `[long_path, prep]`; the decide picks `short_path` | **`needs_long` RAN** despite `long_path` never running | not `needs_long` |
 
-Both the p6 and the control are in `/projects/_tmp/opus-graph-analysis/` and both are re-runnable.
+Both the p6 and the control are in `_tmp/opus-graph-analysis/` and both are re-runnable.
 **The pair is the proof**: same content, only the array order differs, different execution.
 
 Three mechanisms, from the code:
@@ -101,7 +101,7 @@ paths must be shown **not** to suppress live ones. A fix that skips everything p
 - [x] `cargo test -p laya-graph --lib a_node_whose_dependency_was_pruned_is_skipped_and_named 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib two_routes_sharing_a_target_both_reach_it 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib the_control_a_branch_that_is_selected_still_runs 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] the two order fixtures produce the SAME executed-node set, **run through the CLI**, not only in a unit test: `cd /projects/laya-rs && for f in p6-file-order p6c-file-order-control; do laya graph run /projects/_tmp/opus-graph-analysis/$f.flow.json; done` — paste both reports
+- [x] the two order fixtures produce the SAME executed-node set, **run through the CLI**, not only in a unit test: `cd laya-rs && for f in p6-file-order p6c-file-order-control; do laya graph run _tmp/opus-graph-analysis/$f.flow.json; done` — paste both reports
 - [x] `./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the committed example still runs
 - [x] `cargo test --workspace` : no regression
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
@@ -193,7 +193,7 @@ and a criteria list that says otherwise would be the defect this project keeps f
 
 ### Note: both CLI criteria above named `laya` (the PATH binary), which is STALE
 
-`/root/.local/bin/laya` was built at 14:27 and is not a build of this tree. It reports flows that this
+`laya` was built at 14:27 and is not a build of this tree. It reports flows that this
 tree refuses as `is valid`, so a criterion written as `laya graph validate|run ...` **passes without
 testing this change at all**. Both have been re-pointed at `./target/debug/laya`, and both were
 verified that way. This is the third time this session that a criterion's **input** rather than its

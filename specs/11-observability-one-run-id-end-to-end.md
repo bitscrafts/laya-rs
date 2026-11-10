@@ -1,7 +1,7 @@
 # laya-rs — spec-11: observability — one run id end to end, every judgement recorded, a timeline per run
 #: depends=- status=done block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: P1. At 3 a.m. the question is "which decision sent run X down branch Y, and what did the gate let through". Today neither can be answered from the artefacts.
 - **Status**: SPECIFIED — not yet dispatched
 - **Source**: architecture review 2026-10-01 (`REPORT.md` §2)
@@ -161,16 +161,16 @@ cannot be offline.
 
 **New, each watched to FAIL on `b0ee704`:**
 
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_decide_records_the_callers_run_id_and_node_id 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib every_judging_tool_writes_a_ledger_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_gate_row_carries_the_decision_and_never_the_command 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 + N3
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib bucket_clamped_is_not_a_copy_of_saturated 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
-- [x]  `cd /projects/laya-rs && cargo test -p laya-graph --lib a_record_separates_queue_wait_from_execution 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R5
-- [x]  `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance the_ledger_row_joins_the_run_report -- --include-ignored 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1 end to end (**live**; see spec 13 R1 for why it is ignored by default)
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib a_decide_records_the_callers_run_id_and_node_id 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib every_judging_tool_writes_a_ledger_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib a_gate_row_carries_the_decision_and_never_the_command 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 + N3
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib bucket_clamped_is_not_a_copy_of_saturated 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
+- [x]  `cd laya-rs && cargo test -p laya-graph --lib a_record_separates_queue_wait_from_execution 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R5
+- [x]  `cd laya-rs && cargo test -p laya-graph --test acceptance the_ledger_row_joins_the_run_report -- --include-ignored 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1 end to end (**live**; see spec 13 R1 for why it is ignored by default)
 - [x] `cargo test -p laya-mcp --lib the_ledger_state_is_announced_at_startup 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib the_control_an_unset_ledger_directory_is_announced_as_off 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4's control — the off state must be **announced**, which is the whole point of the requirement, and the deployment failure this spec answers
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib each_tool_call_emits_one_structured_event 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R6
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib events_carry_the_run_and_node_id 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R6 — an event without the ids answers nothing, so the ids are the requirement, not the JSON shape
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib the_control_an_unset_ledger_directory_is_announced_as_off 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4's control — the off state must be **announced**, which is the whole point of the requirement, and the deployment failure this spec answers
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib each_tool_call_emits_one_structured_event 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R6
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib events_carry_the_run_and_node_id 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R6 — an event without the ids answers nothing, so the ids are the requirement, not the JSON shape
 - [x] `cargo test -p laya-store --lib stats_reports_per_tool_latency_and_gate_decisions 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7
 - [x] `cargo test -p laya-store --lib stats_opens_the_store_read_only 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7 — a read must not take the exclusive write lock
 - [x] `cargo test -p laya-store --lib merged_rows_sort_by_wall_time_not_process_relative_nanos 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R8 — two rows from different processes, written out of order, must sort correctly after compaction
@@ -178,12 +178,12 @@ cannot be offline.
 - [x] `cargo test -p laya-mcp --lib a_refused_gate_is_recorded 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 — the refusal row, which is the one an incident review needs
 - [x] `cargo test -p laya-cli --lib stats_does_not_take_the_write_lock 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7's read-only requirement
 - [x] `cargo test -p laya-store --lib the_documented_fields_exist_on_the_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R9 — every field the ledger doc tabulates is a field of `DecisionRow`; this fails today on `p` and `score`
-- [x]  `cd /projects/laya-rs && python3 scripts/live/check-observability.py`: **live**. It drives the deployed server, asserts a ledger segment is written for a `gate` call, that the row carries `run_id`/`node_id` when they are supplied, and that the command text never appears in the segment. Exits non-zero if the ledger is off — because "off" and "broken" must not look the same
+- [x]  `cd laya-rs && python3 scripts/live/check-observability.py`: **live**. It drives the deployed server, asserts a ledger segment is written for a `gate` call, that the row carries `run_id`/`node_id` when they are supplied, and that the command text never appears in the segment. Exits non-zero if the ledger is off — because "off" and "broken" must not look the same
 
 **Carried re-checks:**
 
-- [x]  `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -qE '^laya-(mcp|store)' crates/laya-graph/Cargo.toml`: N1. Control: `grep -qE '^laya-store' crates/laya-mcp/Cargo.toml` succeeds
-- [x]  `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings`
+- [x]  `cd laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -qE '^laya-(mcp|store)' crates/laya-graph/Cargo.toml`: N1. Control: `grep -qE '^laya-store' crates/laya-mcp/Cargo.toml` succeeds
+- [x]  `cd laya-rs && cargo clippy --workspace --all-targets -- -D warnings`
 
 ---
 
@@ -261,7 +261,7 @@ in that order.
 
 **Evidence and provenance.** The reviewer was killed by a stream timeout while writing its report,
 so no report file exists; its reasoning was recovered from the run log to
-`/projects/_tmp/glm-observability/REPORT.RECOVERED.md` and is **raw material, not a verified
+`_tmp/glm-observability/REPORT.RECOVERED.md` and is **raw material, not a verified
 review**. The four claims above were independently confirmed against the tree, which is why they
 are recorded here; anything else in that log is unreviewed and should be treated as a lead.
 

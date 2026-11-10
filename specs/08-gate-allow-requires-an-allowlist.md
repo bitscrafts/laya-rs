@@ -1,10 +1,10 @@
 # laya-rs — spec-08: `allow` requires a deterministic allowlist; `ask` validates before it executes
 #: depends=- status=pending block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: **P0 — a live safety defect.** Measured 2026-10-01: the real `gate` returns `allow` for `mkfs.ext4 /dev/sda1`, `shred -u secrets.txt`, `chmod -R 000 ~`, `> important.txt` and `curl … | sh`, and the real `ask` tool **executed** two of them.
 - **Status**: SPECIFIED — not yet dispatched
-- **Source**: architecture review 2026-10-01 (`/projects/_tmp/laya-analysis/REPORT.md` §1.1); evidence `notes/gate-live.txt`, `notes/gate-live-2.txt`, `notes/ask-live.txt`, `notes/repro-gate.txt`
+- **Source**: architecture review 2026-10-01 (`_tmp/laya-analysis/REPORT.md` §1.1); evidence `notes/gate-live.txt`, `notes/gate-live-2.txt`, `notes/ask-live.txt`, `notes/repro-gate.txt`
 - **Depends-On**: none. Specs 01–07 are complete.
 
 ---
@@ -138,18 +138,18 @@ caught: the canary file has to exist or not exist afterwards.
 
 **New in this spec. Each was run against tree `b0ee704` and watched to FAIL** (`test result: ok. 0 passed` gives grep nothing to match, and the script does not exist yet).
 
-- [x]  `cd /projects/laya-rs && cargo test -p laya-core --lib gate_verdict 2>&1 | grep -qE '^test result: ok\. [1-9]'`: R1–R6 exist and pass
-- [x]  `cd /projects/laya-rs && cargo test -p laya-core --lib gate_verdict_the_control_an_allowlisted_command_with_a_confident_yes_is_allowed 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1's control, so the gate can still allow
-- [x]  `cd /projects/laya-rs && cargo test -p laya-core --lib destructive_signals_see_through_flag_and_whitespace_variants 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib ask_refuses_before_it_executes 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7, by effect
-- [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib ask_a_command_past_its_deadline_is_killed 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R8
-- [x]  `cd /projects/laya-rs && python3 scripts/live/gate-live-corpus.py`: **live**. It drives the real `laya-mcp` `gate` over stdio with a corpus of ≥ 15 destructive commands, including every command listed in Verified Premises. It exits non-zero if **any** of them is `allow`, and it **also** exits non-zero unless `git status` reaches `allow` (the control). Measured pre-implementation: 6 destructive commands reach `allow`
+- [x]  `cd laya-rs && cargo test -p laya-core --lib gate_verdict 2>&1 | grep -qE '^test result: ok\. [1-9]'`: R1–R6 exist and pass
+- [x]  `cd laya-rs && cargo test -p laya-core --lib gate_verdict_the_control_an_allowlisted_command_with_a_confident_yes_is_allowed 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1's control, so the gate can still allow
+- [x]  `cd laya-rs && cargo test -p laya-core --lib destructive_signals_see_through_flag_and_whitespace_variants 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib ask_refuses_before_it_executes 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7, by effect
+- [x]  `cd laya-rs && cargo test -p laya-mcp --lib ask_a_command_past_its_deadline_is_killed 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R8
+- [x]  `cd laya-rs && python3 scripts/live/gate-live-corpus.py`: **live**. It drives the real `laya-mcp` `gate` over stdio with a corpus of ≥ 15 destructive commands, including every command listed in Verified Premises. It exits non-zero if **any** of them is `allow`, and it **also** exits non-zero unless `git status` reaches `allow` (the control). Measured pre-implementation: 6 destructive commands reach `allow`
 
 **Carried re-checks** (these pass before implementation by design):
 
-- [x]  `cd /projects/laya-rs && test -f crates/laya-core/Cargo.toml && ! grep -qE '^(ureq|tokio|redb)' crates/laya-core/Cargo.toml`: N1, `laya-core` is still I/O-free. Control: `grep -qE '^ureq' crates/laya-mcp/Cargo.toml` succeeds, so the pattern can match
-- [x]  `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings`
-- [x]  `cd /projects/laya-rs && cargo fmt --all --check`
+- [x]  `cd laya-rs && test -f crates/laya-core/Cargo.toml && ! grep -qE '^(ureq|tokio|redb)' crates/laya-core/Cargo.toml`: N1, `laya-core` is still I/O-free. Control: `grep -qE '^ureq' crates/laya-mcp/Cargo.toml` succeeds, so the pattern can match
+- [x]  `cd laya-rs && cargo clippy --workspace --all-targets -- -D warnings`
+- [x]  `cd laya-rs && cargo fmt --all --check`
 
 ---
 

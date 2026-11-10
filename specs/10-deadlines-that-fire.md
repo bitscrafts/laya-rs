@@ -1,7 +1,7 @@
 # laya-rs — spec-10: deadlines that fire — node `timeout`, and a client that kills what it abandons
 #: depends=- status=done block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: P1. A declared field that does nothing is the `irreversible` defect again (HANDOFF, "decorative"). An unbounded child process is how a 3 a.m. run hangs with nothing to read.
 - **Status**: SPECIFIED — not yet dispatched
 - **Source**: architecture review 2026-10-01 (`REPORT.md` §1.3)
@@ -105,7 +105,7 @@ and the orphan is the defect.
 - [x] `cargo test -p laya-graph --lib the_control_a_node_without_a_timeout_is_unbounded_as_before 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1 control
 - [x] `cargo test -p laya-graph --lib a_timeout_leaves_no_orphan 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2
 - [x] `cargo test -p laya-cli --lib a_hung_server_is_killed_not_awaited_forever 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
-- [x]  `cd /projects/laya-rs && cargo build -q -p laya-cli && d=$(mktemp -d) && printf '%s' '{"flow":"t","nodes":[{"id":"s","kind":"shell","run":"sleep 3","timeout":1}]}' > "$d/f.json" && ! timeout 10 ./target/debug/laya graph run "$d/f.json" >/dev/null 2>&1`: **live, end to end**. The CLI must report the run as failed. Measured pre-implementation: exit 0, `completed`, `duration_ms: 3002`
+- [x]  `cd laya-rs && cargo build -q -p laya-cli && d=$(mktemp -d) && printf '%s' '{"flow":"t","nodes":[{"id":"s","kind":"shell","run":"sleep 3","timeout":1}]}' > "$d/f.json" && ! timeout 10 ./target/debug/laya graph run "$d/f.json" >/dev/null 2>&1`: **live, end to end**. The CLI must report the run as failed. Measured pre-implementation: exit 0, `completed`, `duration_ms: 3002`
 
 **Carried re-checks:**
 

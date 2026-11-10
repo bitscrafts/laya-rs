@@ -1,7 +1,7 @@
 # laya-rs — spec-07: graph executor (part 2/4) — composition and the render
 #: depends=- status=done block=-
 
-- **Project**: `/projects/laya-rs`
+- **Project**: `laya-rs`
 - **Priority**: subflows are what make a flow library reusable; the renderer is what keeps the execution form auditable, and it must exist BEFORE any store.
 - **Status**: **IMPLEMENTED (2026-10-01)** — subflow expansion and the render; 33 tests in the crate, commit `9cf2aa4`.
 - **Source**: graph capability discussion — `_docs/03-reference/GRAPH-SPEC.md` §Composition + Part 3; `_docs/06-research/03-four-architecture-questions.md` §2.3, §3.6 (2026-09-30)

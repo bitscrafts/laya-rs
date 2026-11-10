@@ -61,10 +61,10 @@ integer ms. No other output; exit 0 even if a call is slow. (Those are REAL gate
 — ledger rows, outcomes joinable — that is intended and part of the corpus.)
 
 ### R2 — loop runs the skill's driver with THIS spec
-`autoresearch-driver.sh /projects/laya-rs $PWD/scripts/archive/ar-metric-gate-latency.sh
+`autoresearch-driver.sh laya-rs $PWD/scripts/archive/ar-metric-gate-latency.sh
 specs/30-autoresearch-gate-latency.md gate-lat`; ledger at the project's `_tmp/autoresearch/
 results-gate-lat.tsv`; one HANDOFF.md line per experiment; worktree
-`/projects/_tmp/autoresearch-wt/laya-rs-gate-lat` on branch `autoresearch/gate-lat`.
+`_tmp/autoresearch-wt/laya-rs-gate-lat` on branch `autoresearch/gate-lat`.
 
 ### R3 — keep-seam live
 Every experiment row records `laya_keep=yes|no conf=0.xx` from `laya decide -` (state =

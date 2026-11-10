@@ -18,7 +18,7 @@ not exist**: the string `$.inputs.doc` is sent to the head as literal text, and 
 This spec makes every declared thing either **work**, **be refused by name**, or **be documented as
 carrying no behaviour** — and adds the test that makes that true for every field added later.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 20 — the format is a contract
 **Source**: `_docs/04-development/OPUS-ROUND2-BUILD-ORDER.md` (N1–N5, §2, §6); every item re-verified
 by the orchestrator with `laya graph run`. Ranked **first** by the review: hours of work, no execution
@@ -134,10 +134,10 @@ spec 19 proposed refusals too broad to pass this; they were dropped for exactly 
 - [x] `cargo test -p laya-graph --lib a_port_target_that_names_no_node_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib inputs_and_dollar_inputs_are_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] `cargo test -p laya-graph --lib retry_is_refused_and_names_the_alternative 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] **every committed flow still validates, run through the FRESH build** — `cd /projects/laya-rs && for f in $(git ls-files '_docs/**/*.flow.json' 'crates/laya-graph/tests/fixtures/*.json'); do ./target/debug/laya graph validate "$f" >/dev/null || echo "BROKE: $f"; done` → no output
+- [x] **every committed flow still validates, run through the FRESH build** — `cd laya-rs && for f in $(git ls-files '_docs/**/*.flow.json' 'crates/laya-graph/tests/fixtures/*.json'); do ./target/debug/laya graph validate "$f" >/dev/null || echo "BROKE: $f"; done` → no output
 
   **CORRECTED 2026-10-02: this criterion originally said `laya graph validate`, which is VACUOUS.** The
-  `laya` on `PATH` (`/root/.local/bin/laya`) was built at 14:27 and is **not** a build of this tree; it
+  `laya` on `PATH` (`laya`) was built at 14:27 and is **not** a build of this tree; it
   reports a typo'd-key flow and a dangling-target flow as `is valid`, exit 0, so the loop passes
   without testing anything. Measured both ways: installed binary → `.../typo.flow.json is valid`;
   `./target/debug/laya` → `unknown field \`depend_on\` ... did you mean \`depends_on\`?`, exit 1.

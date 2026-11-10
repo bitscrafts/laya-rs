@@ -8,15 +8,15 @@ the name through the **caller's `PATH`**. So every worked example in `_docs/02-g
 according to how the reader's shell happens to be set up:
 
 ```
-WITHOUT /root/.local/bin on PATH   -> FAILED gt300 | failed to spawn `laya-mcp` … No such file or directory
-WITH    /root/.local/bin on PATH   -> ALL OK
+WITHOUT ~/.local/bin on PATH   -> FAILED gt300 | failed to spawn `laya-mcp` … No such file or directory
+WITH    ~/.local/bin on PATH   -> ALL OK
 WITH LAYA_MCP_BIN=…/laya-mcp       -> ALL OK
 ```
 
 Same flow, same machine, same minute — **deterministic**, and it depends only on the environment. This
 is why the failure looked intermittent for several checks: my own scripts disagreed about `PATH`.
 
-**Project**: `/projects/laya-rs`
+**Project**: `laya-rs`
 **Phase**: 22 — a binary finds its sibling
 **Source**: `_docs/03-reference/EXAMPLES-NEED-LAYA-MCP-ON-PATH.md` (measured 2026-10-02).
 
@@ -73,10 +73,10 @@ picks one candidate passes row 1**, so the near-misses are what make it a test.
 - [x] `cargo test -p laya-cli --lib the_error_lists_every_path_tried 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **the examples run with no laya directory on PATH** — every node, including the decide, must succeed. Run it and check the DECIDE by name, not just that *something* succeeded:
 
-      cd /projects/laya-rs && env PATH=/usr/bin:/bin ./target/debug/laya graph run _docs/02-guides/wc-classify-measured.flow.json 2>/dev/null | python3 -c "import sys,json; d=json.loads(next(l for l in sys.stdin if l.startswith('{'))); bad=[r['node_id'] for r in d['records'] if not r['success']]; print('FAILED:', bad) if bad else print('all nodes succeeded')"
+      cd laya-rs && env PATH=/usr/bin:/bin ./target/debug/laya graph run _docs/02-guides/wc-classify-measured.flow.json 2>/dev/null | python3 -c "import sys,json; d=json.loads(next(l for l in sys.stdin if l.startswith('{'))); bad=[r['node_id'] for r in d['records'] if not r['success']]; print('FAILED:', bad) if bad else print('all nodes succeeded')"
 
   **This is the criterion the whole spec exists for**, and it must be run with the environment stripped, because the failure only appears that way. Do NOT substitute a `grep` for `"success":true`: **that grep is satisfied by the shell node alone** (measured: with a stripped PATH the decide failed while one `"success":true` was still printed), so it would pass while the defect is present. A criterion must be satisfied only by the thing it names.
-- [x] **the control**: the same command WITH `/root/.local/bin` on `PATH` also succeeds (the fix must not break the documented setup)
+- [x] **the control**: the same command WITH `~/.local/bin` on `PATH` also succeeds (the fix must not break the documented setup)
 - [x] `env -u LAYA_MCP_BIN ./target/debug/laya doctor 2>&1 | grep -iE 'laya-mcp|server'` : names which server was resolved (R3)
 - [x] `cargo test --workspace`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
@@ -110,7 +110,7 @@ passed with nothing implemented. **Verify each is non-vacuous before starting.**
 $ env PATH=/usr/bin:/bin ./target/debug/laya graph run _docs/02-guides/wc-classify-measured.flow.json
   stripped PATH  -> ALL NODES SUCCEEDED        (before this spec: FAILED gt300)
 
-$ env PATH=/root/.local/bin:/usr/bin:/bin ./target/debug/laya graph run …same flow…
+$ env PATH=~/.local/bin:/usr/bin:/bin ./target/debug/laya graph run …same flow…
   full PATH      -> ALL NODES SUCCEEDED        (the documented setup still works)
 ```
 
@@ -121,7 +121,7 @@ $ env PATH=/root/.local/bin:/usr/bin:/bin ./target/debug/laya graph run …same 
 
 ```
 $ laya doctor
-  laya-mcp  : /projects/laya-rs/target/debug/laya-mcp (resolved via sibling)
+  laya-mcp  : target/debug/laya-mcp (resolved via sibling)
 
 $ LAYA_MCP_BIN=/nope/nothing laya graph run …
   laya: LAYA_MCP_BIN is set to `/nope/nothing` but that does not resolve to a `laya-mcp`;

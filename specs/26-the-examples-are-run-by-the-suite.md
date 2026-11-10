@@ -19,7 +19,7 @@ That gap is not hypothetical. It hid three defects that a run would have shown i
 
 Each was invisible to validation. **Reading and parsing a flow says nothing about what it does.**
 
-**Project**: /projects/laya-rs · **Phase**: 26 — the examples are proof, not decoration
+**Project**: laya-rs · **Phase**: 26 — the examples are proof, not decoration
 
 ## Requirements
 
