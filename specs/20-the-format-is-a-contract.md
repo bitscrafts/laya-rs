@@ -128,12 +128,12 @@ spec 19 proposed refusals too broad to pass this; they were dropped for exactly 
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_serialised_field_has_a_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unknown_key_is_refused 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unknown_port_key_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_port_target_that_names_no_node_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib inputs_and_dollar_inputs_are_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib retry_is_refused_and_names_the_alternative 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib every_serialised_field_has_a_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib an_unknown_key_is_refused 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib an_unknown_port_key_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_port_target_that_names_no_node_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib inputs_and_dollar_inputs_are_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib retry_is_refused_and_names_the_alternative 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **every committed flow still validates, run through the FRESH build** — `cd /projects/laya-rs && for f in $(git ls-files '_docs/**/*.flow.json' 'crates/laya-graph/tests/fixtures/*.json'); do ./target/debug/laya graph validate "$f" >/dev/null || echo "BROKE: $f"; done` → no output
 
   **CORRECTED 2026-10-02: this criterion originally said `laya graph validate`, which is VACUOUS.** The
@@ -142,11 +142,11 @@ spec 19 proposed refusals too broad to pass this; they were dropped for exactly 
   without testing anything. Measured both ways: installed binary → `.../typo.flow.json is valid`;
   `./target/debug/laya` → `unknown field \`depend_on\` ... did you mean \`depends_on\`?`, exit 1.
   **A criterion must name the binary it is testing.**
-- [x] `cd /projects/laya-rs && grep -c 'inputs' _docs/03-reference/GRAPH-SPEC.md` : the `$.inputs` examples are gone (or annotated as withdrawn, per the project rule)
-- [x] `cd /projects/laya-rs && cargo test --workspace`
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `grep -c 'inputs' _docs/03-reference/GRAPH-SPEC.md` : the `$.inputs` examples are gone (or annotated as withdrawn, per the project rule)
+- [x] `cargo test --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cargo fmt --all --check` : clean
+- [x] `python3 scripts/check-doc-citations.py` : every citation resolves
 
 **Every criterion uses `grep -qE '^test result: ok\. 1 passed'`.** Not `ok\.` — a criterion that
 accepts `ok. 0 passed` is satisfied by a test name that matches nothing, which is how spec 16's

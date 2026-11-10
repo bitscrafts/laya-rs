@@ -150,31 +150,31 @@ watched to FAIL.** A criterion seen only to pass is an unverified criterion.
 specification `laya-graph` did not match any packages"*, which is the expected
 pre-implementation failure: the crate does not exist yet.)
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph` — the whole crate (R1–R5)
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity: the suite is not empty (R1)
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_fallback_is_last_and_a_real_answer_does_not_take_it 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R5, the lowering acceptance test
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_genuinely_unmatched_answer_takes_the_fallback 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R5's control: the fallback is reachable
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib on_refuses_anything_that_is_not_member_access 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R3: the determinism guarantee
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib agent_and_quorum_are_not_supported_kinds 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R2: the deferred kinds are refused, not silently accepted
-- [x] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings` — zero, not below baseline (N3)
-- [x] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part1'` — R15: this spec is discovered by the runner. **Measured pre-implementation: FAILS** — the runner listed exactly `01..06` and never mentioned spec 07, which is the defect R15 exists to fix. **Uses `--list-specs`, not a bare run**: a bare `run-exit-criteria.py | grep` makes the runner evaluate a criterion that re-runs the runner, and it recursed (measured 2026-10-01: 18 nested processes). `--list-specs` runs no criterion, so it cannot recurse
-- [x] `cd /projects/laya-rs && test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/{flow,validate,lower,on_expr,graph,error}.rs` — N4: part 1's own modules are process-free. **The `test -d` guard is mandatory**: without it, `! grep -r` on a missing directory exits 2, which `!` inverts to success — the check would pass on a crate that was never created. **Scope narrowed to part 1's six files on 2026-10-01**: the criterion originally grepped the whole `src/`, and part 3 legitimately added `std::process` (the `shell` executor, N4 for *that* part says process IS used), so the crate-wide form started failing on correct code. A criterion scoped to the whole crate cannot express "this part is process-free" once another part may use the same tool"
+- [x] `cargo test -p laya-graph` — the whole crate (R1–R5)
+- [x] `cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity: the suite is not empty (R1)
+- [x] `cargo test -p laya-graph --lib the_fallback_is_last_and_a_real_answer_does_not_take_it 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R5, the lowering acceptance test
+- [x] `cargo test -p laya-graph --lib the_control_a_genuinely_unmatched_answer_takes_the_fallback 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R5's control: the fallback is reachable
+- [x] `cargo test -p laya-graph --lib on_refuses_anything_that_is_not_member_access 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R3: the determinism guarantee
+- [x] `cargo test -p laya-graph --lib agent_and_quorum_are_not_supported_kinds 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R2: the deferred kinds are refused, not silently accepted
+- [x] `cargo clippy -p laya-graph --all-targets -- -D warnings` — zero, not below baseline (N3)
+- [x] `python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part1'` — R15: this spec is discovered by the runner. **Measured pre-implementation: FAILS** — the runner listed exactly `01..06` and never mentioned spec 07, which is the defect R15 exists to fix. **Uses `--list-specs`, not a bare run**: a bare `run-exit-criteria.py | grep` makes the runner evaluate a criterion that re-runs the runner, and it recursed (measured 2026-10-01: 18 nested processes). `--list-specs` runs no criterion, so it cannot recurse
+- [x] `test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/{flow,validate,lower,on_expr,graph,error}.rs` — N4: part 1's own modules are process-free. **The `test -d` guard is mandatory**: without it, `! grep -r` on a missing directory exits 2, which `!` inverts to success — the check would pass on a crate that was never created. **Scope narrowed to part 1's six files on 2026-10-01**: the criterion originally grepped the whole `src/`, and part 3 legitimately added `std::process` (the `shell` executor, N4 for *that* part says process IS used), so the crate-wide form started failing on correct code. A criterion scoped to the whole crate cannot express "this part is process-free" once another part may use the same tool"
 
   **Control for the line above** — the pattern must still match a file that genuinely *does* use `std::process`, or the `!` is proving nothing. `crates/laya-graph/src/node.rs` is exactly that file (part 3's `shell` executor), so the same pattern with the `!` removed must SUCCEED there:
 
-- [x] `cd /projects/laya-rs && test -f crates/laya-graph/src/node.rs && grep -qE 'std::process' crates/laya-graph/src/node.rs` — near-miss control: the pattern matches where the symbol legitimately exists, so its absence from part 1's six files is a real result rather than a pattern that can never match
+- [x] `test -f crates/laya-graph/src/node.rs && grep -qE 'std::process' crates/laya-graph/src/node.rs` — near-miss control: the pattern matches where the symbol legitimately exists, so its absence from part 1's six files is a real result rather than a pattern that can never match
 
 **Carried re-checks** — these guard earlier work against a regression introduced by
 this part. They pass before implementation *by design*, so their passing is not
 evidence that this part is done; they are listed so a later part cannot quietly
 break an earlier guarantee.
 
-- [x] `cd /projects/laya-rs && test -f crates/laya-core/Cargo.toml && ! grep -q 'laya-graph' crates/laya-core/Cargo.toml` — N2: `laya-core` stays I/O-free
-- [x] `cd /projects/laya-rs && test -f crates/laya-mcp/Cargo.toml && ! grep -q 'laya-graph' crates/laya-mcp/Cargo.toml` — N2: the judge does not depend on the executor
-- [x] `cd /projects/laya-rs && git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` — formatted (N3)
-- [x] `cd /projects/laya-rs && cargo test --workspace` — the whole suite, no regression
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
+- [x] `test -f crates/laya-core/Cargo.toml && ! grep -q 'laya-graph' crates/laya-core/Cargo.toml` — N2: `laya-core` stays I/O-free
+- [x] `test -f crates/laya-mcp/Cargo.toml && ! grep -q 'laya-graph' crates/laya-mcp/Cargo.toml` — N2: the judge does not depend on the executor
+- [x] `git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
+- [x] `cargo fmt --all --check` — formatted (N3)
+- [x] `cargo test --workspace` — the whole suite, no regression
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
 
 **Prose criteria**:
 

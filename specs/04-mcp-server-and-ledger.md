@@ -171,9 +171,9 @@ path records a judgement and refuses what cannot be joined; two concurrent write
 cleanly.
 
 ## Exit Criteria
-- [x] `cd /projects/laya-rs && cargo test -p laya-mcp -p laya-store` — all pass (58 tests; note that before this, `laya-store` contributed **0** and the criterion passed vacuously)
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — zero
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` — zero diffs
+- [x] `cargo test -p laya-mcp -p laya-store` — all pass (58 tests; note that before this, `laya-store` contributed **0** and the criterion passed vacuously)
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — zero
+- [x] `cargo fmt --all --check` — zero diffs
 - [x] the seven tools are listed — **the previous one-liner here was WRONG and could not
   pass**: it sent `tools/list` as the first message, which the protocol forbids (the server
   correctly answers `-32602`, then *"expect initialized request, but received: ListTools"*).

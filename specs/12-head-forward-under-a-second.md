@@ -118,20 +118,20 @@ reproducibility of *our own* output.
 
 **New, each watched to FAIL on `b0ee704`:**
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-head --lib matmul_equals_matvec_per_row_within_1e_5 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
-- [x] `cd /projects/laya-rs && cargo test -p laya-head --lib forward_is_bitwise_identical_across_thread_counts 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 / N2
-- [x] `cd /projects/laya-rs && cargo run --release -q -p laya-head --example forward_bench -- --seq 460 --max-ms 1000`: R3 / N4 (today: no such example; and a straight port of today's code measures 10 641 ms)
+- [x] `cargo test -p laya-head --lib matmul_equals_matvec_per_row_within_1e_5 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R1
+- [x] `cargo test -p laya-head --lib forward_is_bitwise_identical_across_thread_counts 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 / N2
+- [x] `cargo run --release -q -p laya-head --example forward_bench -- --seq 460 --max-ms 1000`: R3 / N4 (today: no such example; and a straight port of today's code measures 10 641 ms)
 
   **Control for the line above**: the bench must be able to fail, or the threshold proves nothing.
 
-- [x] `cd /projects/laya-rs && test -f crates/laya-head/examples/forward_bench.rs && cargo build --release -q -p laya-head --example forward_bench && ! cargo run --release -q -p laya-head --example forward_bench -- --seq 460 --max-ms 1`: the same bench with an impossible budget must exit non-zero. **The `test -f` and build guards are mandatory.** Without them, `!` inverts "no such example" into success. That is exactly how this criterion behaved when first drafted for this review: it PASSED on a tree with no bench.
+- [x] `test -f crates/laya-head/examples/forward_bench.rs && cargo build --release -q -p laya-head --example forward_bench && ! cargo run --release -q -p laya-head --example forward_bench -- --seq 460 --max-ms 1`: the same bench with an impossible budget must exit non-zero. **The `test -f` and build guards are mandatory.** Without them, `!` inverts "no such example" into success. That is exactly how this criterion behaved when first drafted for this review: it PASSED on a tree with no bench.
 
 **Carried re-checks:**
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-head --test forward_differential`: N1
-- [x] `cd /projects/laya-rs && cargo test -p laya-head --test decide_differential`: N1
-- [x] `cd /projects/laya-rs && python3 scripts/live/live-corpus-parity.py`: N1, live, 16/16
-- [x] `cd /projects/laya-rs && cargo clippy -p laya-head --all-targets -- -D warnings`
+- [x] `cargo test -p laya-head --test forward_differential`: N1
+- [x] `cargo test -p laya-head --test decide_differential`: N1
+- [x] `python3 scripts/live/live-corpus-parity.py`: N1, live, 16/16
+- [x] `cargo clippy -p laya-head --all-targets -- -D warnings`
 
 ---
 

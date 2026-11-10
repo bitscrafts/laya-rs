@@ -54,14 +54,14 @@ last proves the test is genuinely synchronised rather than accidentally green.
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_queued_siblings_from_starting 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_independent_nodes_still_run_concurrently 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_failure_stops_queued_siblings_from_starting 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_timed_out_node_halts_queued_siblings_but_allow_failure_does_not 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_independent_nodes_still_run_concurrently 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **stability**: 20 consecutive runs of the two tests, **0 failures**, and the same 20 **under load**
       (4 busy-loop generators on this host), reported with the counts
-- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cargo test --workspace` : 0 failed
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
+- [x] `cargo fmt --all --check` : clean
 
 ## Guardrails
 

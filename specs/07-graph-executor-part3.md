@@ -201,38 +201,38 @@ is what stops a blanket `stopped_early: true` from passing.
 
 **New in this part** (each run against the pre-implementation tree and watched to fail):
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_two_read_only_nodes_may_overlap 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R10's control: concurrency is real
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_serial_limit_runs_one_at_a_time 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R9's control
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failure_stops_the_run_and_reports_stopped_early 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R11
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_completed_run_does_not_say_stopped_early 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R11's control
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_shell_node_exiting_zero_succeeds 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R12's control
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_concurrent_run_attribution_is_still_correct 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R13 under concurrency
-- [x] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part3'` — this spec is discovered by the runner. `--list-specs` rather than a bare run: the latter recursed (18 nested runners, measured 2026-10-01)
-- [x] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'tokio' crates/laya-graph/Cargo.toml` — N5: the existing runtime is reused
-- [x] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'rt-multi-thread' crates/laya-graph/Cargo.toml` — N5: the tokio feature set is stated explicitly, as `laya-mcp`'s is. The workspace pin is `default-features = false`, so a bare `workspace = true` gives a tokio that cannot spawn tasks
+- [x] `cargo test -p laya-graph --lib the_control_two_read_only_nodes_may_overlap 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R10's control: concurrency is real
+- [x] `cargo test -p laya-graph --lib the_control_a_serial_limit_runs_one_at_a_time 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R9's control
+- [x] `cargo test -p laya-graph --lib a_failure_stops_the_run_and_reports_stopped_early 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R11
+- [x] `cargo test -p laya-graph --lib the_control_a_completed_run_does_not_say_stopped_early 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R11's control
+- [x] `cargo test -p laya-graph --lib the_control_a_shell_node_exiting_zero_succeeds 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R12's control
+- [x] `cargo test -p laya-graph --lib a_concurrent_run_attribution_is_still_correct 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R13 under concurrency
+- [x] `python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part3'` — this spec is discovered by the runner. `--list-specs` rather than a bare run: the latter recursed (18 nested runners, measured 2026-10-01)
+- [x] `test -f crates/laya-graph/Cargo.toml && grep -q 'tokio' crates/laya-graph/Cargo.toml` — N5: the existing runtime is reused
+- [x] `test -f crates/laya-graph/Cargo.toml && grep -q 'rt-multi-thread' crates/laya-graph/Cargo.toml` — N5: the tokio feature set is stated explicitly, as `laya-mcp`'s is. The workspace pin is `default-features = false`, so a bare `workspace = true` gives a tokio that cannot spawn tasks
 
 **Prohibitions — "this must NOT exist after the work"** — plus a near-miss control for
 each, because a prohibition cannot fail before the work by construction and would
 otherwise certify nothing. **Expected to pass** at check time; a failure here means
 the pattern is wrong, not that the work is undone:
 
-- [x] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -qE '^async-std|^smol|^futures-executor' crates/laya-graph/Cargo.toml` — N5: no second async runtime
-- [x] `cd /projects/laya-rs && grep -qE '^tokio' crates/laya-mcp/Cargo.toml` — **near-miss control** for the line above: the same pattern *does* match where such a dependency legitimately exists, so the `!` is a real prohibition and not a pattern that never matches anything. (`laya-mcp` is the only crate with a line-anchored `tokio`; measured.)
-- [x] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -qE '^laya-store|^redb' crates/laya-graph/Cargo.toml` — **G16**: the crate opens no store and cannot hold its write lock
-- [x] `cd /projects/laya-rs && grep -qE '^redb' crates/laya-store/Cargo.toml` — **near-miss control**: the pattern matches a real `redb` dependency, so its absence in `laya-graph` is meaningful
-- [x] `cd /projects/laya-rs && test -d crates/laya-graph/src && ! grep -rqE 'redb|Ledger::open' crates/laya-graph/src/` — **G16**: no store access in the source, not merely the manifest
-- [x] `cd /projects/laya-rs && grep -rqE 'Ledger::open_writer' crates/laya-cli/src/ crates/laya-mcp/src/` — **near-miss control**: `Ledger::open_writer` does occur in the workspace, so `! grep` finding none in `laya-graph` is a real result
+- [x] `test -f crates/laya-graph/Cargo.toml && ! grep -qE '^async-std|^smol|^futures-executor' crates/laya-graph/Cargo.toml` — N5: no second async runtime
+- [x] `grep -qE '^tokio' crates/laya-mcp/Cargo.toml` — **near-miss control** for the line above: the same pattern *does* match where such a dependency legitimately exists, so the `!` is a real prohibition and not a pattern that never matches anything. (`laya-mcp` is the only crate with a line-anchored `tokio`; measured.)
+- [x] `test -f crates/laya-graph/Cargo.toml && ! grep -qE '^laya-store|^redb' crates/laya-graph/Cargo.toml` — **G16**: the crate opens no store and cannot hold its write lock
+- [x] `grep -qE '^redb' crates/laya-store/Cargo.toml` — **near-miss control**: the pattern matches a real `redb` dependency, so its absence in `laya-graph` is meaningful
+- [x] `test -d crates/laya-graph/src && ! grep -rqE 'redb|Ledger::open' crates/laya-graph/src/` — **G16**: no store access in the source, not merely the manifest
+- [x] `grep -rqE 'Ledger::open_writer' crates/laya-cli/src/ crates/laya-mcp/src/` — **near-miss control**: `Ledger::open_writer` does occur in the workspace, so `! grep` finding none in `laya-graph` is a real result
 
 **Carried re-checks** (pass before implementation by design — not evidence this part is done):
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph` — the whole crate; parts 1–2 still green (N3). Carried: the crate already exists and is green, so this cannot fail before the work
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity, carried for the same reason
-- [x] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings` — zero (N3), carried
-- [x] `cd /projects/laya-rs && git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` — formatted (N3)
-- [x] `cd /projects/laya-rs && cargo test --workspace` — no regression
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
-- [x] `cd /projects/laya-rs && python3 -c "import pathlib,sys; p=pathlib.Path('crates/laya-mcp/src/lib.rs'); sys.exit(0 if p.exists() and 'PriorityQueue' in p.read_text() else 1)"` — R16: the guarding test's reference is still present. **This replaces a criterion that was measured as a false pass in an earlier draft** (a `test -f … ; true` line that could never fail); this version exits 1 when the file is missing or the symbol is gone
+- [x] `cargo test -p laya-graph` — the whole crate; parts 1–2 still green (N3). Carried: the crate already exists and is green, so this cannot fail before the work
+- [x] `cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity, carried for the same reason
+- [x] `cargo clippy -p laya-graph --all-targets -- -D warnings` — zero (N3), carried
+- [x] `git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
+- [x] `cargo fmt --all --check` — formatted (N3)
+- [x] `cargo test --workspace` — no regression
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
+- [x] `python3 -c "import pathlib,sys; p=pathlib.Path('crates/laya-mcp/src/lib.rs'); sys.exit(0 if p.exists() and 'PriorityQueue' in p.read_text() else 1)"` — R16: the guarding test's reference is still present. **This replaces a criterion that was measured as a false pass in an earlier draft** (a `test -f … ; true` line that could never fail); this version exits 1 when the file is missing or the symbol is gone
 
 **Prose criteria** (human-checked, stated unambiguously):
 

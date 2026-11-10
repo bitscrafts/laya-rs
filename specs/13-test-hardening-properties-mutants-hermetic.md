@@ -137,22 +137,22 @@ asserts presence rather than value. Four changes, ordered by value per effort:
 
 **New, each watched to FAIL on `b0ee704`:**
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test acceptance 2>&1 | grep -qE '^test result: ok\. 1 passed; 0 failed'` _(CORRECTED 2026-10-02: previously also pinned the ignored count at 2; it is incidental and had risen to 5 as more live tests were marked ignored, so pinning it made a true criterion fail)_
-- [x] `cd /projects/laya-rs && LAYA_ACCEPTANCE=1 cargo test -p laya-graph --test acceptance -- --include-ignored 2>&1 | grep -qE '^test result: ok\. [0-9]+ passed'`: the control — the live tests must RUN when opted in, not merely be marked: R1 (2026-10-02: 3 passed when live, 2 failed when not; 4 passed after spec 11 added a case to the same binary — the count is deliberately not pinned, the property is)
-- [x] `cd /projects/laya-rs && bash scripts/mutants-gate.sh`: R2 (2026-10-02: 194 mutants, 174 caught, 20 unviable, 0 missed, exit 0; before this work the equivalent run exited 2 with 18 missed and 9 timeouts)
-- [x] `cd /projects/laya-rs && cargo test -p laya-core --lib payload_invariants_hold_for_random_distributions 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib scheduler_invariants_hold_for_random_dags 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib mutated_flows_are_refused_or_accepted_never_panic 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
-- [x] `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_wrongly_typed_argument_is_named_not_swallowed 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R5
+- [x] `cargo test -p laya-graph --test acceptance 2>&1 | grep -qE '^test result: ok\. 1 passed; 0 failed'` _(CORRECTED 2026-10-02: previously also pinned the ignored count at 2; it is incidental and had risen to 5 as more live tests were marked ignored, so pinning it made a true criterion fail)_
+- [x] `LAYA_ACCEPTANCE=1 cargo test -p laya-graph --test acceptance -- --include-ignored 2>&1 | grep -qE '^test result: ok\. [0-9]+ passed'`: the control — the live tests must RUN when opted in, not merely be marked: R1 (2026-10-02: 3 passed when live, 2 failed when not; 4 passed after spec 11 added a case to the same binary — the count is deliberately not pinned, the property is)
+- [x] `bash scripts/mutants-gate.sh`: R2 (2026-10-02: 194 mutants, 174 caught, 20 unviable, 0 missed, exit 0; before this work the equivalent run exited 2 with 18 missed and 9 timeouts)
+- [x] `cargo test -p laya-core --lib payload_invariants_hold_for_random_distributions 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
+- [x] `cargo test -p laya-graph --lib scheduler_invariants_hold_for_random_dags 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R3
+- [x] `cargo test -p laya-graph --lib mutated_flows_are_refused_or_accepted_never_panic 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
+- [x] `cargo test -p laya-mcp --lib a_wrongly_typed_argument_is_named_not_swallowed 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R5
 
   **Control for R1**: the live tests must still run, and still be able to fail, when asked for.
 
-- [x] `cd /projects/laya-rs && grep -qE 'acceptance.*--include-ignored' scripts/verify-all.sh`: the gate's live step opts in (today: absent)
+- [x] `grep -qE 'acceptance.*--include-ignored' scripts/verify-all.sh`: the gate's live step opts in (today: absent)
 
 **Carried re-checks:**
 
-- [x] `cd /projects/laya-rs && cargo test --workspace`
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
 
 ---
 

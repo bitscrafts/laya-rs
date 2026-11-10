@@ -70,14 +70,14 @@ Rows 1 and 3 are the ones the mutants would exercise; rows 2, 4 and 5 are the ma
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_inconsistent_dependency_table_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_consistent_table_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_scheduler_that_cannot_settle_a_node_reports_which_one 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_satisfiable_graph_completes 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib an_inconsistent_dependency_table_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_a_consistent_table_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_scheduler_that_cannot_settle_a_node_reports_which_one 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_a_satisfiable_graph_completes 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **the mutants stop hanging** — `cd /projects/laya-rs && bash scripts/mutants-gate.sh` : `timeout.txt` is now **empty** and `missed.txt` is empty. Paste both counts. **This is the criterion the spec exists for**, and it must be the real run, not a subset.
-- [x] `cd /projects/laya-rs && cargo test --workspace`
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cargo test --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cargo fmt --all --check` : clean
 
 **Every criterion uses `-p <the owning crate>` and `ok\. 1 passed`.** A criterion that accepts
 `ok. 0 passed` is satisfied by a test name matching nothing. **Verify each is non-vacuous before

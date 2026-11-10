@@ -92,16 +92,16 @@ indistinguishable from a broken node, and a `check` that calls the model is not 
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_check_takes_the_pass_port_on_exit_zero 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_failing_check_does_not_fail_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_check_whose_command_cannot_be_executed_fails_the_node 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib no_model_is_called_by_a_check 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_check_takes_the_pass_port_on_exit_zero 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_a_failing_check_does_not_fail_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_check_whose_command_cannot_be_executed_fails_the_node 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib no_model_is_called_by_a_check 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **every committed flow still validates AND runs**, judged by the report (`git status` clean of `^ D`)
-- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
-- [x] `cd /projects/laya-rs && python3 scripts/regen-index.py` : 0 broken links
+- [x] `cargo test --workspace` : 0 failed
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
+- [x] `cargo fmt --all --check` : clean
+- [x] `python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `python3 scripts/regen-index.py` : 0 broken links
 
 ## Fixtures this spec MUST be judged against (all measured today, all failing without it)
 

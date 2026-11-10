@@ -75,11 +75,11 @@ by changing the default to `noul` and watching it go red, then restore.**
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_flow_without_question_type_still_asks_a_choice 2>&1 | grep -qE '^test result: ok\. 1 passed'` : default preserved
-- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_noul_decide_sends_no_criteria 2>&1 | grep -qE '^test result: ok\. 1 passed'` : the new path, asserting on the bytes the server receives
-- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib an_unknown_question_type_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` : refusal
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_noul_decide_needs_port_coverage 2>&1 | grep -qE '^test result: ok\. 1 passed'` : a noul has no `options`, so the coverage check is vacuous unless ports must cover `yes`/`no` or carry `_`
-- [x] `cd /projects/laya-rs && cargo test --workspace` : no regression
+- [x] `cargo test -p laya-cli --lib a_flow_without_question_type_still_asks_a_choice 2>&1 | grep -qE '^test result: ok\. 1 passed'` : default preserved
+- [x] `cargo test -p laya-cli --lib a_noul_decide_sends_no_criteria 2>&1 | grep -qE '^test result: ok\. 1 passed'` : the new path, asserting on the bytes the server receives
+- [x] `cargo test -p laya-cli --lib an_unknown_question_type_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` : refusal
+- [x] `cargo test -p laya-graph --lib a_noul_decide_needs_port_coverage 2>&1 | grep -qE '^test result: ok\. 1 passed'` : a noul has no `options`, so the coverage check is vacuous unless ports must cover `yes`/`no` or carry `_`
+- [x] `cargo test --workspace` : no regression
 
 **CORRECTED 2026-10-02 after review — the four criteria above replace four that were VACUOUS.** They
 named `the_documented_fields_exist_on_the_row`, which lives in **laya-store**
@@ -89,10 +89,10 @@ named `the_documented_fields_exist_on_the_row`, which lives in **laya-store**
 grep at all. **All four passed with nothing implemented.** Every criterion above now uses
 `-p <the crate that owns it>` and `grep -qE '^test result: ok\. 1 passed'` — an `ok\. 0 passed` line
 must not satisfy a criterion.
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : **the committed example still runs unchanged** (R1's compatibility claim, end to end)
-- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cargo fmt --all --check` : clean
+- [x] `./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : **the committed example still runs unchanged** (R1's compatibility claim, end to end)
+- [x] `python3 scripts/check-doc-citations.py` : every citation resolves
 
 ## Guardrails
 - Do NOT commit. Leave the work in the tree.

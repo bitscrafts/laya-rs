@@ -79,16 +79,16 @@ watching it go red, and restoring.
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_shell_output_reaches_the_decision_and_changes_the_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_the_same_flow_with_the_other_value_takes_the_other_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib an_unlisted_reference_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_failed_referent_skips_the_decide_rather_than_asking_over_empty 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_literal_prompt_without_placeholders_is_unchanged 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_shell_output_reaches_the_decision_and_changes_the_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_the_same_flow_with_the_other_value_takes_the_other_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib an_unlisted_reference_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_failed_referent_skips_the_decide_rather_than_asking_over_empty 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_literal_prompt_without_placeholders_is_unchanged 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **a real end-to-end `wc` example that genuinely depends on `wc`** exists and is run: write `/projects/laya-rs/_docs/02-guides/wc-classify-measured.flow.json` where the shell emits ONLY the number (`wc -w < file`) and the decide's **`prompt` is the state** `The word count in the file is {{count}} words.` and its **`question` is separate**: `Is it greater than 300?`. Do NOT put the question in the prompt -- `prompt` is the state handed to the head, `question` is what it is asked. Run it on both documents and paste both reports showing the branches **differ**.
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the older committed example still runs
-- [x] `cd /projects/laya-rs && cargo test --workspace`
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the older committed example still runs
+- [x] `cargo test --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `python3 scripts/check-doc-citations.py` : every citation resolves
 
 The end-to-end criterion is the one that matters: **a `wc` whose value actually drives the branch**,
 which no flow in this repo can do today. If the head answers wrongly on the substituted shape, that

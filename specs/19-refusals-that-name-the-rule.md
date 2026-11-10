@@ -76,15 +76,15 @@ reject flows that are fine. A validator that refuses everything passes rows 1–
 
 - [x] ~~the R1 port-target refusal~~ — **DROPPED with R1**: it rejected the working example. Do not test it.
 - [x] ~~the R1 depends_on-on-a-port-target refusal~~ — **DROPPED with R1**: it rejected the working example. Do not test it.
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib near_tie_routing_is_refused_as_not_implemented 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_node_id_containing_a_slash_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_well_formed_flow_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph validate _docs/02-guides/wc-classify-chained.flow.json` _(CORRECTED 2026-10-02: named `laya` on PATH, which a bare shell does not have; the tree's own binary is the thing to test)_ : still valid (the working example survives every new refusal)
-- [x] `cd /projects/laya-rs && git ls-files crates/laya-graph/tests/fixtures/ | grep -c 'p6'` : the two order fixtures are **checked in**
+- [x] `cargo test -p laya-graph --lib near_tie_routing_is_refused_as_not_implemented 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_node_id_containing_a_slash_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_a_well_formed_flow_is_accepted 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `./target/debug/laya graph validate _docs/02-guides/wc-classify-chained.flow.json` _(CORRECTED 2026-10-02: named `laya` on PATH, which a bare shell does not have; the tree's own binary is the thing to test)_ : still valid (the working example survives every new refusal)
+- [x] `git ls-files crates/laya-graph/tests/fixtures/ | grep -c 'p6'` : the two order fixtures are **checked in**
 - [x] the four doc corrections exist and each carries its date and measurement: `cd /projects/laya-rs && grep -l '2026-10-02' _docs/04-development/HEAD-QUESTION-SHAPE-LIMITS.md _docs/02-guides/GRAPH-EXAMPLE-WORDCOUNT.md _docs/03-reference/GRAPH-SPEC.md | wc -l` → 3
-- [x] `cd /projects/laya-rs && cargo test --workspace`
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `cargo test --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `python3 scripts/check-doc-citations.py` : every citation resolves
 
 ## Guardrails
 - Do NOT commit. Leave the work in the tree.

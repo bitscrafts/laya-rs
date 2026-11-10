@@ -146,28 +146,28 @@ happened to print the surviving ones in the same order.
 — the `cargo test -p laya-graph` commands fail with *"package ID specification
 `laya-graph` did not match any packages"* until part 1 lands):
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph` — the whole crate, part 1's tests still green (N3)
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_subflow_that_includes_itself_is_refused_not_hung 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R7: returns rather than hangs
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_diamond_is_not_a_cycle 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R7's control: a shared child is not a cycle
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_render_round_trips_the_derived_edge_set 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R14: the renderer is trustworthy
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib two_uses_of_one_subflow_do_not_collide 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R6: the prefix rule
-- [x] `cd /projects/laya-rs && cargo clippy -p laya-graph --all-targets -- -D warnings` — zero (N3)
-- [x] `cd /projects/laya-rs && python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part2'` — this spec is discovered by the runner (R15, landed in part 1). `--list-specs` rather than a bare run: the latter recursed (18 nested runners, measured 2026-10-01)
-- [x] `cd /projects/laya-rs && test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/{expand,render}.rs` — N4: part 2's own modules are still process-free (the `test -d` guard is mandatory — see part 1). **Scope narrowed to `expand.rs` and `render.rs` on 2026-10-01**: the crate-wide form began failing on *correct* code once part 3 added `std::process` for the `shell` executor. A criterion scoped to the whole crate cannot express "this part is process-free" when a sibling part is allowed to use the same tool
+- [x] `cargo test -p laya-graph` — the whole crate, part 1's tests still green (N3)
+- [x] `cargo test -p laya-graph 2>&1 | grep -qE '^test result: ok\. [1-9]'` — non-vacuity
+- [x] `cargo test -p laya-graph --lib a_subflow_that_includes_itself_is_refused_not_hung 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R7: returns rather than hangs
+- [x] `cargo test -p laya-graph --lib the_control_a_diamond_is_not_a_cycle 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R7's control: a shared child is not a cycle
+- [x] `cargo test -p laya-graph --lib the_render_round_trips_the_derived_edge_set 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R14: the renderer is trustworthy
+- [x] `cargo test -p laya-graph --lib two_uses_of_one_subflow_do_not_collide 2>&1 | grep -qE '^test result: ok\. [1-9]'` — R6: the prefix rule
+- [x] `cargo clippy -p laya-graph --all-targets -- -D warnings` — zero (N3)
+- [x] `python3 scripts/run-exit-criteria.py --list-specs | grep -q '07-graph-executor-part2'` — this spec is discovered by the runner (R15, landed in part 1). `--list-specs` rather than a bare run: the latter recursed (18 nested runners, measured 2026-10-01)
+- [x] `test -d crates/laya-graph && ! grep -rqE 'std::process|std::thread|redb' crates/laya-graph/src/{expand,render}.rs` — N4: part 2's own modules are still process-free (the `test -d` guard is mandatory — see part 1). **Scope narrowed to `expand.rs` and `render.rs` on 2026-10-01**: the crate-wide form began failing on *correct* code once part 3 added `std::process` for the `shell` executor. A criterion scoped to the whole crate cannot express "this part is process-free" when a sibling part is allowed to use the same tool
 
   **Control for the line above** — the same pattern with the `!` removed must match a file that genuinely uses it, so the prohibition is not a pattern that can never match:
 
-- [x] `cd /projects/laya-rs && grep -qE 'std::process' crates/laya-graph/src/node.rs` — near-miss control (part 3's `shell` executor is where `std::process` legitimately lives)
-- [x] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && grep -q 'blake3' crates/laya-graph/Cargo.toml` — N5: hashing reuses the existing workspace hash crate
-- [x] `cd /projects/laya-rs && test -f crates/laya-graph/Cargo.toml && ! grep -q 'sha2' crates/laya-graph/Cargo.toml` — N5: no second hash crate
+- [x] `grep -qE 'std::process' crates/laya-graph/src/node.rs` — near-miss control (part 3's `shell` executor is where `std::process` legitimately lives)
+- [x] `test -f crates/laya-graph/Cargo.toml && grep -q 'blake3' crates/laya-graph/Cargo.toml` — N5: hashing reuses the existing workspace hash crate
+- [x] `test -f crates/laya-graph/Cargo.toml && ! grep -q 'sha2' crates/laya-graph/Cargo.toml` — N5: no second hash crate
 
 **Carried re-checks** (pass before implementation by design — not evidence this part is done):
 
-- [x] `cd /projects/laya-rs && git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` — formatted (N3)
-- [x] `cd /projects/laya-rs && cargo test --workspace` — no regression
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
+- [x] `git diff --quiet -- crates/laya-core/src/route_payload.rs` — N1: the payload contract did not move
+- [x] `cargo fmt --all --check` — formatted (N3)
+- [x] `cargo test --workspace` — no regression
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — clean workspace-wide (N3)
 
 **Prose criteria**:
 

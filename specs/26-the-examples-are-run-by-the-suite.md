@@ -85,14 +85,14 @@ certified one.
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test examples 2>&1 | grep -qE '^test result: ok\. [1-9][0-9]* passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test examples every_committed_flow_reaches_its_declared_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --test examples the_count_driven_flows_diverge_on_the_two_documents 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && grep -c 'examples' scripts/verify-all.sh` : at least 1 (R4)
+- [x] `cargo test -p laya-graph --test examples 2>&1 | grep -qE '^test result: ok\. [1-9][0-9]* passed'`
+- [x] `cargo test -p laya-graph --test examples every_committed_flow_reaches_its_declared_branch 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --test examples the_count_driven_flows_diverge_on_the_two_documents 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `grep -c 'examples' scripts/verify-all.sh` : at least 1 (R4)
 - [x] **with the sidecar stopped**, `cargo test -p laya-graph --test examples` : still `ok`, 0 failed (NF1)
-- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cargo test --workspace` : 0 failed
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0 diagnostics
+- [x] `cargo fmt --all --check` : clean
 - [x] **the break-it proof** is in the report: a deliberately broken flow made the test red, then restored
 
 ## Guardrails

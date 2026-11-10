@@ -107,9 +107,9 @@ drains the queue in whatever order it likes; the only requirement is that it is 
 | `a_drained_record_is_only_removed_after_a_durable_write` | a write that fails | the record is still queued |
 
 ## Exit Criteria
-- [x] `cd /projects/laya-rs && cargo test -p laya-core --lib queue` — all pass
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` — zero
-- [x] `cd /projects/laya-rs && cargo run -q -p laya-core --example queue_demo` — prints the ordering
+- [x] `cargo test -p laya-core --lib queue` — all pass
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — zero
+- [x] `cargo run -q -p laya-core --example queue_demo` — prints the ordering
 
 ## Guardrails
 - Do NOT add a queue in front of the backbone to increase throughput; measured 5.8×

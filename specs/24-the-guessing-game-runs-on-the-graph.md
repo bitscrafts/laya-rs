@@ -76,19 +76,19 @@ limitation quietly stops being true.
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph validate _docs/02-guides/guess-the-number.flow.json` : exit 0
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph validate _docs/02-guides/guess-the-number.control.flow.json` : exit 0
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` : exit 0, and the report's `records` show `setup` ok and every node ok
-- [x] `cd /projects/laya-rs && grep -c '{{setup}}' _docs/02-guides/guess-the-number.flow.json` : at least 1 (R2)
-- [x] `cd /projects/laya-rs && python3 /projects/_tmp/check-guess-branches.py` : prints `BRANCHES DIFFER` (R3)
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` twice : the advice node named in both reports is identical (NF1)
-- [x] `cd /projects/laya-rs && ! grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : every path the flows read lies inside the repository (NF4)
+- [x] `./target/debug/laya graph validate _docs/02-guides/guess-the-number.flow.json` : exit 0
+- [x] `./target/debug/laya graph validate _docs/02-guides/guess-the-number.control.flow.json` : exit 0
+- [x] `./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` : exit 0, and the report's `records` show `setup` ok and every node ok
+- [x] `grep -c '{{setup}}' _docs/02-guides/guess-the-number.flow.json` : at least 1 (R2)
+- [x] `python3 scripts/check-guess-branches.py` : prints `BRANCHES DIFFER` (R3)
+- [x] `./target/debug/laya graph run _docs/02-guides/guess-the-number.flow.json` twice : the advice node named in both reports is identical (NF1)
+- [x] `! grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : every path the flows read lies inside the repository (NF4)
   _(CORRECTED 2026-10-02: required a `guess-the-number*/` DIRECTORY that never existed -- the flows read committed files directly. The assertion was wrong about the artefact.)_
-- [x] `cd /projects/laya-rs && ! grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : **no matches** (NF4)
+- [x] `! grep -n '_tmp' _docs/02-guides/guess-the-number*.flow.json` : **no matches** (NF4)
   _(CORRECTED 2026-10-02: without the `!` this returned grep's exit status, which is 1 exactly when there are NO matches -- the criterion failed when it should have passed)_
-- [x] `cd /projects/laya-rs && cargo test --workspace` : 0 failed
-- [x] `cd /projects/laya-rs && python3 scripts/check-doc-citations.py` : every citation resolves
-- [x] `cd /projects/laya-rs && python3 scripts/regen-index.py` : 0 broken links
+- [x] `cargo test --workspace` : 0 failed
+- [x] `python3 scripts/check-doc-citations.py` : every citation resolves
+- [x] `python3 scripts/regen-index.py` : 0 broken links
 
 ## Guardrails
 

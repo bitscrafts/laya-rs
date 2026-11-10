@@ -76,15 +76,15 @@ distinguishes "the timeout works" from "every decide now fails".
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_decide_timeout_bounds_the_decide 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_decide_without_a_timeout_still_completes 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_decide_with_allow_failure_does_not_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_decide_without_allow_failure_does_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib every_row_holds 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_decide_timeout_bounds_the_decide 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_a_decide_without_a_timeout_still_completes 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_decide_with_allow_failure_does_not_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_a_decide_without_allow_failure_does_stop_the_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib every_row_holds 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **run it through the CLI** (a graph claim must be run, not read): the decide-timeout flow exits non-zero with a timed-out error, and the same flow without `timeout` exits 0. Use `./target/debug/laya` — **the `laya` on `PATH` is a stale build and would pass vacuously.**
-- [x] `cd /projects/laya-rs && cargo test --workspace`
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `cargo test --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cargo fmt --all --check` : clean
 
 Every criterion uses `-p <the owning crate>` and `ok\. 1 passed`. A criterion that accepts
 `ok. 0 passed` is satisfied by a test name that matches nothing.

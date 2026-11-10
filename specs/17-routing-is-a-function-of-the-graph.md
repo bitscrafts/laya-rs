@@ -96,17 +96,17 @@ paths must be shown **not** to suppress live ones. A fix that skips everything p
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_files_node_order_does_not_change_which_nodes_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_branch_the_graph_did_not_select_does_not_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib a_node_whose_dependency_was_pruned_is_skipped_and_named 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib two_routes_sharing_a_target_both_reach_it 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-graph --lib the_control_a_branch_that_is_selected_still_runs 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_files_node_order_does_not_change_which_nodes_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_branch_the_graph_did_not_select_does_not_run 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib a_node_whose_dependency_was_pruned_is_skipped_and_named 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib two_routes_sharing_a_target_both_reach_it 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-graph --lib the_control_a_branch_that_is_selected_still_runs 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] the two order fixtures produce the SAME executed-node set, **run through the CLI**, not only in a unit test: `cd /projects/laya-rs && for f in p6-file-order p6c-file-order-control; do laya graph run /projects/_tmp/opus-graph-analysis/$f.flow.json; done` — paste both reports
-- [x] `cd /projects/laya-rs && ./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the committed example still runs
-- [x] `cd /projects/laya-rs && cargo test --workspace` : no regression
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
-- [x] `cd /projects/laya-rs && bash scripts/mutants-gate.sh` : exit 0 (the scheduler is on the mutation path)
+- [x] `./target/debug/laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | grep -q selected_port` : the committed example still runs
+- [x] `cargo test --workspace` : no regression
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cargo fmt --all --check` : clean
+- [x] `bash scripts/mutants-gate.sh` : exit 0 (the scheduler is on the mutation path)
   - **Amended by spec 23 (2026-10-02), old wording kept above.** `exit 0` demanded no *hanging* mutants
     in addition to zero misses; a hang is neither. The honest criterion is: **`missed.txt` is empty, and
     every `timeout.txt` entry is explained by spec 23's R1–R2.** After spec 23 the two `dependency_tables`

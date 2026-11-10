@@ -67,20 +67,20 @@ picks one candidate passes row 1**, so the near-misses are what make it a test.
 
 ## Exit Criteria
 
-- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_sibling_is_preferred_over_path 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_control_path_is_used_when_there_is_no_sibling 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib a_set_but_unresolvable_laya_mcp_bin_fails_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
-- [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib the_error_lists_every_path_tried 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-cli --lib the_sibling_is_preferred_over_path 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-cli --lib the_control_path_is_used_when_there_is_no_sibling 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-cli --lib a_set_but_unresolvable_laya_mcp_bin_fails_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'`
+- [x] `cargo test -p laya-cli --lib the_error_lists_every_path_tried 2>&1 | grep -qE '^test result: ok\. 1 passed'`
 - [x] **the examples run with no laya directory on PATH** — every node, including the decide, must succeed. Run it and check the DECIDE by name, not just that *something* succeeded:
 
       cd /projects/laya-rs && env PATH=/usr/bin:/bin ./target/debug/laya graph run _docs/02-guides/wc-classify-measured.flow.json 2>/dev/null | python3 -c "import sys,json; d=json.loads(next(l for l in sys.stdin if l.startswith('{'))); bad=[r['node_id'] for r in d['records'] if not r['success']]; print('FAILED:', bad) if bad else print('all nodes succeeded')"
 
   **This is the criterion the whole spec exists for**, and it must be run with the environment stripped, because the failure only appears that way. Do NOT substitute a `grep` for `"success":true`: **that grep is satisfied by the shell node alone** (measured: with a stripped PATH the decide failed while one `"success":true` was still printed), so it would pass while the defect is present. A criterion must be satisfied only by the thing it names.
 - [x] **the control**: the same command WITH `/root/.local/bin` on `PATH` also succeeds (the fix must not break the documented setup)
-- [x] `cd /projects/laya-rs && env -u LAYA_MCP_BIN ./target/debug/laya doctor 2>&1 | grep -iE 'laya-mcp|server'` : names which server was resolved (R3)
-- [x] `cd /projects/laya-rs && cargo test --workspace`
-- [x] `cd /projects/laya-rs && cargo clippy --workspace --all-targets -- -D warnings` : 0
-- [x] `cd /projects/laya-rs && cargo fmt --all --check` : clean
+- [x] `env -u LAYA_MCP_BIN ./target/debug/laya doctor 2>&1 | grep -iE 'laya-mcp|server'` : names which server was resolved (R3)
+- [x] `cargo test --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` : 0
+- [x] `cargo fmt --all --check` : clean
 
 **Every criterion uses `-p <the owning crate>` and `ok\. 1 passed`** — a criterion that accepts
 `ok. 0 passed` is satisfied by a test name matching nothing, which is how an earlier spec's criteria

@@ -84,8 +84,8 @@ the loop; quota window respected (window guard); no destructive commands — mov
 ## Exit Criteria
 
 - [x] `bash scripts/archive/ar-metric-gate-latency.sh | grep -qE '^[0-9]+$'`
-- [ ] `[ "$(grep -c 'baseline' /projects/laya-rs/_tmp/autoresearch/results-gate-lat.tsv)" -ge 1 ]`
-- [ ] `[ "$(grep -c 'laya_keep=' /projects/laya-rs/_tmp/autoresearch/results-gate-lat.tsv)" -ge 3 ]`
+- [ ] `[ "$(grep -c 'baseline' _tmp/autoresearch/results-gate-lat.tsv)" -ge 1 ]`
+- [ ] `[ "$(grep -c 'laya_keep=' _tmp/autoresearch/results-gate-lat.tsv)" -ge 3 ]`
 - [x] `bash /root/.hermes/skills/software-development/autoresearch-loop/scripts/selftest.sh` (16/16 must stay green)
 
 ## Non-goals
