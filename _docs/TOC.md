@@ -26,6 +26,7 @@ reading order.
 
 ## 04-development
 - [laya-rs — architectural review (2026-10-01)](04-development/ANALYSIS-2026-10-02.md)
+- [HANDOFF — laya-rs](04-development/BUILD-LOG-2026-09-to-10.md)
 - [Code review — laya-rs, 2026-09-30](04-development/CODE-REVIEW-2026-09-30.md)
 - [Design amendments — what the adversarial review changed](04-development/DESIGN-AMENDMENTS-2026-09-29.md)
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md)

@@ -1,5 +1,5 @@
 # laya-rs — spec-11: observability — one run id end to end, every judgement recorded, a timeline per run
-#: depends=- status=pending block=-
+#: depends=- status=done block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: P1. At 3 a.m. the question is "which decision sent run X down branch Y, and what did the gate let through". Today neither can be answered from the artefacts.

@@ -1,5 +1,5 @@
 # laya-rs — spec-10: deadlines that fire — node `timeout`, and a client that kills what it abandons
-#: depends=- status=pending block=-
+#: depends=- status=done block=-
 
 - **Project**: `/projects/laya-rs`
 - **Priority**: P1. A declared field that does nothing is the `irreversible` defect again (HANDOFF, "decorative"). An unbounded child process is how a 3 a.m. run hangs with nothing to read.

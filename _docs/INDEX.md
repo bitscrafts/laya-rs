@@ -42,6 +42,7 @@ in exactly one place; this index points at it, never restates it.
 
 ### 04-development
 - [laya-rs — architectural review (2026-10-01)](04-development/ANALYSIS-2026-10-02.md) — Reviewed tree: b0ee704 on master, clean at the start of the review. Read-only throughout: nothing in laya-rs was written. A separate session modified an unrelated research note at 23:34 during this review; that edit is
+- [HANDOFF — laya-rs](04-development/BUILD-LOG-2026-09-to-10.md) — spec 28+29 deployed live (decision_id + gate_deny); SPEC-B nudge live; rule 11 fully mechanism-backed (see AGENTS.md).
 - [Code review — laya-rs, 2026-09-30](04-development/CODE-REVIEW-2026-09-30.md) — Method: deterministic audit (codebase-audit 2.0.0) + hand-verification of every PROVEN finding + targeted reads of the fail-closed paths. No claim below is from the
 - [Design amendments — what the adversarial review changed](04-development/DESIGN-AMENDMENTS-2026-09-29.md) — MANDATORY corrections to the design, with the five blockers and their resolutions.
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md) — depends_on does not order a decide before its shell (measured: the shell ran LAST); escalate_on_near_tie is validated but inert; and a decide's question type is hardcoded to choice, so a flow can never ask the noul the head answers best.
