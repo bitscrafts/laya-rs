@@ -40,7 +40,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-MCP_BIN = os.environ.get("LAYA_MCP_BIN", "/root/.local/bin/laya-mcp")
+MCP_BIN = os.environ.get("LAYA_MCP_BIN", os.path.expanduser("~/.local/bin/laya-mcp"))
 LEDGER_DIR = os.environ.get("LAYA_LEDGER_DIR", "/var/lib/laya-ledger")
 READ_ROOT = os.environ.get("LAYA_READ_ROOTS", "/projects:/root")
 
@@ -294,7 +294,7 @@ def main() -> int:
         )
 
         # ---- L8: cheap read — the file never enters context ------------------
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", dir="/projects/_tmp", delete=False) as f:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
             f.write("fn main() { println!(\"hello\"); }\n")
             probe = f.name
         ok, body = s.call("ask_file", {"path": probe, "question": "Does this file contain a main function?"})
@@ -310,7 +310,7 @@ def main() -> int:
         # ---- L9: files at scale ---------------------------------------------
         ok, body = s.call(
             "ask_files",
-            {"paths": [probe, "/projects/laya-rs/Cargo.toml"], "question": "Is this a Rust project file?"},
+            {"paths": [probe, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Cargo.toml"))], "question": "Is this a Rust project file?"},
         )
         # The shape is `{question, asked, hits[{path,noul}], files[{path,answers}]}` — not
         # `{answers, files_read}`. Checking for keys the tool never had is how a working

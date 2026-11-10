@@ -10,11 +10,11 @@
 #   scripts/verify-spec-part.sh 3 --quick   # tests + clippy only
 #
 # EXIT: 0 when every checked criterion passes, 1 otherwise.
-# Evidence file: /projects/_tmp/spec07-part<N>-verify-<timestamp>.txt
+# Evidence file: _tmp/spec07-part<N>-verify-<timestamp>.txt
 
 set -uo pipefail
 
-REPO=/projects/laya-rs
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PART="${1:-}"
 QUICK=0
 [ "${2:-}" = "--quick" ] && QUICK=1
@@ -26,7 +26,7 @@ export CARGO_HOME=/usr/local/cargo
 export RUSTUP_HOME=/usr/local/rustup
 
 TS=$(date -u +%Y%m%dT%H%M%SZ)
-EVIDENCE="/projects/_tmp/spec07-part${PART}-verify-${TS}.txt"
+EVIDENCE="${LAYA_TMP:-$REPO/_tmp}/spec07-part${PART}-verify-${TS}.txt"
 mkdir -p "$(dirname "$EVIDENCE")"
 
 FAILED=0
@@ -63,12 +63,12 @@ cd "$REPO" || exit 1
 # orchestrator's own spec corrections.
 # The dispatch script writes `<KEY>.head`, keyed the same way it keys everything else:
 # `<N>` for spec N, `part<N>` for a spec-07 part. This path was hardcoded to
-# `/projects/_tmp/spec07-dispatch/part${PART}.head`, which was wrong twice over -- the directory
+# `_tmp/spec07-dispatch/part${PART}.head`, which was wrong twice over -- the directory
 # does not exist (dispatch writes `spec-dispatch/`) and the filename prefix does not match
 # (`N.head`, not `partN.head`). So the commit check silently SKIPPED for every spec dispatched
 # since the scripts were generalised, and reported "no recorded HEAD" instead of failing.
 # A check that cannot find its own input is not a passing check.
-STATE_DIR="${SPEC_STATE_DIR:-/projects/_tmp/spec-dispatch}"
+STATE_DIR="${SPEC_STATE_DIR:-${LAYA_TMP:-$REPO/_tmp}/spec-dispatch}"
 HEAD_FILE="$STATE_DIR/${PART}.head"
 if [ -f "$HEAD_FILE" ]; then
   PRE=$(cat "$HEAD_FILE")

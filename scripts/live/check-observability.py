@@ -21,7 +21,7 @@ of this script could never see "off": it forced `LAYA_LEDGER_DIR` into the serve
 itself, so a deployment that had lost the variable still passed. It now
 
   * reads the variable from the host's MCP entry (`HERMES_CONFIG`, default
-    `/root/.hermes/config.yaml`) and fails when the entry does not set it;
+    `~/.hermes/config.yaml`) and fails when the entry does not set it;
   * starts the server with ONLY that environment and requires its startup `ledger` event to say
     `enabled: true` -- the server's own view, which a shell variable cannot certify;
   * runs a control server with the variable removed and requires it to announce `enabled: false`
@@ -41,12 +41,12 @@ import sys
 import threading
 from pathlib import Path
 
-MCP_BIN = os.environ.get("LAYA_MCP_BIN", "/root/.local/bin/laya-mcp")
-CLI_BIN = os.environ.get("LAYA_CLI_BIN", "/root/.local/bin/laya")
+MCP_BIN = os.environ.get("LAYA_MCP_BIN", os.path.expanduser("~/.local/bin/laya-mcp"))
+CLI_BIN = os.environ.get("LAYA_CLI_BIN", os.path.expanduser("~/.local/bin/laya"))
 LEDGER_DIR = os.environ.get("LAYA_LEDGER_DIR", "/var/lib/laya-ledger")
 
 
-HERMES_CONFIG = os.environ.get("HERMES_CONFIG", "/root/.hermes/config.yaml")
+HERMES_CONFIG = os.environ.get("HERMES_CONFIG", os.path.expanduser("~/.hermes/config.yaml"))
 
 
 def configured_env() -> dict[str, str] | None:

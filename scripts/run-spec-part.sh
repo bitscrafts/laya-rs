@@ -29,7 +29,7 @@
 # numbered spec needs no edit here. `part<N>` still selects spec 07's part, which
 # is how that spec was split.
 #
-# A spec's brief lives at /projects/_tmp/brief-spec<N>.md. Both spec and brief are
+# A spec's brief lives at $LAYA_TMP/brief-spec<N>.md (default _tmp/ in the repo). Both spec and brief are
 # checked before dispatch: a dispatch with a missing brief fails here, in one
 # second, not after a full turn budget is spent.
 #
@@ -39,9 +39,9 @@
 
 set -uo pipefail
 
-REPO=/projects/laya-rs
-BRIEF_DIR=/projects/_tmp
-STATE_DIR=/projects/_tmp/spec-dispatch
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BRIEF_DIR="${LAYA_TMP:-$REPO/_tmp}"
+STATE_DIR="${SPEC_STATE_DIR:-$BRIEF_DIR/spec-dispatch}"
 MODEL=sonnet
 # The turn cap is a COST bound, not a difficulty setting — but 120 turned out to sit
 # inside the range that legitimate specs need, so it was failing real work rather
@@ -60,13 +60,13 @@ MAX_TURNS="${MAX_TURNS:-160}"
 
 # The worker's environment. Set here, never assumed: a background shell starts
 # with a minimal env and `cargo` would not be found.
-export PATH="/root/.local/bin:/usr/local/cargo/bin:$PATH"
+export PATH="$HOME/.local/bin:/usr/local/cargo/bin:$PATH"
 export CARGO_HOME=/usr/local/cargo
 export RUSTUP_HOME=/usr/local/rustup
 # Required for `claude --permission-mode bypassPermissions` as root.
 export IS_SANDBOX=1
 # The claude CLI's own credentials live here.
-if [ -f /root/.hermes/.env ]; then set -a; . /root/.hermes/.env; set +a; fi
+if [ -n "${AGENT_ENV_FILE:-}" ] && [ -f "$AGENT_ENV_FILE" ]; then set -a; . "$AGENT_ENV_FILE"; set +a; fi
 
 mkdir -p "$STATE_DIR"
 

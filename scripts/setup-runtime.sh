@@ -3,15 +3,15 @@
 #
 # Why a new venv rather than reusing an existing one: `import laya` is not available
 # from system python (verified), and reaching into ANOTHER PROJECT'S venv
-# (/projects/digital-marketing/.venv) is the fragile coupling that the design review
+# (another project's virtualenv) is the fragile coupling that the design review
 # flagged and that the Rust head port exists to remove. The sidecar must not break
 # when an unrelated project reinstalls its dependencies.
 #
 # Pinned: laya==0.3.5 is the version the measurements were taken against.
 set -euo pipefail
 
-VENV=/projects/laya-rs/.venv-laya
-UV=/root/.local/bin/uv
+VENV="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.venv-laya"
+UV="${UV:-$(command -v uv || echo "$HOME/.local/bin/uv")}"
 LAYA_VERSION="${LAYA_VERSION:-0.3.5}"
 
 echo "=== creating $VENV ==="

@@ -10,10 +10,10 @@
 # Exits with cargo-mutants' own exit code (0 = all caught, 2 = missed, 3 = timeout, 4 = baseline failed).
 set -uo pipefail
 export PATH="/usr/local/cargo/bin:$PATH"
-cd /projects/laya-rs || exit 1
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
-BASE=/projects/_tmp/mutants-tmp
-OUT=/projects/_tmp/mutants-out-laya-rs
+BASE="${LAYA_TMP:-$PWD/_tmp}/mutants-tmp"
+OUT="${LAYA_TMP:-$PWD/_tmp}/mutants-out"
 mkdir -p "$BASE" "$OUT" || exit 1
 # A scratch dir created by THIS run and nothing else: the only thing this script ever removes.
 SCRATCH="$(mktemp -d "$BASE/run.XXXXXX")" || exit 1

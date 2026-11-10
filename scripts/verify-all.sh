@@ -14,7 +14,7 @@ set -uo pipefail
 # A script must be runnable from ANY shell. Prepending the cargo bin alone is not enough: the CLI
 # criteria below invoke `laya`, so without this the whole file fails with `laya: command not found`
 # when the caller's PATH lacks the install dir (measured 2026-10-02: `env -i PATH=/usr/bin:/bin`).
-export PATH="/root/.local/bin:/usr/local/cargo/bin:$PATH"
+export PATH="$HOME/.local/bin:/usr/local/cargo/bin:$PATH"
 # And pin the binary the CLI criteria test. The installed `laya` can be a STALE build -- three specs
 # this session had criteria that passed against an old binary while testing nothing. Prefer this
 # tree's build when it exists, so a criterion about THIS tree reads THIS tree.
@@ -24,7 +24,7 @@ if [ -x "./target/debug/laya" ]; then
 fi
 export CARGO_HOME=/usr/local/cargo
 export RUSTUP_HOME=/usr/local/rustup
-cd /projects/laya-rs
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # --- failure accounting -------------------------------------------------------
 # FAILS accumulates "step: what" for every check that exits non-zero. Each check
@@ -148,7 +148,7 @@ echo "########## 7b. THE LIVE CORPUS — Rust vs the Python reference ##########
 # The gate is explicit and prints WHY. A silent skip would be a check that cannot fail, which is the
 # failure mode this repo has already paid for twice. UNMEASURED is tracked SEPARATELY from FAILS so
 # "not measured" can never be read as "passed" -- but it also does not fail the build.
-if ! curl -sf -m 5 http://10.10.10.217:8083/v1/models > /dev/null 2>&1; then
+if ! curl -sf -m 5 "${LAYA_URL:-http://127.0.0.1:8083}/v1/models" > /dev/null 2>&1; then
   UNMEASURED+=("live corpus: backbone :8083 unreachable")
   echo "  UNMEASURED: the backbone at :8083 is not reachable, so the live corpus cannot run."
   echo "  This is NOT a pass — run it when the backbone is up:"
@@ -168,7 +168,7 @@ echo "########## 7c. THE GRAPH ACCEPTANCE TEST — laya-mcp as judge (spec 07 pa
 # spawned over stdio, exactly as `laya graph run` does. Same shape as §7b: gated on
 # the live backbone, reported as UNMEASURED (never a silent pass) when it is down —
 # an unmeasured acceptance test is not an acceptance test (the spec's own words).
-if ! curl -sf -m 5 http://10.10.10.217:8083/health > /dev/null 2>&1; then
+if ! curl -sf -m 5 "${LAYA_URL:-http://127.0.0.1:8083}/health" > /dev/null 2>&1; then
   UNMEASURED+=("graph acceptance: backbone :8083 unreachable")
   echo "  UNMEASURED: the backbone at :8083 is not reachable, so R-ACC cannot run."
   echo "  This is NOT a pass — run it when the backbone is up:"

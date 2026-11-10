@@ -31,7 +31,7 @@ echo "=== 2. write the user service (podman path: $PODMAN) ==="
 cat > "$UNIT" <<EOF
 [Unit]
 Description=laya-sidecar — the Laya decision head (inside the \`hermes\` container)
-Documentation=file:/podman/assistants/hermes/projects/laya-rs/_docs/05-operations/SUPERVISION.md
+Documentation=https://github.com/bitscrafts/laya-rs/blob/master/_docs/05-operations/SUPERVISION.md
 After=network-online.target
 Wants=network-online.target
 

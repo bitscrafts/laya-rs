@@ -41,7 +41,7 @@ every id and every marker **exactly**.
 
 Run with the reference interpreter:
 
-    /projects/laya-rs/.venv-laya/bin/python scripts/make-tokenizer-fixture.py
+    .venv-laya/bin/python scripts/make-tokenizer-fixture.py
 """
 
 import hashlib
@@ -50,12 +50,12 @@ import os
 import pathlib
 import sys
 
-SNAP = (
-    "/root/.cache/huggingface/hub/models--convaiinnovations--laya/snapshots/"
+SNAP = os.path.expanduser(
+    "~/.cache/huggingface/hub/models--convaiinnovations--laya/snapshots/"
     "1c5edc17a7acd8701df6fc341c0d179f1c62c982"
 )
 TOKENIZER_JSON = os.path.join(SNAP, "tokenizer", "tokenizer.json")
-OUT = pathlib.Path("/projects/laya-rs/crates/laya-head/tests/fixtures/tokenizer.json")
+OUT = pathlib.Path(__file__).resolve().parent.parent / "crates/laya-head/tests/fixtures/tokenizer.json"
 
 # The budgets `Agent` uses come from `rl_agent_config.json` (`max_len`, `head_max_len`),
 # not from a guess.

@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path("/projects/laya-rs")
+ROOT = Path(__file__).resolve().parent.parent
 SPECS_DIR = ROOT / "specs"
 CHECKBOX = re.compile(r"^\s*- \[([ x])\]")
 SPAN = re.compile(r"`([^`]+)`")

@@ -15,7 +15,7 @@
 #   FAST=1  skips the criteria that are known to take minutes, and SAYS SO in the line
 #   (default) runs everything, which is what you want before a release or a commit
 set -uo pipefail
-cd /projects/laya-rs
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 SPEC="${1:-}"
 [ -n "$SPEC" ] || { echo "usage: spec-gate.sh <spec-file>"; exit 2; }

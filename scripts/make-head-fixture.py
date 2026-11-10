@@ -21,6 +21,7 @@ Writes the same weights the Rust port reads, from the same file, so a mismatch c
 blamed on different tensors.
 """
 import json
+import os
 import pathlib
 import sys
 
@@ -28,8 +29,8 @@ import torch
 import torch.nn as nn
 from safetensors.torch import load_file
 
-HEAD = "/projects/_tmp/laya-gguf/laya-head.safetensors"
-OUT = pathlib.Path("/projects/laya-rs/crates/laya-head/tests/fixtures/head_forward.json")
+HEAD = os.environ.get("LAYA_HEAD", os.path.expanduser("~/laya-models/laya-head.safetensors"))
+OUT = pathlib.Path(__file__).resolve().parent.parent / "crates/laya-head/tests/fixtures/head_forward.json"
 
 
 def build(weights: dict, d: int, nhead: int, layers: int):

@@ -9,7 +9,7 @@
 # specs' criteria include the mutation gate at ~12 minutes each. A QUALITY check is not needed to answer
 # a COMPLETENESS question; run the full form before a release.
 set -uo pipefail
-cd /projects/laya-rs
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 FAST="${FAST:-1}"
 export FAST
 

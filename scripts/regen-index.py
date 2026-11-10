@@ -9,7 +9,7 @@ verifies each link — two independent checks rather than trusting the prose.
 import pathlib
 import re
 
-root = pathlib.Path("/projects/laya-rs")
+root = pathlib.Path(__file__).resolve().parent.parent
 
 DOCS = {
     "01-overview/README.md": (
@@ -281,8 +281,6 @@ out = [
     "",
     "Project-local documentation, organised with the SSOT methodology. Each fact lives",
     "in exactly one place; this index points at it, never restates it.",
-    "",
-    "**Project root**: `/projects/laya-rs`",
     "",
     "> **Read in this order on a cold start:** `01-overview` → `04-development/"
     "DESIGN-AMENDMENTS-2026-09-29.md` (the corrections) → `06-research/01-design.md`",

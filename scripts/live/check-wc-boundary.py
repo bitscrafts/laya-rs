@@ -19,7 +19,7 @@ import os
 import subprocess
 import sys
 
-MCP = os.environ.get("LAYA_MCP_BIN", "/root/.local/bin/laya-mcp")
+MCP = os.environ.get("LAYA_MCP_BIN", os.path.expanduser("~/.local/bin/laya-mcp"))
 
 THRESHOLDS = [
     # (threshold, counts to test -- the exact boundary is non-negotiable)

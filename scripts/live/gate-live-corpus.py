@@ -41,14 +41,14 @@ import subprocess
 import sys
 import time
 
-ROOT = "/projects/laya-rs"
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 PY = f"{ROOT}/.venv-laya/bin/python"
 SIDECAR = f"{ROOT}/scripts/laya-sidecar.py"
 MCP = os.environ.get("LAYA_MCP_BIN", f"{ROOT}/target/release/laya-mcp")
 HEAD = os.environ.get(
-    "LAYA_HEAD", "/projects/_tmp/laya-gguf/laya-head.safetensors"
+    "LAYA_HEAD", os.path.expanduser("~/laya-models/laya-head.safetensors")
 )
-LAYA_URL = os.environ.get("LAYA_URL", "http://10.10.10.217:8083")
+LAYA_URL = os.environ.get("LAYA_URL", "http://127.0.0.1:8083")
 SIDECAR_SOCK = os.environ.get("LAYA_SIDECAR_SOCKET", "/run/laya/sidecar.sock")
 
 # Every command named in this spec's Verified Premises, plus enough variants of the

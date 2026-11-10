@@ -68,9 +68,9 @@ import urllib.request
 
 # The pinned runtime. Overridable for a different deploy, but the DEFAULT is the
 # local venv created by setup-runtime.sh — never another project's venv.
-DEFAULT_VENV = "/projects/laya-rs/.venv-laya"
-DEFAULT_HEAD = "/projects/_tmp/laya-gguf/laya-head.safetensors"
-DEFAULT_ENDPOINT = "http://10.10.10.217:8083"
+DEFAULT_VENV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".venv-laya")
+DEFAULT_HEAD = os.path.expanduser("~/laya-models/laya-head.safetensors")
+DEFAULT_ENDPOINT = "http://127.0.0.1:8083"
 
 
 def log(msg):

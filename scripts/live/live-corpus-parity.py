@@ -52,7 +52,7 @@ import sys
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-ENDPOINT = os.environ.get("LAYA_BACKBONE", "http://10.10.10.217:8083")
+ENDPOINT = os.environ.get("LAYA_BACKBONE", "http://127.0.0.1:8083")
 SIDECAR = os.environ.get("LAYA_SIDECAR_SOCKET", "/run/laya/sidecar.sock")
 # Absolute, not a bare name: this is run from cron and from other sessions, where PATH does not
 # necessarily include ~/.local/bin — and a bare name would fail as an unhelpful "No such file".
