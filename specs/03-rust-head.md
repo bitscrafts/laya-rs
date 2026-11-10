@@ -61,7 +61,7 @@ because they are the kind that only a live run surfaces.
 > temperature at all. Only the reported probabilities do. That is an edge invariant worth
 > preserving, and it is now F10.
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: P4
 
 ## Requirements

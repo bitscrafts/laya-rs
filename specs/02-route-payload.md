@@ -9,7 +9,7 @@ a graph `route` node's expression language supports.
 **Status: IMPLEMENTED.** `laya-core::route_payload` (tests in `specs/01`, green).
 This spec records the wire contract so a change is made against a written standard.
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: 1 — P1
 
 ## Requirements

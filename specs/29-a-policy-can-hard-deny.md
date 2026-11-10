@@ -1,7 +1,7 @@
 # Spec: 29 — A policy can hard-deny (gate_deny beats ask)
 #: depends=- status=done block=-
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: P4 enforcement — closes G2 (deny production-unreachable: 5083 decisions, 0 denies)
 **Status**: NOT IMPLEMENTED (structural proof dated 2026-10-06 — see premises)
 **Derived from**: `_docs/06-research/05-laya-seam-review-2026-10-06.md` §G2, SPEC-C

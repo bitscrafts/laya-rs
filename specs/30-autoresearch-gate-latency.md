@@ -1,7 +1,7 @@
 # Spec: 30 — Autoresearch loop #1: laya gate latency
 #: depends=- status=done block=-
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: first real run of the autoresearch-loop skill ON this repo's own machinery
 **Status**: COMPLETE (2026-10-07) — STUB proof + v1 VOIDED by its own catch (bogus 2ms keep) + v2 series done honest
 **Derives from**: laya-rs rule 11 (autoresearch = the standing test bed); 05 seam review

@@ -13,7 +13,7 @@ against a written standard rather than against the implementation.
 
 **Status: IMPLEMENTED.** `laya-core::policy` + `route_payload`; tests green.
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: 1 — P1 (pure core)
 
 ## Requirements

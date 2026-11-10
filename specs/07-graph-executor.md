@@ -44,7 +44,7 @@ green, compiling tree and is committed before the next is dispatched:
 part's exit criteria would silently never run — and a criterion that never runs is
 indistinguishable from one that passed.
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Source**: `_docs/03-reference/GRAPH-SPEC.md` (the suggested format, marked as a
 proposal) and `_docs/06-research/03-four-architecture-questions.md` §3 (the
 capability, standalone absorption, and parallel execution as the defining

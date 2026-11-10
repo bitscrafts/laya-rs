@@ -6,7 +6,7 @@ The first `wc` example routed on a 3-option `choice` and produced the **same** l
 and a 412-word document, so its control certified nothing. The cause is now **measured**, and it is
 not the head's ability to read numbers.
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: 15 — worked examples that encode a measured boundary
 
 ## The measurement this spec is built on (2026-10-02, re-runnable)

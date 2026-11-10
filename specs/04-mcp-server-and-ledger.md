@@ -17,7 +17,7 @@ end. This spec incorporates the review's corrections: P1 needs a **pinned Python
 the head (blocker B3), the ledger uses a single-writer scheme (blocker B4), and `route` is
 **not** a tool (finding M6).
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: P1
 
 ## Requirements

@@ -1,7 +1,7 @@
 # Spec: 28 — The decision identity is visible (decision_id in the gate payload)
 #: depends=- status=done block=-
 
-**Project**: /projects/laya-rs
+**Project**: laya-rs
 **Phase**: P4 observability — closes G1 (outcomes=0, no calibration feedback) at the source
 **Status**: NOT IMPLEMENTED (exit criteria proven to FAIL 2026-10-06T14:23Z)
 **Derived from**: `_docs/06-research/05-laya-seam-review-2026-10-06.md` (pi+glm-5.3 analysis, committed `b4ced29`), SPEC-A laya-rs part
