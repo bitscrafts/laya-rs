@@ -38,8 +38,9 @@ Measured when this was written (criteria run, not the card trusted):
   rather than pass when it is down. Two specs (08, 14) still fail on them.
 - Spec 24 needs a built `target/debug/laya`: its criteria say so only implicitly.
 - Spec 30 has one criterion that names a script outside this repository.
-- History: 35 early commits carry another author name and 118 an old address; rewriting them
-  needs a force-push and is the owner's decision.
+- History was rewritten on 2026-11-10: one author identity throughout, eight commit messages
+  reworded, and every commit id cited inside this repository carried to the new id. An id quoted
+  anywhere outside this repository from before that date will not match.
 - Nothing is published to crates.io. The names `laya`, `laya-rs` and `laya-core` are taken there;
   the first release is a GitHub release with prebuilt binaries (`release.yml`, on a `v*` tag).
 
