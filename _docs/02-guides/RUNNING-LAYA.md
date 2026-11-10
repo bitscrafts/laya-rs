@@ -1,6 +1,6 @@
 # Running Laya + llama.cpp
 
-How to stand up the whole decision layer on `lnx`, from nothing to a verified answer.
+How to stand up the whole decision layer on a Linux host, from nothing to a verified answer.
 
 **Audience**: an operator or agent who has not read the source. Every command is real
 and was run; where a number appears it was measured, not estimated.
@@ -37,7 +37,7 @@ is not a decision layer. `laya doctor` checks both (see §5).
 The backbone is a **host** container — it is *not* started from inside this container.
 
 ```bash
-# on lnx (the host)
+# on the host that runs the containers
 systemctl --user status llamacpp-laya.service
 # or, if it is not up:
 systemctl --user start llamacpp-laya.service

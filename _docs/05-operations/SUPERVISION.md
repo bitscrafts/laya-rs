@@ -3,7 +3,7 @@
 How the Laya sidecar stays up across crashes and reboots, and why it is supervised
 **on the host** rather than inside this container.
 
-Unit installed at: `~/.config/systemd/user/laya-sidecar.service` on **lnx** (the host).
+Unit installed at: `~/.config/systemd/user/laya-sidecar.service` on the host.
 This is the doc referenced by the unit's `Documentation=` field.
 
 ---
@@ -29,7 +29,7 @@ the host's own units.
 
 ## The unit
 
-`~/.config/systemd/user/laya-sidecar.service` on lnx:
+`~/.config/systemd/user/laya-sidecar.service` on the host:
 
 ```ini
 [Unit]

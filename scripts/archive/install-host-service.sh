@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install `laya-sidecar` as a SUPERVISED service on the host `lnx`.
+# Install `laya-sidecar` as a SUPERVISED service on the host.
 #
 # WHY THE HOST: inside the container there is no systemd (PID 1 is podman-init), no
 # podman, and no crontab — verified. Nothing inside can supervise a daemon, so the

@@ -22,7 +22,7 @@ and none is run by CI or referenced by the gate, the docs or another script.
 | `fix-scope-resolution.py` | GREEN, part 2: resolve a path for the scope check WITHOUT requiring the file to exist. |
 | `fix-scope-test-contradiction.py` | Fix a contradiction between TWO TESTS I WROTE, by stating the semantics. |
 | `gate-signal-green.py` | GREEN: the second, independent signal for command safety — plus honest validation. |
-| `install-host-service.sh` | Install `laya-sidecar` as a SUPERVISED service on the host `lnx`. |
+| `install-host-service.sh` | Install `laya-sidecar` as a SUPERVISED service on the host. |
 | `measure-and-prove.py` | Measure Laya concurrency properly, then PROVE the redb cross-process behaviour. |
 | `measure-concurrency.sh` | Measure the TWO contention points that decide P1's architecture. |
 | `measure-content-limit.py` | MEASURE the real content limit of the head — do NOT assume 256 KiB is seen. |
