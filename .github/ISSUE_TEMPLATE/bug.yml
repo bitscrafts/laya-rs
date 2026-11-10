@@ -1,0 +1,24 @@
+name: Bug
+description: Something behaves differently from what the documentation says.
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: seen
+    attributes:
+      label: What you ran and what happened
+      description: The exact command and its output. Remove anything private.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "Output of `laya --version` or the commit hash."
+    validations:
+      required: true

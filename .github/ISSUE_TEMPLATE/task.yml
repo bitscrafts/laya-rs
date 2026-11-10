@@ -1,0 +1,35 @@
+name: Task
+description: A change to make. Maintainers mark it `ready` when it is specified well enough to start.
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A task is done when its exit criteria pass, so write them as commands.
+        Larger changes get a spec in `specs/` (see `specs/README.md`); link it here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+      description: The change, and the problem it solves, in a few sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Exit criteria
+      description: One shell command per line that exits 0 when this is done. Nothing that always passes.
+      placeholder: "cargo test -p laya-cli embedder::"
+    validations:
+      required: true
+  - type: textarea
+    id: paths
+    attributes:
+      label: Files it may touch
+      description: Paths or crates. Anything else needs a new task.
+    validations:
+      required: true
+  - type: textarea
+    id: out
+    attributes:
+      label: Out of scope

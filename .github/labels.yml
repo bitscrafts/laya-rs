@@ -1,0 +1,8 @@
+# Status labels are plain words. Whoever manages the work (a person or a tool) uses these names;
+# the repository does not know or care who. Apply with scripts/sync-labels.sh.
+- {name: triage,      color: ededed, description: "new; not yet read by a maintainer"}
+- {name: ready,       color: 0e8a16, description: "specified well enough to start; set by a maintainer only"}
+- {name: in-progress, color: fbca04, description: "someone is working on it"}
+- {name: in-review,   color: 1d76db, description: "a pull request is open"}
+- {name: blocked,     color: d93f0b, description: "cannot continue; the issue says why"}
+- {name: bug,         color: b60205, description: "behaves differently from the documentation"}
