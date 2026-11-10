@@ -16,7 +16,6 @@ in exactly one place; this index points at it, never restates it.
 | `04-development/` | design decisions, the review amendments, implementation notes |
 | `05-operations/` | the ledger, budgets, running the server |
 | `06-research/` | numbered research write-ups (design v1, the review, prior-art trails) |
-| `99-archive/` | superseded material, kept with its consequence labelled |
 
 ## Documents
 
@@ -73,9 +72,6 @@ in exactly one place; this index points at it, never restates it.
 - [Four architecture questions (threading, config, graph spec, scheduler)](06-research/03-four-architecture-questions.md) — Discussion only: the priority queue as admission control and a missed fourth parallelism axis; where config should live and why redb does not speed the load; our own graph specification and mermaid export; and whether to build a scheduler.
 - [LAYA SEAM REVIEW + FIX PLAN — 2026-10-06](06-research/05-laya-seam-review-2026-10-06.md) — <!-- Filed 2026-10-06T14:30Z by the Hermes orchestrator (Marcelo Correa). Produced by: pi + glm-5.3:cloud (ollama-cloud), the two-lane ANALYSIS lane (read-only tool grant),
 - [Research](06-research/README.md) — Numbered research write-ups: convention and index.
-
-### 99-archive
-- [LAYA-RS — ANALYSIS BRIEF (adversarial design review)](99-archive/session-handoffs-2026-10-02/02a-analysis-brief.md) — Job type: ANALYSIS ONLY. Do NOT implement. Do NOT edit any .rs file. Do NOT create a Cargo.toml or scaffold the project.
 
 ## This project is self-contained
 
