@@ -6,9 +6,9 @@ node. **It was never intermittent.** It is deterministic and depends entirely on
 ## The measurement, three ways, same flow, same machine, same minute
 
 ```
-WITHOUT /root/.local/bin on PATH   -> FAILED gt300 | failed to spawn `laya-mcp` (set LAYA_MCP_BIN if it is not on PATH): No such file or directory (os error 2)
-WITH    /root/.local/bin on PATH   -> ALL OK
-WITH LAYA_MCP_BIN=/root/.local/bin/laya-mcp  -> ALL OK
+WITHOUT ~/.local/bin on PATH   -> FAILED gt300 | failed to spawn `laya-mcp` (set LAYA_MCP_BIN if it is not on PATH): No such file or directory (os error 2)
+WITH    ~/.local/bin on PATH   -> ALL OK
+WITH LAYA_MCP_BIN=~/.local/bin/laya-mcp  -> ALL OK
 ```
 
 `command -v laya-mcp` prints `NO` in the first case and a path in the second.
@@ -18,7 +18,7 @@ WITH LAYA_MCP_BIN=/root/.local/bin/laya-mcp  -> ALL OK
 A `decide` node lowers to an `mcp` node, and the CLI **spawns `laya-mcp` as a child process**. It
 resolves that name through the **caller's** `PATH`. So:
 
-- scripts of mine that began `export PATH=/root/.local/bin:$PATH` ran clean;
+- scripts of mine that began `export PATH=~/.local/bin:$PATH` ran clean;
 - scripts that did not, failed at the **first decide**, every time.
 
 I observed both and called the difference **intermittent**, which sent me hunting a race for several
@@ -34,7 +34,7 @@ tooling.
 
 Every worked example in `_docs/02-guides/` runs a `decide`, so **every one of them needs `laya-mcp` on
 `PATH`** (or `LAYA_MCP_BIN` set). A reader who follows the documented command in a shell without
-`/root/.local/bin` gets:
+`~/.local/bin` gets:
 
 ```
 laya graph run: STOPPED EARLY at `gt300` … failed to spawn `laya-mcp`

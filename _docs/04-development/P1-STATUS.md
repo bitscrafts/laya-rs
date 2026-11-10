@@ -71,7 +71,7 @@ the answer is `ask`, never `allow`.
 ```
 $ laya doctor
 laya-rs: READY
-  endpoint  : http://10.10.10.217:8083
+  endpoint  : http://127.0.0.1:8083
   /health   : ok
   /v1/models: ok (serving the expected model)
 exit=0

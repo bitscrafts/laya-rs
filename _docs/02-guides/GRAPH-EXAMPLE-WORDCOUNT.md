@@ -222,7 +222,7 @@ around — it is the reason the phrasing sweep in 6.4 exists.
 Fourteen candidate (state, question) phrasings were measured on the calls the two flows actually
 execute — the main flow's gates are `(13>300)` and `(13>100)`, the control's executed gate is
 `(412>300)` (its `>100` subtree is pruned after `yes`). Probe scripts:
-`/projects/_tmp/wc-example/probe-decide-shapes.py`, `probe-phrasing.py`, `probe-phrasing3.py`,
+`_tmp/wc-example/probe-decide-shapes.py`, `probe-phrasing.py`, `probe-phrasing3.py`,
 `probe-phrasing4.py`, `probe-v14c-grid.py` (scratch, not checked in). Labels `WRONG` disqualify;
 `band=low` disqualifies for a gate (it escalates):
 
@@ -268,7 +268,7 @@ gt100_gate/route {"on":"$.payload.band","value":"mid","selected_port":"gt100_ask
 gt100_ask        {"payload":{"label":"no","band":"mid","confidence":0.8062,...}}
 gt100_ask/route  {"on":"$.payload.label","value":"no","selected_port":"class_short"}
 class_short      "CLASSIFIED: SHORT (not more than 100 words)"
-count_words      "13 /projects/_tmp/wc-example/short-note.txt"   (ran LAST — see 6.6)
+count_words      "13 _tmp/wc-example/short-note.txt"   (ran LAST — see 6.6)
 ```
 
 Control (`wc-classify-chained.control.flow.json`, 412-word document) — key records, verbatim:
@@ -279,12 +279,12 @@ gt300_gate/route {"on":"$.payload.band","value":"mid","selected_port":"gt300_ask
 gt300_ask        {"payload":{"label":"yes","band":"mid","confidence":0.632,...}}
 gt300_ask/route  {"on":"$.payload.label","value":"yes","selected_port":"class_long"}
 class_long       "CLASSIFIED: LONG (more than 300 words)"
-count_words      "412 /projects/_tmp/wc-example/long-note.txt"
+count_words      "412 _tmp/wc-example/long-note.txt"
 ```
 
 **`class_short` vs `class_long` — the pair is a real control.** The gate and ask bands agree
 everywhere (the ask repeats the gate's answer exactly), and each `wc` line matches the count in
-the prompt literal. Full JSON reports: `/projects/_tmp/wc-example/REPORT.md`.
+the prompt literal. Full JSON reports: `_tmp/wc-example/REPORT.md`.
 
 ### 6.6 The break-the-control check — the pair collapses and is restored
 
@@ -293,13 +293,13 @@ the four `412` literals replaced by `13`) and re-run: it walked the full chain �
 selected **`class_short`**, the SAME terminal as the main flow, with the two answers byte-identical
 to the main flow's (0.8518 / 0.8062). **The pair collapsed; the difference between the real runs
 came from the data (the count), not from the graph shape.** The file was restored from a byte-copy
-(`/projects/_tmp/wc-example/control-flow-backup.json`, md5 `cd3f41e5e002778a8586300c5a812490` both
+(`_tmp/wc-example/control-flow-backup.json`, md5 `cd3f41e5e002778a8586300c5a812490` both
 before and after) and re-run confirmed `class_long` again. Nothing was deleted.
 
 ### 6.7 The low-band escalation, live — and its near-miss control
 
 `a state the head bands low` must reach an escalate port, not a nominated branch. Two probe flows
-(scratch: `/projects/_tmp/wc-example/probe-low-band.flow.json` and its near-miss
+(scratch: `_tmp/wc-example/probe-low-band.flow.json` and its near-miss
 `probe-mid-band.flow.json`; identical gate, only the count differs):
 
 ```
@@ -352,8 +352,8 @@ routing on `band` and routing on `label` that section 4 demonstrated with the 3-
 ## 7. Reproduce
 
 ```sh
-export PATH=/root/.local/bin:$PATH
-cd /projects/laya-rs
+export PATH=~/.local/bin:$PATH
+cd laya-rs
 
 # the threshold measurement the design rests on (noul shape, raw tool): 15/15
 python3 scripts/live/check-wc-boundary.py
@@ -382,7 +382,7 @@ the example demonstrates the graph's *shape* while proving nothing about `wc` �
 version of this document claimed otherwise.
 
 ```sh
-export PATH=/root/.local/bin:$PATH
+export PATH=~/.local/bin:$PATH
 laya graph run _docs/02-guides/wc-classify-chained.flow.json 2>&1 | python3 -c "
 import sys, json
 for line in sys.stdin:

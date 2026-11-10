@@ -1,7 +1,7 @@
 # OPUS ROUND 2 — the build order, and what I had wrong
 
 **claude + opus, 2026-10-02**, resumed session `d58b577f-fc19-48d5-b690-f6d7524ea4f8` (15 turns,
-$4.27, 620 s). Full report: `/projects/_tmp/opus-graph-analysis/ROUND2.md` (346 lines), with every
+$4.27, 620 s). Full report: `_tmp/opus-graph-analysis/ROUND2.md` (346 lines), with every
 probe flow and its run report under `round2/`.
 
 Round 2 was asked: is the five-inert-fields finding the real problem or a symptom, what is the build

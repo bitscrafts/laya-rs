@@ -15,17 +15,17 @@ Now it is a `check`: a command's exit status picks the branch, **with no model i
 
 ```sh
 # one spec, one compact line, exit status is the answer
-cd /projects/laya-rs && scripts/spec-gate.sh specs/25-the-graph-can-decide-without-asking.md
+scripts/spec-gate.sh specs/25-the-graph-can-decide-without-asking.md
     -> 25-the-graph-can-decide-without-asking.md: DONE 9/9 criteria passed      exit 0
     -> 26-the-examples-are-run-by-the-suite.md: NOT DONE 6/7 passed, 1 failed   exit 1
 
 # the whole spec set, one compact line
-cd /projects/laya-rs && scripts/spec-all-gate.sh
+scripts/spec-all-gate.sh
     -> spec set: ALL DONE (33 specs)                                            exit 0
     -> spec set: 2 NOT DONE of 33; open: 16 18                                  exit 1
 
 # and the same decision, made by a GRAPH (routing, skipped nodes, a report)
-cd /projects/laya-rs && laya graph run _docs/02-guides/spec-gate.flow.json
+laya graph run _docs/02-guides/spec-gate.flow.json
 ```
 
 `spec-gate.flow.json` is the graph form: one `check` node runs `scripts/spec-all-gate.sh` and routes to
@@ -94,8 +94,8 @@ The obvious worry about a gate whose input is a spec file: does it trust the `[x
 control spec was written with one criterion **unticked and failing** and one ticked and passing:
 
 ```
-unticked + failing  ->  NOT DONE 1/2 passed, 1 failed; first failure: cd /projects/laya-rs && false   exit 1
-same spec, ticked   ->  NOT DONE 1/2 passed, 1 failed; first failure: cd /projects/laya-rs && false   exit 1
+unticked + failing  ->  NOT DONE 1/2 passed, 1 failed; first failure: false   exit 1
+same spec, ticked   ->  NOT DONE 1/2 passed, 1 failed; first failure: false   exit 1
 ```
 
 **Identical.** The parser accepts `- [x]` and `- [ ]`, and both are RUN. So "ALL DONE" means *every

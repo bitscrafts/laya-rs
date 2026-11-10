@@ -18,7 +18,7 @@ Four facts, each verified, each ruling out an option that looks reasonable on pa
 | No container runtime inside | `podman` **absent** | cannot manage containers from here |
 | No cron inside | `crontab` **absent**; no user crontab | cannot schedule a restart from here |
 | `/run` is container-local tmpfs | `findmnt /run` → not a separate mount | the socket does **not** survive a container restart |
-| The venv cannot run on the host | host exec of `.venv-laya/bin/python` → **Permission denied** (it is a symlink into the container's `/root/.local/share/uv/...`) | the head can **only** run inside the container |
+| The venv cannot run on the host | host exec of `.venv-laya/bin/python` → **Permission denied** (it is a symlink into the container's `~/.local/share/uv/...`) | the head can **only** run inside the container |
 | The host can attach to the container | `podman exec hermes /bin/bash -c 'echo EXEC-OK'` → `EXEC-OK` | supervision goes through `podman exec` |
 | The host runs user services at boot | `loginctl show-user mvcorrea --property=Linger` → `Linger=yes` | a user unit is enough; no root unit needed |
 
@@ -34,13 +34,13 @@ the host's own units.
 ```ini
 [Unit]
 Description=laya-sidecar — the Laya decision head (inside the `hermes` container)
-Documentation=file:/podman/assistants/hermes/projects/laya-rs/_docs/05-operations/SUPERVISION.md
+Documentation=https://github.com/bitscrafts/laya-rs/blob/master/_docs/05-operations/SUPERVISION.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/podman exec hermes /root/.local/bin/laya-sidecar
+ExecStart=/usr/bin/podman exec hermes ~/.local/bin/laya-sidecar
 Restart=always
 RestartSec=5
 TimeoutStartSec=180
@@ -77,8 +77,8 @@ Each line is load-bearing:
 
 ```bash
 # from inside the container, with the script in the repo:
-scp scripts/install-host-service2.sh mvcorrea@10.10.10.217:/tmp/
-ssh mvcorrea@10.10.10.217 'bash /tmp/install-laya-sidecar2.sh'
+scp scripts/install-host-service2.sh user@host:/tmp/
+ssh user@host 'bash /tmp/install-laya-sidecar2.sh'
 ```
 
 Or by hand on the host:
@@ -96,7 +96,7 @@ Expect **~30 s** before the head is usable — that is the load, not a fault.
 
 ```bash
 # is it up, and is the head actually usable?  (the whole path, not just the unit)
-ssh mvcorrea@10.10.10.217 'podman exec hermes /root/.local/bin/laya doctor'
+ssh user@host 'podman exec hermes ~/.local/bin/laya doctor'
 
 systemctl --user status  laya-sidecar.service        # unit state
 systemctl --user restart laya-sidecar.service        # restart (waits ~30 s)

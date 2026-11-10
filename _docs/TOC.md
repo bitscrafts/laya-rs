@@ -53,7 +53,9 @@ reading order.
 ## 06-research
 - [Design (v1) — superseded in part](06-research/01-design.md)
 - [Adversarial review by pi + glm-5.3](06-research/02-analysis-glm-5.3.md)
-- [The review brief](06-research/02a-analysis-brief.md)
 - [Four architecture questions (threading, config, graph spec, scheduler)](06-research/03-four-architecture-questions.md)
 - [LAYA SEAM REVIEW + FIX PLAN — 2026-10-06](06-research/05-laya-seam-review-2026-10-06.md)
 - [Research](06-research/README.md)
+
+## 99-archive
+- [LAYA-RS — ANALYSIS BRIEF (adversarial design review)](99-archive/session-handoffs-2026-10-02/02a-analysis-brief.md)

@@ -99,12 +99,12 @@ standard the rest of the engine does not yet meet.
 ## Reproduce
 
 ```sh
-export PATH=/root/.local/bin:$PATH
-cd /projects/laya-rs
-bash /projects/_tmp/test-engine-features.sh
+export PATH=~/.local/bin:$PATH
+cd laya-rs
+bash _tmp/test-engine-features.sh
 ```
 
-The probe flows are in `/projects/_tmp/engine-features/` (`parent.flow.json`, `child.flow.json`,
+The probe flows are in `_tmp/engine-features/` (`parent.flow.json`, `child.flow.json`,
 `cycle.flow.json`).
 
 ## Not claimed

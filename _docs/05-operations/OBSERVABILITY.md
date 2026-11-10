@@ -135,11 +135,11 @@ The probes were written as scratch and are listed here because the numbers above
 
 | what | how |
 |---|---|
-| all seven tools, deployed env | `/projects/_tmp/usable-probe.py` |
-| the ten levels | `/projects/_tmp/verify-levels.py` |
-| cost per call | `/projects/_tmp/token-economy.py` |
-| the ledger records at all | `/projects/_tmp/ledger-proof.py` |
-| the question-shape matrix | `/projects/_tmp/shape-matrix.py` |
+| all seven tools, deployed env | `_tmp/usable-probe.py` |
+| the ten levels | `_tmp/verify-levels.py` |
+| cost per call | `_tmp/token-economy.py` |
+| the ledger records at all | `_tmp/ledger-proof.py` |
+| the question-shape matrix | `_tmp/shape-matrix.py` |
 
 They live in `_tmp/` **deliberately, and they must not become load-bearing**: nothing in the repo may
 depend on them existing. The durable checks are the exit criteria in the specs.
@@ -153,7 +153,7 @@ ledger was off for the life of the installation") is now the *other* state. Corr
 ```
 deployed server pids 1068293 / 1068334 / 1070199
   LAYA_LEDGER_DIR=/var/lib/laya-ledger      <- present, so recording IS on
-  LAYA_READ_ROOTS=/projects:/root
+  LAYA_READ_ROOTS=<allowed roots>
 
 on disk:  7 segment files, 7 rows (ledger-<pid>.jsonl, one per probing process)
 
@@ -398,7 +398,7 @@ so it also reaches the agent's own log:
 and, in `agent.log`, through the stderr channel:
 
 ```
-INFO agent.shell_hooks: shell hook stderr (command=/root/.hermes/hooks/laya-gate.sh):
+INFO agent.shell_hooks: shell hook stderr (command=~/.hermes/hooks/laya-gate.sh):
      laya-gate: PASS [allow] tool=terminal signals=0 cmd=pwd
 ```
 

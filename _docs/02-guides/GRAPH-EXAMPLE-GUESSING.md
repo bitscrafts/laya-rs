@@ -271,10 +271,10 @@ weaken the criterion.)
 ## 7. Reproduce
 
 ```sh
-export PATH=/root/.local/bin:$PATH     # only if using the installed binary; the installed
+export PATH=~/.local/bin:$PATH     # only if using the installed binary; the installed
                                        # one may be stale — build first, or do what every
                                        # criterion here does and run ./target/debug/laya
-cd /projects/laya-rs
+cd laya-rs
 cargo build
 
 ./target/debug/laya graph validate _docs/02-guides/guess-the-number.flow.json

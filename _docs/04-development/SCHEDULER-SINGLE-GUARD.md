@@ -1,7 +1,7 @@
 # THE SCHEDULER'S SINGLE GUARD, AND THE MUTANTS THAT HANG IT
 
 **Measured 2026-10-02**, from the mutation gate's own preserved output at
-`/projects/_tmp/mutants-out-laya-rs/mutants.out/`. This is the finding behind spec 17's one unticked
+`_tmp/mutants-out-laya-rs/mutants.out/`. This is the finding behind spec 17's one unticked
 criterion, and it is more interesting than "the gate exits 3".
 
 ## The facts, from the gate's artefacts rather than a re-run

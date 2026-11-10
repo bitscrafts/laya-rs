@@ -386,7 +386,7 @@ what tool) before P5.
 **n1** — F2's scorer.0 shape; the "36 tensors" count that 040 recorded but the design dropped (header verified: 36).
 **n2** — §8 lists `max_prefixes 6`; it is unused by the inference path (grep exit=1).
 **n3** — `hybrid_test.py:13` points at `localhost:8099` while the serving container is :8083 (040 §2) — harness drift the design never reconciles.
-**n4** — The Python ground truth lives in another project's venv (`/projects/digital-marketing/.venv`) — the same venv that produced the tokenizers/transformers conflict F1 cites; the design's evidence base is a side effect of an unrelated project.
+**n4** — The Python ground truth lives in another project's venv (`another project's virtualenv`) — the same venv that produced the tokenizers/transformers conflict F1 cites; the design's evidence base is a side effect of an unrelated project.
 **n5** — F10's claim that two sibling projects use redb 2: one pins 1.0, the other 2.
 
 ---
@@ -398,7 +398,7 @@ what tool) before P5.
 - **F3 — correct in substance, stale in citation.** Argmax verified at `agent.py:341` (design says :316); no sampling anywhere (grep exit=1). "No seed pinning needed for replay" holds only within a fixed implementation+version — not across head ports or backbones (see F7's own Δp, and B1).
 - **F4 — correct math, wrong consequence.** Temperature scales logits before softmax (`agent.py:330-332`); argmax is invariant for T>0 (clamped to [0.5, 5.0], `common.py:228-240`) ✓ **for label routes**. "Can NEVER change the EDGE" is false for band/score routes (m5) — including §5's own second route.
 - **F5 — correct that the config travels in the file (verified in the safetensors metadata), dangerously incomplete otherwise.** It quotes raw temperatures including `choice:11+ = 0.101`, which laya **refuses to apply** (clamps to 0.5, warns "uncalibrated", `agent.py:205-220`); and the most load-bearing head constant (nhead=16) is not in the config at all (`common.py:96`) — "never hardcode" cannot be followed.
-- **F6 — verified live today.** `curl http://10.10.10.217:8083/health` → `{"status":"ok"}` (2026-09-29). ✓
+- **F6 — verified live today.** `curl http://127.0.0.1:8083/health` → `{"status":"ok"}` (2026-09-29). ✓
 - **F7 — real number, wrong inference.** Δp=0.0006 is one probability, one state, same Python head, different backbone (`parity_test.py:50`). It quantifies Q8_0 quantization, not Rust-head fidelity. "The Rust head port is a fidelity question" is true — F7 is not evidence for it.
 - **F8 — accurate for THIS checkpoint, overstated as a fact.** 039 §6.5 measured act_probability ≡ 1.0 including gibberish; but if the Rust port drops act_head (as F2's inventory implies), the field vanishes and the tool contract diverges from laya's documented response (`agent.py:335`). Decide explicitly.
 - **F9 — fine.** Saturation measured; flag-in-ledger is the right mitigation. Note unclamped sharpening (B2) manufactures fake saturation.

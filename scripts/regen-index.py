@@ -167,10 +167,6 @@ DOCS = {
         "Adversarial review by pi + glm-5.3",
         "The full review: five blockers, ten majors, fact-by-fact corrections.",
     ),
-    "06-research/02a-analysis-brief.md": (
-        "The review brief",
-        "The exact prompt the reviewer ran against, so the review is reproducible.",
-    ),
     "06-research/README.md": ("Research", "Numbered research write-ups: convention and index."),
     "06-research/03-four-architecture-questions.md": (
         "Four architecture questions (threading, config, graph spec, scheduler)",

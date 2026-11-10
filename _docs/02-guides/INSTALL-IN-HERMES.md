@@ -16,12 +16,12 @@ Everything lives in `~/.local/bin` (this container's convention — no root path
 `/usr/local`):
 
 ```bash
-cd /projects/laya-rs
+cd laya-rs
 export PATH="/usr/local/cargo/bin:$PATH" CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup
 cargo build --release -p laya-mcp -p laya-cli
-install -m 0755 target/release/laya-mcp /root/.local/bin/laya-mcp   # the MCP server
-install -m 0755 target/release/laya    /root/.local/bin/laya        # the CLI
-install -m 0755 scripts/laya-sidecar.py /root/.local/bin/laya-sidecar.py
+install -m 0755 target/release/laya-mcp ~/.local/bin/laya-mcp   # the MCP server
+install -m 0755 target/release/laya    ~/.local/bin/laya        # the CLI
+install -m 0755 scripts/laya-sidecar.py ~/.local/bin/laya-sidecar.py
 ```
 
 `laya-sidecar` (the head launcher) comes from `scripts/setup-runtime.sh` instead — it
@@ -39,7 +39,7 @@ Two binaries, two roles — do not confuse them:
 ## 2. Register with Hermes
 
 ```bash
-printf 'Y\n' | hermes mcp add laya --command /root/.local/bin/laya-mcp
+printf 'Y\n' | hermes mcp add laya --command ~/.local/bin/laya-mcp
 ```
 
 * The name `laya` (not `laya-mcp`) makes the tools read `mcp__laya__decide`,
@@ -51,7 +51,7 @@ printf 'Y\n' | hermes mcp add laya --command /root/.local/bin/laya-mcp
 Verify:
 
 ```bash
-hermes mcp list        # laya  /root/.local/bin/laya-mcp  all  ✓ enabled
+hermes mcp list        # laya  ~/.local/bin/laya-mcp  all  ✓ enabled
 hermes mcp test laya   # Transport: stdio → ...  ✓ Connected  ✓ Tools discovered: 7
 ```
 
@@ -81,7 +81,7 @@ the new code is broken:
 
 ```bash
 ps -eo pid,lstart,args | grep -E 'laya-mcp' | grep -v grep
-stat -c '%y' /root/.local/bin/laya-mcp     # newer than the process => stale session
+stat -c '%y' ~/.local/bin/laya-mcp     # newer than the process => stale session
 ```
 
 If several sessions are open, the old processes are harmless (they exit when their
@@ -191,7 +191,7 @@ Consequences worth acting on:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `laya` missing from `hermes mcp list` | `mcp` package absent in the **Hermes venv** → discovery silently skipped | `/root/.hermes/hermes-agent/venv/bin/python -c "import mcp"`; install if missing |
+| `laya` missing from `hermes mcp list` | `mcp` package absent in the **Hermes venv** → discovery silently skipped | `~/.hermes/hermes-agent/venv/bin/python -c "import mcp"`; install if missing |
 | Connected, 0 tools | server started but the tool router failed | `hermes mcp test laya`, then check the server's stderr |
 | Server will not connect at all | **preflight refused** — Laya or the head is down | `laya doctor`; note `laya-mcp` exiting is *correct*, not a bug |
 | Tools return stale behaviour | session bound to an old process | new session; check the diagnostic prefix |
@@ -203,7 +203,7 @@ Consequences worth acting on:
 ## 7. Verified state
 
 ```
-hermes mcp list       laya  /root/.local/bin/laya-mcp  all  ✓ enabled
+hermes mcp list       laya  ~/.local/bin/laya-mcp  all  ✓ enabled
 hermes mcp test laya  ✓ Connected (859 ms)   ✓ Tools discovered: 7
 in-session call       mcp__laya__gate {"action": "git status"}
                        -> {"decision":"allow","allowlisted":true,

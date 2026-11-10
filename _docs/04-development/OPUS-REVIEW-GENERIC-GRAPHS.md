@@ -1,7 +1,7 @@
 # OPUS REVIEW — running generic graphs through laya
 
 **Review by claude + opus, 2026-10-02**, session `d58b577f-fc19-48d5-b690-f6d7524ea4f8` (resumable).
-40 turns, $2.45. Report: `/projects/_tmp/opus-graph-analysis/REPORT.md` (20,786 B), with 25+ probe
+40 turns, $2.45. Report: `_tmp/opus-graph-analysis/REPORT.md` (20,786 B), with 25+ probe
 flows and their run reports beside it.
 
 It was asked to **attack my analysis**

@@ -46,8 +46,8 @@ systemctl --user start llamacpp-laya.service
 Verify — from **inside** this container:
 
 ```bash
-curl -s http://10.10.10.217:8083/health      # -> {"status":"ok"}
-curl -s http://10.10.10.217:8083/v1/models   # -> /models/laya-Q8_0.gguf
+curl -s http://127.0.0.1:8083/health      # -> {"status":"ok"}
+curl -s http://127.0.0.1:8083/v1/models   # -> /models/laya-Q8_0.gguf
 ```
 
 Two traps, both real and both hit during development:
@@ -66,7 +66,7 @@ of it.
 ## 3. Install the head sidecar (one-off, inside the container)
 
 ```bash
-cd /projects/laya-rs
+cd laya-rs
 bash scripts/setup-runtime.sh
 ```
 
@@ -120,7 +120,7 @@ laya doctor
 
 ```
 laya: READY
-  endpoint  : http://10.10.10.217:8083
+  endpoint  : http://127.0.0.1:8083
   /health   : ok
   /v1/models: ok (serving the expected model)
   head      : ok (sidecar at /run/laya/sidecar.sock)

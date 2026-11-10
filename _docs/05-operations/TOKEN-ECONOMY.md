@@ -71,7 +71,7 @@ Measured in the session store:
 
 ```
 allow/ask calls recorded          73       0 bytes in context
-seeing-log lines in context        0       (they go to /root/.hermes/logs/laya.log)
+seeing-log lines in context        0       (they go to ~/.hermes/logs/laya.log)
 gate block messages                2       712 B total ≈ 178 tokens, ever
 ```
 

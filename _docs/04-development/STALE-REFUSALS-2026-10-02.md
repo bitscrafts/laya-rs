@@ -65,7 +65,7 @@ which is what the question actually needed.
 
 ## A related trap in the quota gate
 
-`python3 /root/.hermes/scripts/laya-quota.py` prints **"TOO LITTLE ROOM … Do not start a dispatch"**
+`python3 ~/.hermes/scripts/laya-quota.py` prints **"TOO LITTLE ROOM … Do not start a dispatch"**
 below a 45% floor, and `run-spec-part.sh` **prints that line but does not enforce it** — the gate is
 advisory. At 43% free (one spec needs ~15-25%) there is room for one more dispatch. So: **read the
 number, do not obey the sentence.** The floor is a heuristic for "leave room for the next run", not a

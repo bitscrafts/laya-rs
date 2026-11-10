@@ -213,7 +213,7 @@ a new engine.**
 ## 8. Crate layout
 
 ```
-/projects/laya-rs/
+
 ├── crates/
 │   ├── laya-core/       PURE — no MCP, no HTTP types
 │   │   ├── head.rs      the 26.5M head in Rust (safetensors load, attention,
@@ -291,7 +291,7 @@ the levels that pay.
    *Lean: yes, as a new static check.*
 4. **`band` computed by Laya, or by a transform node?** *Lean: transform — keeps
    thresholds reviewable in one line of the graph file.*
-5. **Project name/location** — `/projects/laya-rs`?
+5. **Project name/location** — `laya-rs`?
 6. **Ledger location** — inside the project, or in a shared store so
    decisions are queryable with existing tooling?
 

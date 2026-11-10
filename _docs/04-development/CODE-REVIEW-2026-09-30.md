@@ -8,13 +8,13 @@ tool's summary alone; each was re-read at its `file:line`.
 
 ```
 audit        codebase-audit/2.0.0
-repo         /projects/laya-rs
+repo         laya-rs
 check        new_proven
 verdict      BLOCKED
 proven       15
 suspect      218
 by_check     A0=1 A1=40 A11=3 A13=46 A5=1 A8=142
-RUN OUTCOME: repo=/projects/laya-rs verdict=BLOCKED proven=15 suspect=218 new=15 rc=1
+RUN OUTCOME: repo=laya-rs verdict=BLOCKED proven=15 suspect=218 new=15 rc=1
 ```
 
 `--selftest` = **PASSED** (`each check above FIRED on a fixture`), so a zero from any
@@ -43,7 +43,7 @@ subtree** — the shipped code by itself — produces a materially different and
 accurate result, and it exposed findings the whole-repo run could not see:
 
 ```
-RUN OUTCOME: repo=/projects/laya-rs/crates verdict=BLOCKED proven=18 suspect=51 new=18 rc=1
+RUN OUTCOME: repo=crates verdict=BLOCKED proven=18 suspect=51 new=18 rc=1
 by_check     A0=1 A1=41 A3=26 A5=1
 ```
 
@@ -124,7 +124,7 @@ count (`18`), which is what caught it.
 acknowledged, so the gate fails only on something **new**:
 
 ```
-RUN OUTCOME: repo=/projects/laya-rs/crates verdict=OK proven=18 suspect=51 new=0 rc=0
+RUN OUTCOME: repo=crates verdict=OK proven=18 suspect=51 new=0 rc=0
 ```
 
 A baseline is an acknowledged list, not a fix: every entry still needs the decision in

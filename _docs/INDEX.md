@@ -3,8 +3,6 @@
 Project-local documentation, organised with the SSOT methodology. Each fact lives
 in exactly one place; this index points at it, never restates it.
 
-**Project root**: `/projects/laya-rs`
-
 > **Read in this order on a cold start:** `01-overview` → `04-development/DESIGN-AMENDMENTS-2026-09-29.md` (the corrections) → `06-research/01-design.md`
 > (the original). The amendments WIN wherever they conflict with the design.
 
@@ -18,6 +16,7 @@ in exactly one place; this index points at it, never restates it.
 | `04-development/` | design decisions, the review amendments, implementation notes |
 | `05-operations/` | the ledger, budgets, running the server |
 | `06-research/` | numbered research write-ups (design v1, the review, prior-art trails) |
+| `99-archive/` | superseded material, kept with its consequence labelled |
 
 ## Documents
 
@@ -43,14 +42,14 @@ in exactly one place; this index points at it, never restates it.
 - [Reference](03-reference/README.md) — Technical reference: the contract and the wire shapes.
 
 ### 04-development
-- [laya-rs — architectural review (2026-10-01)](04-development/ANALYSIS-2026-10-02.md) — Reviewed tree: b0ee704 on master, clean at the start of the review. Read-only throughout: nothing in /projects/laya-rs was written. A separate session modified
+- [laya-rs — architectural review (2026-10-01)](04-development/ANALYSIS-2026-10-02.md) — Reviewed tree: b0ee704 on master, clean at the start of the review. Read-only throughout: nothing in laya-rs was written. A separate session modified an unrelated research note at 23:34 during this review; that edit is
 - [Code review — laya-rs, 2026-09-30](04-development/CODE-REVIEW-2026-09-30.md) — Method: deterministic audit (codebase-audit 2.0.0) + hand-verification of every PROVEN finding + targeted reads of the fail-closed paths. No claim below is from the
 - [Design amendments — what the adversarial review changed](04-development/DESIGN-AMENDMENTS-2026-09-29.md) — MANDATORY corrections to the design, with the five blockers and their resolutions.
 - [Engine defects — three confirmed findings in the graph executor](04-development/ENGINE-DEFECTS-2026-10-02.md) — depends_on does not order a decide before its shell (measured: the shell ran LAST); escalate_on_near_tie is validated but inert; and a decide's question type is hardcoded to choice, so a flow can never ask the noul the head answers best.
 - [Analysis — why a generic graph cannot run today](04-development/GENERIC-GRAPHS-ANALYSIS.md) — The engine has no data flow at all: every decide input is a literal compiled into the flow file, and all four mechanisms that could carry run-time data are absent. The two-phase execution model, what a flow can actually express, and a ranked set of fixes.
 - [The head's question-shape limits — measured](04-development/HEAD-QUESTION-SHAPE-LIMITS.md) — A 3-option choice does not track a number while a noul threshold does (15/15, incl. the boundary); and a bare noul on a subjective question returns a confident CONSTANT (no at 1.0 for both positive and negative text). Why the correct handling is bounding one signal.
 - [Opus review — running generic graphs through laya](04-development/OPUS-REVIEW-GENERIC-GRAPHS.md) — An independent review that re-ran every claim with laya graph run. Found that routing is not a function of the graph (node ARRAY ORDER decides execution), that the near-tie target runs unconditionally, and that 'no data flow at all' was wrong: data CAN reach the head, it cannot reach an edge. Five contradictions, three re-verified here.
-- [OPUS ROUND 2 — the build order, and what I had wrong](04-development/OPUS-ROUND2-BUILD-ORDER.md) — claude + opus, 2026-10-02, resumed session d58b577f-fc19-48d5-b690-f6d7524ea4f8 (15 turns, $4.27, 620 s). Full report: /projects/_tmp/opus-graph-analysis/ROUND2.md (346 lines), with every
+- [OPUS ROUND 2 — the build order, and what I had wrong](04-development/OPUS-ROUND2-BUILD-ORDER.md) — claude + opus, 2026-10-02, resumed session d58b577f-fc19-48d5-b690-f6d7524ea4f8 (15 turns, $4.27, 620 s). Full report: _tmp/opus-graph-analysis/ROUND2.md (346 lines), with every
 - [P1 status — and the measurements that shaped it](04-development/P1-STATUS.md) — What was measured before designing (Laya concurrency, the redb collision), and what P1 delivered.
 - [The scheduler's single guard, and the mutants that hang it](04-development/SCHEDULER-SINGLE-GUARD.md) — dependency_tables is the shared source of the graph's shape for topo_order, refuse_cycle and the Tracker, and nothing checks it is about the graph at all. refuse_cycle is the only cycle guard and is built on the same table. There is no spin bound anywhere, so a node that never settles is waited on forever -- the two mutants the gate reports as timeouts.
 - [Stale refusals — a rule that outlives its reason is a defect too](04-development/STALE-REFUSALS-2026-10-02.md) — Spec 20 refused timeout and allow_failure on a decide 'until spec 17'. Spec 17 landed and the timeout now works: a decide with timeout zero fails as timed out. The refusal was stale and blocked a working feature. The other half is worse than refused -- allow_failure is accepted, looks honoured, then the synthetic route node stops the run anyway.
@@ -71,10 +70,12 @@ in exactly one place; this index points at it, never restates it.
 ### 06-research
 - [Design (v1) — superseded in part](06-research/01-design.md) — The original design. Read DESIGN-AMENDMENTS first: the review corrected five blockers in it.
 - [Adversarial review by pi + glm-5.3](06-research/02-analysis-glm-5.3.md) — The full review: five blockers, ten majors, fact-by-fact corrections.
-- [The review brief](06-research/02a-analysis-brief.md) — The exact prompt the reviewer ran against, so the review is reproducible.
 - [Four architecture questions (threading, config, graph spec, scheduler)](06-research/03-four-architecture-questions.md) — Discussion only: the priority queue as admission control and a missed fourth parallelism axis; where config should live and why redb does not speed the load; our own graph specification and mermaid export; and whether to build a scheduler.
 - [LAYA SEAM REVIEW + FIX PLAN — 2026-10-06](06-research/05-laya-seam-review-2026-10-06.md) — <!-- Filed 2026-10-06T14:30Z by the Hermes orchestrator (Marcelo Correa). Produced by: pi + glm-5.3:cloud (ollama-cloud), the two-lane ANALYSIS lane (read-only tool grant),
 - [Research](06-research/README.md) — Numbered research write-ups: convention and index.
+
+### 99-archive
+- [LAYA-RS — ANALYSIS BRIEF (adversarial design review)](99-archive/session-handoffs-2026-10-02/02a-analysis-brief.md) — Job type: ANALYSIS ONLY. Do NOT implement. Do NOT edit any .rs file. Do NOT create a Cargo.toml or scaffold the project.
 
 ## This project is self-contained
 

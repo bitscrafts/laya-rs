@@ -188,8 +188,8 @@ way to tell whether the hook pre-dates your session. Check these four things in 
 ```sh
 hermes hooks doctor | grep -A5 laya-gate      # registered, executable, allowlisted, ran clean
 ls -l /run/laya/sidecar.sock                  # the head is up, or every judgement fails closed
-tail -3 /root/.hermes/logs/laya.log           # did the seeing log grow when you made a call?
-/root/.local/bin/laya-gate "git status"       # does the binary itself answer? (exit 0 = allow)
+tail -3 ~/.hermes/logs/laya.log           # did the seeing log grow when you made a call?
+~/.local/bin/laya-gate "git status"       # does the binary itself answer? (exit 0 = allow)
 ```
 
 If the first two are good and the binary answers but the log does not grow, the process predates the
