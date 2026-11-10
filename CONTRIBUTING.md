@@ -2,7 +2,9 @@
 
 1. Open an issue with the **Task** form. Say what changes, give exit criteria as commands that exit 0
    when it is done, and list the files it may touch.
-2. A maintainer marks it `ready`. Work starts from `ready` issues only.
+2. A maintainer marks it `ready` (`scripts/mark-ready.sh <number>`). It refuses an issue written by
+   anyone but the owner unless the owner approves it with `--owner-approved`. Work starts from
+   `ready` issues only.
 3. Open a pull request that closes the issue. Fill in the template: paste the criteria output
    unsummarised, and name the test that fails without the change.
 
