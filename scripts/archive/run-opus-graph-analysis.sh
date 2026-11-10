@@ -90,7 +90,7 @@ any scheduling feature. The head and sidecar are live, so \`laya graph run\` wor
 echo "==> dispatching (log: $LOG)"
 set -o pipefail
 # `--permission-mode bypassPermissions` IS LOAD-BEARING -- do not remove it and do not weaken it.
-# Measured 2026-09-09 (recorded in amem) and re-measured here on 2026-10-02: `claude -p` in print mode
+# Measured 2026-09-09 and re-measured here on 2026-10-02: `claude -p` in print mode
 # WITHOUT the skip-permissions flag gets STUCK requesting approval for its FIRST write, and answers
 # from prior context instead of doing the work -- which reads as a completed run. `--allowedTools`
 # alone is NOT enough. IS_SANDBOX=1 is required for bypassPermissions as root.

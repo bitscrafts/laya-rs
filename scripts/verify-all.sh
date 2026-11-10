@@ -152,14 +152,14 @@ if ! curl -sf -m 5 http://10.10.10.217:8083/v1/models > /dev/null 2>&1; then
   UNMEASURED+=("live corpus: backbone :8083 unreachable")
   echo "  UNMEASURED: the backbone at :8083 is not reachable, so the live corpus cannot run."
   echo "  This is NOT a pass — run it when the backbone is up:"
-  echo "    python3 scripts/live-corpus-parity.py"
+  echo "    python3 scripts/live/live-corpus-parity.py"
 elif [ ! -S "${LAYA_SIDECAR_SOCKET:-/run/laya/sidecar.sock}" ]; then
   UNMEASURED+=("live corpus: sidecar socket absent")
   echo "  UNMEASURED: the Python reference sidecar is not up at ${LAYA_SIDECAR_SOCKET:-/run/laya/sidecar.sock}."
   echo "  This is NOT a pass — the reference is the oracle and there is nothing to compare against."
   echo "    scripts/laya-sidecar.py   (see the sidecar's own docs to start it)"
 else
-  chk "live corpus parity" python3 scripts/live-corpus-parity.py --json /tmp/laya-parity.json
+  chk "live corpus parity" python3 scripts/live/live-corpus-parity.py --json /tmp/laya-parity.json
 fi
 echo
 

@@ -11,8 +11,8 @@ It speaks MCP over stdio to the deployed `laya-mcp` binary, exactly as an agent 
 check exercises the live path rather than a re-enactment of it.
 
 Usage:
-    uv run scripts/check-observability.py                 # measure, and fail if the ledger is off
-    uv run scripts/check-observability.py --json          # machine-readable
+    uv run scripts/live/check-observability.py                 # measure, and fail if the ledger is off
+    uv run scripts/live/check-observability.py --json          # machine-readable
 
 Exit codes: 0 = the ledger is recording AND readable, 1 = not, 2 = usage/environment error.
 

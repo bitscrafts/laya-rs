@@ -61,7 +61,7 @@ DOCS = {
     ),
     "04-development/TEN-LEVELS-MAPPING.md": (
         "The ten levels, mapped to our tools",
-        "IndyDevDan's ten levels, and the documented failures we inherit as requirements.",
+        "The ten levels, and the documented failures we inherit as requirements.",
     ),
     "04-development/README.md": ("Development", "Design decisions and implementation notes."),
     "05-operations/READINESS-AND-QUEUE.md": (

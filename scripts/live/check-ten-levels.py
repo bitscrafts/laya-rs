@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise all TEN levels of JEV (IndyDevDan, `github.com/disler/ten-levels-of-jev`).
+"""Exercise all ten levels of the System-1 progression.
 
 The mapping is documented in `_docs/04-development/TEN-LEVELS-MAPPING.md`; this is the
 harness that proves the mapping is real. Each level is driven through the SHIPPED MCP
@@ -25,8 +25,8 @@ level also has a near-miss row that must take the NORMAL path, so a level cannot
 accident of the rule that skips something.
 
 Usage:
-    uv run scripts/check-ten-levels.py           # all ten, PASS/FAIL each
-    uv run scripts/check-ten-levels.py --json
+    uv run scripts/live/check-ten-levels.py           # all ten, PASS/FAIL each
+    uv run scripts/live/check-ten-levels.py --json
 Exit: 0 all ten pass, 1 any failure, 2 environment problem.
 """
 

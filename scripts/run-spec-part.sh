@@ -151,7 +151,7 @@ cd "$REPO" || exit 1
 # while the log keeps growing; measured 2026-10-01).
 #
 # `--permission-mode bypassPermissions` IS LOAD-BEARING -- do not remove it, and do
-# not weaken it to the default. Measured 2026-09-09 and recorded in amem: `claude -p`
+# not weaken it to the default. Measured 2026-09-09: `claude -p`
 # in print mode WITHOUT the skip-permissions flag gets STUCK requesting an
 # interactive file-write approval that print mode cannot surface. The symptom is a
 # silent hang, not an error, so it costs a full timeout before anyone notices. This

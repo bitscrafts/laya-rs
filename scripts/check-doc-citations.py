@@ -22,6 +22,7 @@ worse than none. It checks citations, which is exactly where the invented claim 
 
 Exit 1 if any citation does not resolve.
 """
+import os
 import pathlib
 import re
 import sys
@@ -97,7 +98,10 @@ def module_or_item_exists(crate: str, name: str) -> bool:
 # be self-contained — a citation into another project's source is an association we neither have
 # nor want, and it is unverifiable from here. Allowed: this repo, the evidence directory the
 # measurements were recorded in, and the pinned laya virtualenv.
-EVIDENCE = pathlib.Path("/projects/_tmp")
+# Optional: a directory where measurements were recorded. Unset by default, so a clean clone (and CI) resolves
+# citations against the repository alone; set LAYA_EVIDENCE_DIR to include a local evidence directory.
+_EV = os.environ.get("LAYA_EVIDENCE_DIR")
+EVIDENCE = pathlib.Path(_EV) if _EV else None
 RESOLVE_ROOTS = [ROOT, EVIDENCE, VENV_SITE]
 
 

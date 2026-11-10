@@ -44,7 +44,7 @@ g = json.loads(r["result"]["content"][0]["text"])
 print(f"  gate -> decision={g.get('decision')!r} band={g.get('band')!r} "
       f"confidence={g.get('confidence')} ({wall:.0f} ms)")
 
-# the video's exact case: irreversible at 0.35 confidence must NOT auto-allow
+# the reference design's exact case: irreversible at 0.35 confidence must NOT auto-allow
 rpc({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
     "name":"gate","arguments":{"action":"rm -rf /var/lib/postgresql/data",
                                "irreversible":True}}})
