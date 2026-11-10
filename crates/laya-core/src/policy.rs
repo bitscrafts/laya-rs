@@ -1,6 +1,6 @@
 //! Thresholds, confidence bands and composite weights — **all caller-side**.
 //!
-//! The video's central discipline is that the model never sees a threshold:
+//! The reference design's central discipline is that the model never sees a threshold:
 //! *"Jev never sees the weights. Tuning means changing a number, not a prompt."*
 //! This module is that idea made concrete. Every number a decision depends on is
 //! here, in one reviewable place, loadable from TOML.
@@ -53,10 +53,10 @@ impl Band {
     }
 }
 
-/// What a gate concluded — the three-way outcome the video's L4 describes.
+/// What a gate concluded — the three-way outcome the reference design's L4 describes.
 ///
 /// Note there is **no `block` variant that implies safety**: a gate is one signal
-/// among several (the video's own L6 was routed around; its author calls the fix
+/// among several (the reference design's own L6 was routed around; its author calls the fix
 /// *"an instruction, not a control"*). `Deny` means "this signal says no", and
 /// the caller is expected to pair it with other controls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ pub enum PolicyError {
 
 /// The numbers every decision depends on.
 ///
-/// Defaults come from the video's measured bands (below 0.5 a human decides,
+/// Defaults come from the reference design's measured bands (below 0.5 a human decides,
 /// above 0.9 a destructive action runs unconfirmed) and are intentionally
 /// conservative: it is better to escalate than to act on a plausible guess.
 ///
@@ -343,7 +343,7 @@ impl Policy {
     /// `irreversible` is accepted for the caller's record but cannot change the outcome:
     /// the *only* confidence that allows ANY action here is `High`, so an irreversible one
     /// is already held to that bar. (It was matched in a guard whose arm did the same as the
-    /// arm after it — a branch no test could tell from its absence, found by mutation.) The video's measured example is the
+    /// arm after it — a branch no test could tell from its absence, found by mutation.) The reference design's measured example is the
     /// reason — `rm -rf node_modules && npm install` was classified "reversible"
     /// at confidence 0.35, and 0.35 must ask a human however the pick reads.
     ///
@@ -417,11 +417,11 @@ mod tests {
         assert_eq!(Band::High.as_str(), "high");
     }
 
-    // ---- the video's measured cases ----------------------------------------
+    // ---- the reference design's measured cases ----------------------------------------
 
     #[test]
     fn the_measured_reversible_case_asks_a_human() {
-        // The video: `rm -rf node_modules && npm install` -> "reversible" at
+        // The reference design: `rm -rf node_modules && npm install` -> "reversible" at
         // confidence 0.35 -> ASKS A HUMAN, because the pick is plausible and the
         // confidence is not. 0.35 is Low here, so it Denies rather than Asks —
         // either way it does NOT allow, which is the property that matters.
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn composite_score_applies_weights() {
-        // The video's ticket example: severity .6, frustration .3, quality .1.
+        // The reference design's ticket example: severity .6, frustration .3, quality .1.
         let pairs = [(0.6, 0.9), (0.3, 1.0), (0.1, 0.2)];
         let got = Policy::weighted_score(&pairs);
         let want = 0.6_f64.mul_add(0.9, 0.3_f64.mul_add(1.0, 0.1 * 0.2));

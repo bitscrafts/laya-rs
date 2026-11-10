@@ -130,7 +130,7 @@ reproducibility of *our own* output.
 
 - [x] `cd /projects/laya-rs && cargo test -p laya-head --test forward_differential`: N1
 - [x] `cd /projects/laya-rs && cargo test -p laya-head --test decide_differential`: N1
-- [x] `cd /projects/laya-rs && python3 scripts/live-corpus-parity.py`: N1, live, 16/16
+- [x] `cd /projects/laya-rs && python3 scripts/live/live-corpus-parity.py`: N1, live, 16/16
 - [x] `cd /projects/laya-rs && cargo clippy -p laya-head --all-targets -- -D warnings`
 
 ---

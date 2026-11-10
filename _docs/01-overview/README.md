@@ -18,7 +18,7 @@ ports that already exist* — never invent one.
 
 We had already concluded, twice and independently (research docs 039 and 040), that
 a probabilistic model must only *select among existing ports*, and that the graph
-should stay the authority. IndyDevDan's *Ten Levels of Jev* is a third independent
+should stay the authority. A published ten-level treatment of System-1 decision models is a third independent
 arrival at the same architecture — with a **paid cloud model and an OpenRouter key**
 at its centre.
 

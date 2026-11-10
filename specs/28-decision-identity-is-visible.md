@@ -13,7 +13,7 @@
 | V1 | `record_decision_for` returns only an error note (or `None`) — the row's identity never reaches the caller | laya-mcp `lib.rs:1327`, `:1416-1419` |
 | V2 | The ledger join key is `Record::identity()` = `d␟ts_nanos␟wall_nanos␟tool␟question_id␟label` | laya-store `lib.rs:236-260`, `:781` (record_outcome), CLI `main.rs:384-425` (`laya ledger outcome`) |
 | V3 | The gate payload printed by `gate_payload` carries no decision reference today | live probe: `laya-gate "ls" --run-id probe-t \| jq -r '.decision_id'` → `ABSENT` (2026-10-06T14:23Z) |
-| V4 | The hook passes `--run-id "hook-$$"` (ephemeral PID) so ledger rows cannot be joined to sessions | laya-gate.sh:158 (outside this repo's scope — orchestrator fix, not the worker's) |
+| V4 | The hook passes `--run-id "hook-$$"` (ephemeral PID) so ledger rows cannot be joined to sessions | the host-side hook that calls `laya-gate` (outside this repo's scope — an orchestrator fix, not the worker's) |
 | V5 | Calibration exists and refuses <30 samples | laya-store `calibrate.rs:44-58` |
 
 **Appearance-only requirement (written down so it cannot be "implemented" vacuously):**
@@ -66,7 +66,7 @@ itself, not merely assert non-empty.
 - Do NOT rename or re-shape any existing payload/ledger field (F5 is a hard requirement).
 - Do NOT invent a UUID/other id — the identity is `Record::identity()`, the same bytes
   `laya ledger outcome` joins on.
-- Do NOT touch the hook (`/root/.hermes/hooks/laya-gate.sh`) or any Hermes-side file — outside this
+- Do NOT touch the host-side hook that calls `laya-gate`, or any agent-host file — outside this
   repo; the orchestrator wires it after deploy.
 - Do NOT change Policy/thresholds — that is spec 29's scope only.
 - Workers never commit; work stays in the tree for orchestrator review.

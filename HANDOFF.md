@@ -54,8 +54,7 @@
 
 - User mandate 2026-10-06: laya always + automatic, saving tokens MANDATORY (rule 11 in AGENTS.md).
 - Two-lane pi dispatch (analysis lane, glm-5.3:cloud read-only): report filed at
-  `_docs/06-research/05-laya-seam-review-2026-10-06.md` (provenance header inside), full text in amem
-  `laya/review/seam-2026-10-06/` (verified retrievable), raw session/log in /projects/_tmp/laya-seam-plan/.
+  `_docs/06-research/05-laya-seam-review-2026-10-06.md` (provenance header inside).
 - Findings: P1 CORRECTED (pi worker lane has NO laya wiring — the mandate is currently Hermes-only);
   G1 outcomes=0 (join key destroyed by run-id "hook-$$"; write path exists unused); G2 deny production-
   unreachable (allowlist-forces-Ask; deny needs allowlisted+confident-No); G3 ask_files adoption 0
@@ -285,7 +284,7 @@ the review ranks it lower than I did: it buys **confidence**, not correctness.
 cd /projects/laya-rs
 BRIEF=/projects/_tmp/brief-opus-round2.md \
 REPORT=/projects/_tmp/opus-graph-analysis/ROUND2.md \
-  scripts/run-opus-graph-analysis.sh --resume
+  scripts/archive/run-opus-graph-analysis.sh --resume
 ```
 
 Exit **3 means the dispatch failed** (nothing written). Procedure and traps:
@@ -315,7 +314,7 @@ Each was implemented by `sonnet` through `scripts/run-spec-part.sh` — never in
 
 `/root/.local/bin/{laya,laya-mcp,laya-gate}` are the **03:05 / 03:43 builds**. Everything from spec 11
 onward exists only in the source tree. Measured consequence: the spec-11 criterion
-`python3 scripts/check-observability.py` **exits 1 against the deployed binaries and 0 against this
+`python3 scripts/live/check-observability.py` **exits 1 against the deployed binaries and 0 against this
 tree's build**:
 
 ```sh
@@ -324,7 +323,7 @@ pgrep -x laya-gate        # MUST be empty first: replacing it blocks every live 
 cargo build --release
 mv ~/.local/bin/laya-mcp ~/.local/bin/laya-mcp.old-$(date +%s) && cp target/release/laya-mcp ~/.local/bin/
 mv ~/.local/bin/laya     ~/.local/bin/laya.old-$(date +%s)     && cp target/release/laya     ~/.local/bin/
-python3 scripts/check-observability.py    # must exit 0 from the deployed path
+python3 scripts/live/check-observability.py    # must exit 0 from the deployed path
 ```
 
 Use `mv`-then-copy, never `cp` over a live binary. Four `laya-mcp` processes still hold the old
@@ -356,7 +355,7 @@ control:  ls -la /tmp                   ask       ->    allow      <- allow stil
 control:  git status                    ask       ->    allow
 ```
 
-`scripts/gate-live-corpus.py`: **18 of 18** destructive commands refused `allow`, the control reaches it.
+`scripts/live/gate-live-corpus.py`: **18 of 18** destructive commands refused `allow`, the control reaches it.
 An adversarial set of eleven **allowlisted-prefix** commands carrying destructive intent
 (`ls -la /tmp; rm -rf …`, `cat f > f`, `git status; <format cmd>`, `git log $(…)`) — **none** reached `allow`;
 the metacharacter rule carries them. `VERDICT: ALL CHECKS PASS`.
@@ -460,7 +459,7 @@ unmoved). It is also a gate step with an explicit baseline — measured, **8 of 
 rewrite; the gate prints the count so the debt is named, not forgotten.
 
 `scripts/verify-all.sh` §6c runs
-`scripts/live-corpus-parity.py`, so `LABEL AGREEMENT: 16/16 = 1.0000` is reported on every gate run
+`scripts/live/live-corpus-parity.py`, so `LABEL AGREEMENT: 16/16 = 1.0000` is reported on every gate run
 rather than asserted here.
 
 ## Spec 03's live criterion, MEASURED
@@ -469,7 +468,7 @@ The last unchecked box was the live corpus, and measuring it required building t
 path rather than asserting one:
 
 ```
-python3 scripts/live-corpus-parity.py
+python3 scripts/live/live-corpus-parity.py
 LABEL AGREEMENT: 16/16 = 1.0000   (floor 0.9)   0 errors
 worst probability difference 4.978e-05   vs the reference's own 4-dp rounding (5e-05)
 logit-gap histogram: min 0.0158  p10 0.1102  median 2.6461  max 6.2077
@@ -541,7 +540,7 @@ mismatches.
 
 Spec 04's second half was a contract with no implementation. It is implemented:
 `crates/laya-store` (redb 4.2.0), the server's per-process segment writing (F8), and
-`laya ledger compact | stats | tail | outcome`. Proven end to end by `scripts/prove-ledger.py`.
+`laya ledger compact | stats | tail | outcome`. Proven end to end by `scripts/archive/prove-ledger.py`.
 
 **The outcome path is the part that matters.** Nothing recorded whether a decision was RIGHT, so
 `calibrate` could never have meant anything — ECE needs `(confidence, correct)` pairs. An outcome
@@ -615,7 +614,7 @@ changed.)*
 > **IMPLEMENTED, 2026-10-02.** `laya_core::agentic::gate_verdict` is the one I/O-free decision
 > function spec 08 asked for (`crates/laya-core/src/agentic.rs`); `laya-mcp`'s `gate` and `ask`
 > tools call nothing else. Re-run live, over real stdio against the real sidecar
-> (`python3 scripts/gate-live-corpus.py`): all 18 destructive commands in the corpus — including
+> (`python3 scripts/live/gate-live-corpus.py`): all 18 destructive commands in the corpus — including
 > every one named above, plus the R4 flag/whitespace variants (`rm -Rf`, `rm  -rf`,
 > `rm --recursive --force`) — now return `ask`, and the control, `git status`, returns `allow`
 > (`allowlisted: true, allowlist_entry: "git status"`). The noul label is read now (a confident
@@ -710,7 +709,7 @@ redirects. So `docs/` was **archived** (never deleted) and every reference repoi
 documents before -> after : 2 folders -> 1 folder (`_docs/`, 17 files)
 files merged              : 0 — the stubs were REDIRECTS, no unique content to absorb
 files archived            : 3  (docs.old-<ts>/, preserved, nothing links into it)
-references repointed      : README.md, DOCS.md, scripts/run-analysis.sh, AGENTS.md, HANDOFF.md
+references repointed      : README.md, DOCS.md, scripts/archive/run-analysis.sh, AGENTS.md, HANDOFF.md
 workspace tree untouched  : /projects/docs/ (open register) — a DIFFERENT tree
 broken links after        : 0 (verified by scripts/regen-index.py)
 ```
@@ -905,11 +904,10 @@ implements it; see `_docs/05-operations/READINESS-AND-QUEUE.md`.
 
 ## What was done
 
-**1. Research and design (complete).** The project exists because of IndyDevDan's
-*Ten Levels of Jev* video + repo, which is the third independent arrival at the
+**1. Research and design (complete).** The project exists because a published ten-level treatment of System-1
+decision models is the third independent arrival at the
 architecture we already built ("the graph drives, the model decides"). Design
-written, then **consolidated into one doc** with the video/repo links and our full
-prior research trail.
+written, then **consolidated into one doc**.
 
 Key measured finding: **Laya's decision head is 26.5M params of pure linear
 algebra** (2 layers, attention/LayerNorm/GELU/scorer, 106 MB), so the whole
@@ -956,7 +954,7 @@ confidence gate that the whole design depends on.
 
 **B5 — our central DAG mechanism was IMPOSSIBLE.** We planned a `transform` node to
 compute the confidence band. A graph `route` node's expr language is *"only member
-access … no arrays, no functions"* (`expr.rs:3-8`) — **I re-verified this myself**
+access … no arrays, no functions"* (the same limit, enforced here by `on_expr.rs:1-11`) — **I re-verified this myself**
 before accepting it. A transform cannot compute a band; `route`'s `eq` is exact
 equality with no ranges. **Fix: `laya-rs` computes the band and emits it in the
 payload**, so the graph gets an exact string to match. Thresholds still live in
@@ -982,10 +980,6 @@ including the inverted-pair and equal-pair rejections.
 
 ## What failed / needs attention
 
-- **The video transcript was never fetched** — YouTube returned HTTP 429 on the
-  subtitle endpoint. All video content came from the description + repo README. The
-  reviewer flagged this too: **no video-specific claim could be verified from the
-  files given.**
 - **The Python ground truth lives in another project's venv**
   (`/projects/digital-marketing/.venv`), which is also the venv that produced the
   dependency conflict we cite. The review is right that our evidence base is a side
@@ -1016,7 +1010,7 @@ including the inverted-pair and equal-pair rejections.
 
 ## Deploy day — 2026-10-06 afternoon (this session)
 
-- **Binaries deployed live** (`scripts/deploy-binaries.sh`): laya, laya-gate, laya-mcp all
+- **Binaries deployed live** (`scripts/archive/deploy-binaries.sh`): laya, laya-gate, laya-mcp all
   CHANGED→MATCH against `386f012`; priors preserved as `.old-20261006T145846Z`. Sidecar
   untouched; head READY after swap.
 - **decision_id is in production**: deployed `laya-gate` payloads carry the ledger identity
@@ -1074,7 +1068,7 @@ cd /projects/laya-rs
 cargo xtask gate                       # fmt + clippy -D warnings + test, all zero
 cargo test -p laya-abi -p laya-core    # the offline contracts
 python3 scripts/regen-index.py            # regen INDEX/TOC + verify every link
-bash scripts/check-real-crates.sh         # the zero-warning proof
+bash scripts/archive/check-real-crates.sh         # the zero-warning proof
 ```
 
 

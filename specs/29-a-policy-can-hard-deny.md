@@ -13,7 +13,7 @@
 | V1 | `gate_verdict` forces `Ask` for anything not on `gate_allow`; Deny is reachable ONLY as (allowlisted ∧ label=No ∧ noul High ≥0.8) | laya-core `agentic.rs:556-580`, `:528-539`; deny unit test `:1160-1164` exists and passes |
 | V2 | The model measures 0.90–0.99 "safe" even on destructive commands; a confident No on `ls`/`git status` is semantically contradictory | `policy.rs:201-211` measured note; live row: `destructive_signals:2, allow, p=0.9743` |
 | V3 | An empty allowlist is a valid policy (precedent for empty-vec fields) | `policy.rs:743-752` |
-| V4 | `rm -rf` on pre-existing paths is categorically banned in this workspace yet passes the gate today (signal recorded, not enforced) | AGENTS.md rule 1; laya-gate.sh:34-37 (deliberate, documented) |
+| V4 | `rm -rf` on pre-existing paths is categorically banned in this workspace yet passes the gate today (signal recorded, not enforced) | AGENTS.md rule 1; the host-side hook records the signal and deliberately does not enforce it (documented there) |
 
 **Appearance-only requirement:** a `gate_deny` checked AFTER the allowlist question can
 never fire on the commands it exists for (non-allowlisted input is already `Ask`-forced) —

@@ -100,7 +100,7 @@ fn main() {
     // Failure modes, shown as they actually present to a graph.
     let low =
         DecisionPayload::from_answer(&triage("wrong_test", 0.35, vec![0.35, 0.40, 0.25]), &policy);
-    println!("\n=== a low-confidence pick (the video's 0.35 case) ===");
+    println!("\n=== a low-confidence pick (the reference design's 0.35 case) ===");
     println!(
         "label={}  band={}  <- routes to an ask/escalate port, NOT an action",
         low.label, low.band

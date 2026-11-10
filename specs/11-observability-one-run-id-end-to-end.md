@@ -178,7 +178,7 @@ cannot be offline.
 - [x] `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_refused_gate_is_recorded 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R2 — the refusal row, which is the one an incident review needs
 - [x] `cd /projects/laya-rs && cargo test -p laya-cli --lib stats_does_not_take_the_write_lock 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7's read-only requirement
 - [x] `cd /projects/laya-rs && cargo test -p laya-store --lib the_documented_fields_exist_on_the_row 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R9 — every field the ledger doc tabulates is a field of `DecisionRow`; this fails today on `p` and `score`
-- [x]  `cd /projects/laya-rs && python3 scripts/check-observability.py`: **live**. It drives the deployed server, asserts a ledger segment is written for a `gate` call, that the row carries `run_id`/`node_id` when they are supplied, and that the command text never appears in the segment. Exits non-zero if the ledger is off — because "off" and "broken" must not look the same
+- [x]  `cd /projects/laya-rs && python3 scripts/live/check-observability.py`: **live**. It drives the deployed server, asserts a ledger segment is written for a `gate` call, that the row carries `run_id`/`node_id` when they are supplied, and that the command text never appears in the segment. Exits non-zero if the ledger is off — because "off" and "broken" must not look the same
 
 **Carried re-checks:**
 

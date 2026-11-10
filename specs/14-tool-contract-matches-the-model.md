@@ -5,7 +5,7 @@
 - **Priority**: P0 for R1–R3 (each is a caller-visible failure on the advertised surface); P1 for R4–R5.
 - **Status**: SPECIFIED — the three defects below are **fixed in the working tree** as of `447f7a3`
   onwards; this spec exists so the fix is certified, extended to every argument, and cannot regress.
-- **Source**: the ten-levels harness, `scripts/check-ten-levels.py`, run 2026-10-02. Its first run
+- **Source**: the ten-levels harness, `scripts/live/check-ten-levels.py`, run 2026-10-02. Its first run
   reported 3/11 and exposed three defects in the tool's ADVERTISED contract, each found by an
   agent-shaped caller failing.
 - **Depends-On**: none. Touches `crates/laya-mcp` only.
@@ -36,7 +36,7 @@ All measured 2026-10-02, through the deployed `laya-mcp` over stdio, on the ship
   (`QuestionWithoutCriteria`) — but **`decide` never called it**: `decide_via_sidecar` forwarded
   `args.questions` straight to the model. So the refusal existed for `ask` and not for `decide`,
   which is a rule enforced on one of two paths.
-- The first run of `scripts/check-ten-levels.py` reported **3/11**; correcting the harness's own
+- The first run of `scripts/live/check-ten-levels.py` reported **3/11**; correcting the harness's own
   invented inputs raised it to **7/11**, and the remaining four were these defects plus one
   assertion on a response field that does not exist. **Eight of the first eleven failures were
   the check's fault, not the tool's** — recorded because it is the same class as the defects.
@@ -170,7 +170,7 @@ from a layer it cannot see and cannot fix.
 - [x]  **The control, run by hand:** with the `validate_question_shape(...)` call site in
   `decide_via_sidecar` commented out, all three `through_the_handler` tests must FAIL. Measured
   before this fix: they did not exist, and disabling the validator failed **nothing**.
-- [x]  `cd /projects/laya-rs && uv run scripts/check-ten-levels.py 2>&1 | grep -q 'VERDICT: all ten levels'`: the end to end, through the shipped surface
+- [x]  `cd /projects/laya-rs && uv run scripts/live/check-ten-levels.py 2>&1 | grep -q 'VERDICT: all ten levels'`: the end to end, through the shipped surface
 - [x]  `cd /projects/laya-rs && python3 scripts/check-doc-citations.py 2>&1 | grep -q 'every citation resolves'`: docs still honest
 - [x]  **R4 (not yet implemented):** `cd /projects/laya-rs && cargo test -p laya-mcp --lib a_wrongly_typed_argument_is_refused_by_name 2>&1 | grep -qE '^test result: ok\. 1 passed'` — fails today
 
@@ -193,7 +193,7 @@ from a layer it cannot see and cannot fix.
 
 ## Provenance
 
-- `scripts/check-ten-levels.py` — the harness that found this, and the record of the eight
+- `scripts/live/check-ten-levels.py` — the harness that found this, and the record of the eight
   self-inflicted failures that came first.
 - `_docs/04-development/TEN-LEVELS-MAPPING.md` — the findings, with the verbatim model errors.
 - The model's authority for the shape: the pinned model venv, `laya/agent.py`, `system_one`'s docstring (`pip show laya` → 0.3.5).

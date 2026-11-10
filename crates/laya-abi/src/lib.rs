@@ -18,7 +18,7 @@ pub enum QuestionType {
     /// Yes/no, returned as `p` (the probability of yes, 0.0..=1.0).
     ///
     /// The number *is* the belief — there is no separate confidence field. Use for
-    /// gates and flags: the video's "smart if". **The threshold lives in the
+    /// gates and flags: the reference design's "smart if". **The threshold lives in the
     /// caller, never here.**
     Noul,
     /// Pick exactly one of `options` (Laya allows up to 255).
@@ -60,7 +60,7 @@ impl QuestionType {
 /// A question about a state.
 ///
 /// `id` is **caller-chosen** and is echoed back on the answer — it is the join
-/// key between a question and its answer, and the video's rule is to use it to
+/// key between a question and its answer, and the reference design's rule is to use it to
 /// *fan out*: ask every question you might need in one call, then decide in code
 /// which answers to actually use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

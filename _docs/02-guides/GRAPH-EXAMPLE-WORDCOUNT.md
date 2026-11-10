@@ -180,13 +180,13 @@ be a `noul`** — no options means `criteria: {}`, and laya-mcp refuses a choice
 `laya graph validate`, and the run stops early at the node with
 `question 'answer' is a 'choice' whose 'criteria' is empty, so there is no option to choose`.
 
-So the spec's measured table — `noul` "greater than 300?" tracks, 15/15 (`scripts/check-wc-boundary.py`)
+So the spec's measured table — `noul` "greater than 300?" tracks, 15/15 (`scripts/live/check-wc-boundary.py`)
 — describes a shape **unreachable from a flow**. The closest flow-reachable shape is the 2-option
 `choice` over `yes`/`no`, measured next.
 
 ### 6.3 The 2-option `choice` tracks the number — measured on the wire path
 
-Exactly the arguments `LiveMcpCaller` sends, over the same grid `scripts/check-wc-boundary.py` uses
+Exactly the arguments `LiveMcpCaller` sends, over the same grid `scripts/live/check-wc-boundary.py` uses
 (state `The word count is N.`, criteria `{"yes": "yes", "no": "no"}`):
 
 ```
@@ -356,7 +356,7 @@ export PATH=/root/.local/bin:$PATH
 cd /projects/laya-rs
 
 # the threshold measurement the design rests on (noul shape, raw tool): 15/15
-python3 scripts/check-wc-boundary.py
+python3 scripts/live/check-wc-boundary.py
 
 # validate + render + run the current pair
 for f in wc-classify-chained wc-classify-chained.control; do

@@ -176,7 +176,7 @@ when it was taken and against which version.**
   copyable (`main.rs:144-158`).
 - **Phasing the Rust head after the levels that pay** is the right instinct.
 - **The offline-mock / live-suite test split** is the right test shape.
-- **Two lanes, never one** — correct posture, matches the video and 039/040.
+- **Two lanes, never one** — correct posture, matches the reference design and 039/040.
 
 ---
 
@@ -196,7 +196,7 @@ code**. The revised sequence:
    spec (M3), and the `clamp_temperature` port (B2).
 5. **Do not build** the transform-computed band (B5) or an MCP `route` tool (M6).
 
-**Unresolved and honestly listed** (review §6): video/repo-specific content could
+**Unresolved and honestly listed** (review §6): reference-design-specific content could
 not be verified from the files (the transcript was 429-blocked); llama.cpp
 determinism across thread counts/builds is unmeasured; the Rust head's cold-load
 time — the number that decides the hook lane — is unmeasured anywhere.

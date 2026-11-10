@@ -212,5 +212,5 @@ in-session call       mcp__laya__gate {"action": "git status"}
 
 Last verified 2026-09-30 (`hermes mcp list`/`test`). The `gate` decision itself was
 re-verified over real stdio on 2026-10-02 against spec 08's fix — see
-`scripts/gate-live-corpus.py`, which is the re-runnable version of this check. Re-run
+`scripts/live/gate-live-corpus.py`, which is the re-runnable version of this check. Re-run
 `hermes mcp test laya` before trusting the Hermes-connection lines above.

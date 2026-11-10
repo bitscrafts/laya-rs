@@ -107,6 +107,6 @@ crates/laya-core/src/{queue,readiness,policy,route_payload}.rs
 crates/laya-backbone/src/lib.rs          <- the probe parsers
 crates/laya-cli/src/main.rs              <- `laya doctor`
 specs/{05-laya-must-be-running,06-priority-queue}.md
-scripts/measure-and-prove.py                <- the concurrency + redb measurement
+scripts/archive/measure-and-prove.py                <- the concurrency + redb measurement
 _tmp/redb-probe/                         <- the redb cross-process probe
 ```

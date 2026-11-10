@@ -58,4 +58,4 @@ stale-binary trap that cost three specs a criterion correction today.
 - Whether `cargo run` from the workspace behaves the same — it would put `target/debug` on `PATH` and
   so mask the problem, which is likely why it went unnoticed through several verification passes.
 - Whether the installed `laya` and the installed `laya-mcp` are ever mismatched in practice — they are
-  deployed together by `scripts/deploy-binaries.sh`, but nothing in the binary enforces it.
+  deployed together by `scripts/archive/deploy-binaries.sh`, but nothing in the binary enforces it.

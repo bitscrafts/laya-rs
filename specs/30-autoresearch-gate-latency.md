@@ -31,7 +31,7 @@ require a >25 ms sustained improvement, which noise must not fake.
 
 <!-- autoresearch-config
 TAG=gate-lat2
-METRIC_SCRIPT=scripts/ar-metric-gate-latency.sh
+METRIC_SCRIPT=scripts/archive/ar-metric-gate-latency.sh
 WORKER_CMD=pi -p "Read {spec} — it is the METHOD you follow. Read the last 5 rows of {tsv} (what was tried, what won). In the repo checkout at {worktree}, make EXACTLY ONE improvement edit to the allowed target files only. Write one line describing your hypothesis to {worktree}/.ar-hypothesis.md. Do not run git. Do not run the metric script. Do not touch any other file."
 ALLOWED_TARGETS=README.md
 MAX_EXPERIMENTS=12
@@ -43,7 +43,7 @@ EXPERIMENT_TIMEOUT_SECS=240
 ```yaml
 autoresearch-config:
   TAG: gate-lat
-  METRIC_SCRIPT: scripts/ar-metric-gate-latency.sh
+  METRIC_SCRIPT: scripts/archive/ar-metric-gate-latency.sh
   WORKER_CMD: pi            # STUB first for mechanics; then glm-5.3-flash:cloud
   ALLOWED_TARGETS: README.md
   MAX_EXPERIMENTS: 12
@@ -55,13 +55,13 @@ autoresearch-config:
 ## Requirements
 
 ### R1 — metric script is real and quiet
-`scripts/ar-metric-gate-latency.sh` times 5 sequential `laya-gate "ls" --run-id ar-metric`
+`scripts/archive/ar-metric-gate-latency.sh` times 5 sequential `laya-gate "ls" --run-id ar-metric`
 calls (date +%s%N around each, LAYA_LEDGER_DIR exported), prints ONE number: the p50 in
 integer ms. No other output; exit 0 even if a call is slow. (Those are REAL gate decisions
 — ledger rows, outcomes joinable — that is intended and part of the corpus.)
 
 ### R2 — loop runs the skill's driver with THIS spec
-`autoresearch-driver.sh /projects/laya-rs $PWD/scripts/ar-metric-gate-latency.sh
+`autoresearch-driver.sh /projects/laya-rs $PWD/scripts/archive/ar-metric-gate-latency.sh
 specs/30-autoresearch-gate-latency.md gate-lat`; ledger at the project's `_tmp/autoresearch/
 results-gate-lat.tsv`; one HANDOFF.md line per experiment; worktree
 `/projects/_tmp/autoresearch-wt/laya-rs-gate-lat` on branch `autoresearch/gate-lat`.
@@ -83,7 +83,7 @@ the loop; quota window respected (window guard); no destructive commands — mov
 
 ## Exit Criteria
 
-- [x] `bash scripts/ar-metric-gate-latency.sh | grep -qE '^[0-9]+$'`
+- [x] `bash scripts/archive/ar-metric-gate-latency.sh | grep -qE '^[0-9]+$'`
 - [ ] `[ "$(grep -c 'baseline' /projects/laya-rs/_tmp/autoresearch/results-gate-lat.tsv)" -ge 1 ]`
 - [ ] `[ "$(grep -c 'laya_keep=' /projects/laya-rs/_tmp/autoresearch/results-gate-lat.tsv)" -ge 3 ]`
 - [x] `bash /root/.hermes/skills/software-development/autoresearch-loop/scripts/selftest.sh` (16/16 must stay green)

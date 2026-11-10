@@ -260,7 +260,7 @@ pinned Python reference over a corpus.
 - [x] `cd /projects/laya-rs && cargo test -p laya-head` — all pass, offline
 - [x] `cd /projects/laya-rs && cargo clippy -p laya-head --all-targets -- -D warnings` — zero
 - [x] `cd /projects/laya-rs && cargo fmt --all --check` — zero diffs
-- [x] `cd /projects/laya-rs && python3 scripts/live-corpus-parity.py` — **MEASURED 2026-09-30:
+- [x] `cd /projects/laya-rs && python3 scripts/live/live-corpus-parity.py` — **MEASURED 2026-09-30:
   label agreement 16/16 = 1.0000** (floor 0.9), 0 errors, worst probability difference 4.978e-05
   against the reference's own 4-dp rounding resolution of 5e-05.
 

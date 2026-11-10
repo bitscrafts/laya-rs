@@ -2,7 +2,7 @@
 
 **Status**: IMPLEMENTED (2026-09-30). `laya-store` implements this schema; the server appends a
 row per decision to its own segment file; `laya ledger compact` merges them. Proven end to end by
-`scripts/prove-ledger.py`.
+`scripts/archive/prove-ledger.py`.
 
 > ## What is in the store TODAY
 >

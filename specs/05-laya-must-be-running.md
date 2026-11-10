@@ -75,7 +75,7 @@ per tool call ──► cached readiness (TTL 5s)
 **Why fail closed and not fail open:** the whole point of the project is that
 decisions arrive as typed values the graph matches on. A `gate` that returns
 `allow` because it could not ask is precisely the "single-path gate that gets
-routed around" failure the review documented (the video's own Level 6), except
+routed around" failure the review documented (the reference design's own Level 6), except
 self-inflicted. **An unavailable gate must never mean permission.**
 
 ## TDD Contract

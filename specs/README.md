@@ -38,7 +38,7 @@ opposite state, reaching opposite branches — the pairing that catches a hardco
 Everything is implemented and proven:
 
 - P1 is complete. The MCP server exposes all seven tools, the redb ledger is written by
-  `laya ledger compact` and nothing else, and `scripts/prove-ledger.py` proves the whole
+  `laya ledger compact` and nothing else, and `scripts/archive/prove-ledger.py` proves the whole
   lifecycle end to end through the real binaries.
 - **One thing is deliberately not built, and it is not a gap:** `calibrate`. It is *possible*
   now — the outcome path exists — but it needs outcomes actually recorded before it can mean

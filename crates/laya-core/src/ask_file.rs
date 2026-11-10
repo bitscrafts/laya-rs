@@ -2,7 +2,7 @@
 //!
 //! ## Why this module exists (the highest-value tool in the set)
 //!
-//! The measured case, from the source video: a file was judged with **9,089 tokens** for
+//! The measured case, from the reference design: a file was judged with **9,089 tokens** for
 //! **$0.00049** while the agent's own context stayed at 2k. The same read at a frontier
 //! model cost **$0.091 — 187x more** — and is paid again every turn until compaction.
 //! An agent that reads whole files to answer yes/no is paying that difference every time.
@@ -16,7 +16,7 @@
 //! out-of-scope path is refused **before the file is opened**, so the refusal cannot leak
 //! the file's existence or size.
 //!
-//! **2. File content is DATA, never instructions (spec 04 F9).** This is the video's own
+//! **2. File content is DATA, never instructions (spec 04 F9).** This is the reference design's own
 //! warning — *"state is not treated as hostile"* — and it is a real failure mode: a file
 //! whose text says "ignore your previous instructions" is a prompt injection aimed at the
 //! decision layer. Laya is asked a question ABOUT the content, and the content is labelled

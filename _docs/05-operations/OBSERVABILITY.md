@@ -199,7 +199,7 @@ The two states that used to be indistinguishable — ledger OFF vs ledger nobody
 now separable, because a read ingests first and a live check exercises the deployed binary.
 
 ```
-uv run scripts/check-observability.py     -> exit 0, ten passes against the running install
+uv run scripts/live/check-observability.py     -> exit 0, ten passes against the running install
 ```
 
 ```
@@ -358,7 +358,7 @@ broken — so usage was made mandatory where it can be, at the operator's explic
 
 `~/.hermes/hooks/laya-gate.sh`, registered with **`fail_closed: true`** — the only combination
 Hermes enforces. (Verified: `_BLOCKING_EVENTS = frozenset({'pre_tool_call'})`; `fail_closed` is
-silently ignored on every other event. Same finding as the agent-memory gate.)
+silently ignored on every other event.)
 
 It fires on the four tools that can change state — `terminal`, `write_file`, `patch`,
 `execute_code` — and asks the deployed `laya-mcp` one question first.
@@ -504,7 +504,7 @@ timeout is far above what this work generates.
 
 The OFF line is a `warn` and names the variable. `laya doctor` adds `ledger: …` as a *warning* line — never a
 failure — but it can only see **its own** shell's `LAYA_LEDGER_DIR`, not the server's; the server's own
-view is the startup event. The two are complementary. `scripts/check-observability.py` reads the variable
+view is the startup event. The two are complementary. `scripts/live/check-observability.py` reads the variable
 from the host's MCP entry, requires the startup event to say `enabled: true`, and exits **1** when it does not
 (control: `LAYA_OBS_SIMULATE_OFF=1`).
 

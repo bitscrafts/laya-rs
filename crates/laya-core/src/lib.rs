@@ -14,7 +14,7 @@
 //! * [`route_payload`] — the shape a graph's `route` node consumes, so
 //!   `route on = "$.payload.label"` is all a graph author writes.
 //!
-//! The split is deliberate and comes from the video's own lab: contracts are
+//! The split is deliberate and comes from the reference design's own lab: contracts are
 //! tested **offline** against a deterministic mock (`just test`), and a separate
 //! suite checks **meaning** against the live model (`just test-live`). Anything
 //! that needs the model to test does not belong in this crate.

@@ -95,7 +95,7 @@ the head (blocker B3), the ledger uses a single-writer scheme (blocker B4), and 
   `stats` prints **NO OUTCOMES RECORDED** when there are none, so the calibration gap is visible
   rather than implied.
 - F9. `ask_file`/`ask_files` mark file content as **DATA** in the state, never as
-  instructions (the video's own warning: *"state is not treated as hostile"*).
+  instructions (the reference design's own warning: *"state is not treated as hostile"*).
 - F10. The seam is a precisely-named node factory (finding m3): registered in **both**
   a server's `registry()` **and**
   `lint_registry()`, with `ports()`/`required_caps()`/`effects()` — a net-calling
@@ -164,7 +164,7 @@ The tests that exist, by their real names. (`cargo test -p <crate>` to run them.
 | `latency_ms_is_required_because_the_budget_claim_depends_on_it` | `laya-store` | a null latency cannot parse |
 | `a_percentile_of_nothing_is_none_not_zero` | `laya-store` | unknown is not zero |
 
-**End-to-end, through the real binaries** (`scripts/prove-ledger.py`, not `cargo test`): a real
+**End-to-end, through the real binaries** (`scripts/archive/prove-ledger.py`, not `cargo test`): a real
 `decide` writes a segment and **does not create the store**; `compact` merges it and moves it
 aside; a second compact inserts **zero** rows; `stats` reports the real latency; the outcome
 path records a judgement and refuses what cannot be joined; two concurrent writers both exit
@@ -181,7 +181,7 @@ cleanly.
   `printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized"}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' | timeout 20 cargo run -q -p laya-mcp | tail -1`
   → `ask, ask_file, ask_files, decide, gate, ledger, should_compact` (no `route`)
 - [x] the two-process redb test passes (blocker B4 proven, not assumed) —
-  `two_writers_on_one_store_is_a_typed_error_not_a_panic`, plus `scripts/prove-ledger.py`
+  `two_writers_on_one_store_is_a_typed_error_not_a_panic`, plus `scripts/archive/prove-ledger.py`
   for the no-panic property under a real race
 
 ## Guardrails

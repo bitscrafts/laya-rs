@@ -16,8 +16,7 @@ enthusiastic author; treat every "verified" claim as a claim to be checked.
 
 ## Read these files EXACTLY (do not go exploring the repo)
 
-Read the design first, in full — including **§12, which carries the video/repo links
-and our own prior Jev/Laya research trail**:
+Read the design first, in full — including **§12, which lists the sources**:
 1. `/projects/laya-rs/docs/DESIGN.md`  ← the subject of your review
 
 Then the ground truth it cites. Read ONLY these:

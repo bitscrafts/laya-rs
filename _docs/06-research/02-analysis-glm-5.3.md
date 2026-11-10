@@ -93,9 +93,8 @@ version, or absorb the Rust head), and say which laya version P1 proxies.
 **B4 — One redb store behind N stdio servers collides with redb's single-writer model.**
 Evidence: DESIGN §3 — every consumer (Hermes, pi, Claude, hooks) spawns its
 own `laya-mcp` process, all against one embedded store. redb is an
-embedded, single-process database (amem pins `redb = "2"`, `amem/Cargo.toml:82`;
-pidag pins `redb = "1.0"`, `pidag/Cargo.toml:17` — F10's "redb 2 — amem,
-pidag" is half wrong, and the majors differ in lock/repair behavior).
+embedded, single-process database (of the two sibling projects the design cited, one pins `redb = "2"` and the other `redb = "1.0"`;
+F10's claim that both use redb 2 is half wrong, and the majors differ in lock/repair behavior).
 Consequence: a hook firing while an agent session holds the server is the
 normal case, and the second process cannot open the same store for writing —
 the "one binary, every consumer" architecture fails at first concurrent use.
@@ -388,7 +387,7 @@ what tool) before P5.
 **n2** — §8 lists `max_prefixes 6`; it is unused by the inference path (grep exit=1).
 **n3** — `hybrid_test.py:13` points at `localhost:8099` while the serving container is :8083 (040 §2) — harness drift the design never reconciles.
 **n4** — The Python ground truth lives in another project's venv (`/projects/digital-marketing/.venv`) — the same venv that produced the tokenizers/transformers conflict F1 cites; the design's evidence base is a side effect of an unrelated project.
-**n5** — F10's "redb 2 — amem, pidag": pidag pins 1.0, amem pins 2.
+**n5** — F10's claim that two sibling projects use redb 2: one pins 1.0, the other 2.
 
 ---
 
@@ -403,7 +402,7 @@ what tool) before P5.
 - **F7 — real number, wrong inference.** Δp=0.0006 is one probability, one state, same Python head, different backbone (`parity_test.py:50`). It quantifies Q8_0 quantization, not Rust-head fidelity. "The Rust head port is a fidelity question" is true — F7 is not evidence for it.
 - **F8 — accurate for THIS checkpoint, overstated as a fact.** 039 §6.5 measured act_probability ≡ 1.0 including gibberish; but if the Rust port drops act_head (as F2's inventory implies), the field vanishes and the tool contract diverges from laya's documented response (`agent.py:335`). Decide explicitly.
 - **F9 — fine.** Saturation measured; flag-in-ledger is the right mitigation. Note unclamped sharpening (B2) manufactures fake saturation.
-- **F10 — half wrong.** rmcp 3.2 ✓ (`pii-mcp/Cargo.toml:19`); llama-cpp-2 in pii-model ✓; redb: amem pins 2 ✓, **pidag pins 1.0** ✗.
+- **F10 — half wrong.** rmcp 3.2 ✓ (`pii-mcp/Cargo.toml:19`); llama-cpp-2 in pii-model ✓; redb: one sibling pins 2 ✓, **the other pins 1.0** ✗.
 - **F11 — accurate.** Verified `nodes.rs:64-131` (parsing :75-101; hard error :118-123; payload travels :125-129). `eq` is exact `serde_json::Value` equality (:113) — string labels and bands work; no coercion (float eq is fragile, but the design uses strings).
 - **F12 — accurate.** `find_map`, first match wins, exactly one port (`nodes.rs:112-117`). ✓
 - **F13 — overstated.** V1 exists (`validate.rs:67-75`) and checks edges against rule-declared ports (`node.rs:179-201`) — but it says nothing about labels, and the failure it cannot see is a rule port with **no outgoing edge**, which is only a V5 *warning* (`validate.rs:169-192`): the catch-all nobody wired routes into a silent dead end, not an error. The null/missing case IS caught by a no-`eq` fallback (verified: eval returns `Ok(Null)` on unresolvable paths, `expr.rs:26-28`; Null ≠ any string eq) — but only because the fallback exists, which is exactly what nothing enforces (m1).
@@ -431,7 +430,7 @@ what tool) before P5.
 13. The DAG seam named precisely: new `NodeFactory` in pii-server `registry()` + `lint_registry()`, ports/caps/effects for the `laya` kind; cycle-exhaustion semantics for the two-lane loop. (m3/M10/M1)
 14. Catch-all enforcement: uniform fallback rule required on every route (well-defined), replacing the prefix heuristic. (m1)
 15. Outcome-recording path for `calibrate`. (m7)
-16. amem-consolidation (040 L3) and the pre-dispatch tier gate (040 L1): in scope or explicitly descoped — the design claims to land on the prior trail but reorders it silently.
+16. memory-consolidation (040 L3) and the pre-dispatch tier gate (040 L1): in scope or explicitly descoped — the design claims to land on the prior trail but reorders it silently.
 17. Which checkpoint the head is (English root?) and what happens with the multilingual siblings (`agent.py:110-144`).
 18. Discovery/wiring: where the binary lives, how Hermes/pi/Claude/hook configs register it, version pinning.
 
@@ -444,14 +443,14 @@ what tool) before P5.
 - F4's separability insight (temperature tunes confidence, not the label) is correct where it applies and worth keeping once properly scoped (m5).
 - The MCP-stdio choice and the spec-22 bounded-lifetime pattern are correctly identified and copyable (`main.rs:144-158`: `stdio()` → `serve_server` → `running.waiting()`); rmcp 3.2 + transport-io is already in-tree.
 - Phasing the Rust head (P4) after the levels that pay is the right sequencing instinct; the offline-mock/live-suite test split (§8) is the right test shape.
-- Two-lanes-never-one is the correct posture, matches both the video's framing and 039/040's conclusion that the model handles the ambiguous middle.
+- Two-lanes-never-one is the correct posture, matches both the reference design's framing and 039/040's conclusion that the model handles the ambiguous middle.
 - F6 was true when written and is still true today (verified live).
 
 ---
 
 ## 6. Open questions I could not resolve from the files given
 
-- **All video/repo-specific content** — the ten levels' details, the $3,500/$525/$16.80 cost ladder, the 0.35-confidence "reversible" case, the 201-test offline suite, the L6 bash-heredoc bypass: the design itself records that the transcript could not be fetched (HTTP 429) and relies on the video description + repo README. I could not verify any of it from the files given.
+- **All reference-design-specific content** — the ten levels' details, the $3,500/$525/$16.80 cost ladder, the 0.35-confidence "reversible" case, the 201-test offline suite, the L6 bash-heredoc bypass: the design itself records that the transcript could not be fetched (HTTP 429) and relies on the source's published description. I could not verify any of it from the files given.
 - **llama.cpp determinism across thread counts/builds** for the `/embedding` path (relevant to B1): not determinable from the files; worth a two-build, two-thread-count measurement before relying on replay.
 - **redb 2.x exact cross-process behavior** (lock error vs repair): strongly believed to be exclusive-lock (B4), but I did not run the test; it is a one-liner in P1.
 - **Which checkpoint `_tmp/laya-gguf/laya-head.safetensors` came from**: implied English root by the parity comparison, but not recorded anywhere I was given; the config's `model_name: rl-agent` does not disambiguate.

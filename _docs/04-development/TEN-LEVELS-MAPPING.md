@@ -1,9 +1,8 @@
 # The ten levels, mapped to our tools
 
-**Source**: IndyDevDan, *Ten Levels of Jev* — `https://youtu.be/_U-O5lYhJ7Q`
-(repo `github.com/disler/ten-levels-of-jev`, MIT). The full digest, with the
-repo links and our prior research trail, is in
-[`../06-research/01-design.md`](../06-research/01-design.md) §12.
+**Source**: a public ten-level progression for using a System-1 decision model, from a single
+yes/no question up to an agent that writes its own questions. The design that adopts it is in
+[`../06-research/01-design.md`](../06-research/01-design.md).
 
 **Corrections applied.** This mapping reflects
 [`DESIGN-AMENDMENTS-2026-09-29.md`](DESIGN-AMENDMENTS-2026-09-29.md): the `band`
@@ -14,7 +13,7 @@ is **not** an MCP tool (M6).
 
 ## The mapping
 
-| L | the video's concept | our surface | the invariant we must hold |
+| L | the reference concept | our surface | the invariant we must hold |
 |---|---|---|---|
 | 1 | Single decisions — the "smart if" | `decide` with a `noul` | **the threshold lives in the caller**, in `Policy`, never in a prompt |
 | 2 | Multiple choice | `decide` with N questions in ONE call | **fan out**: ask everything you might need, then choose in code which answers to use |
@@ -29,7 +28,7 @@ is **not** an MCP tool (M6).
 
 ### Deliberately out of scope
 
-The video's **presentation layer** — the Vue lab, the animated hero SVGs, the
+The reference design's **presentation layer** — the Vue lab, the animated hero SVGs, the
 agent-window UI — exists to teach, not to decide. Our equivalent is `ledger` plus
 the redb store: observability and cost-per-decision without a web app.
 
@@ -64,10 +63,10 @@ can match on: an exact string.
 
 ## The failures we inherit as requirements
 
-These are the video's own bug list. They are **not** optional extras — each one
+These are the reference design's own bug list. They are **not** optional extras — each one
 shapes a rule above.
 
-**1. A single-path gate gets routed around.** The video's Level 6 gate blocked
+**1. A single-path gate gets routed around.** The reference design's Level 6 gate blocked
 writes to `.env`, and the agent wrote the same file via a **bash heredoc**. The
 author added a "this block is final, do not work around it" notice and says
 plainly: *"that notice is an instruction, not a control."*
@@ -100,7 +99,7 @@ derived in code from HTTP facts.
 
 ## Two lanes, never one
 
-The video's thesis is *"Jev AND your agents"*, and it is also our docs 039/040
+The reference design's thesis is *"Jev AND your agents"*, and it is also our docs 039/040
 conclusion. The cheap lane handles the bounded decisions; the expensive lane does
 the open work; the graph owns every edge in both cases. `laya-rs` never replaces
 the LLM lane — **its uncertainty is the LLM lane's work queue**.
@@ -248,7 +247,7 @@ came to be wrong. Worth a decision, not asserted here.
 
 ## Verified end to end, and the three contract defects that found (2026-10-02)
 
-`scripts/check-ten-levels.py` drives all ten through the **shipped MCP tools** over stdio — the
+`scripts/live/check-ten-levels.py` drives all ten through the **shipped MCP tools** over stdio — the
 surface an agent actually uses — so a level that passes here works for a caller, not just for a
 unit test. It carries a control: L10's command must be **refused by the gate** (`mkfs.ext4`) and
 never run, so the level cannot pass by executing whatever it is given.

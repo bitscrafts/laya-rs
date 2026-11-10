@@ -53,7 +53,7 @@ in exactly one place; this index points at it, never restates it.
 - [P1 status — and the measurements that shaped it](04-development/P1-STATUS.md) — What was measured before designing (Laya concurrency, the redb collision), and what P1 delivered.
 - [The scheduler's single guard, and the mutants that hang it](04-development/SCHEDULER-SINGLE-GUARD.md) — dependency_tables is the shared source of the graph's shape for topo_order, refuse_cycle and the Tracker, and nothing checks it is about the graph at all. refuse_cycle is the only cycle guard and is built on the same table. There is no spin bound anywhere, so a node that never settles is waited on forever -- the two mutants the gate reports as timeouts.
 - [Stale refusals — a rule that outlives its reason is a defect too](04-development/STALE-REFUSALS-2026-10-02.md) — Spec 20 refused timeout and allow_failure on a decide 'until spec 17'. Spec 17 landed and the timeout now works: a decide with timeout zero fails as timed out. The refusal was stale and blocked a working feature. The other half is worse than refused -- allow_failure is accepted, looks honoured, then the synthetic route node stops the run anyway.
-- [The ten levels, mapped to our tools](04-development/TEN-LEVELS-MAPPING.md) — IndyDevDan's ten levels, and the documented failures we inherit as requirements.
+- [The ten levels, mapped to our tools](04-development/TEN-LEVELS-MAPPING.md) — The ten levels, and the documented failures we inherit as requirements.
 - [Development](04-development/README.md) — Design decisions and implementation notes.
 
 ### 05-operations
@@ -72,7 +72,6 @@ in exactly one place; this index points at it, never restates it.
 - [Adversarial review by pi + glm-5.3](06-research/02-analysis-glm-5.3.md) — The full review: five blockers, ten majors, fact-by-fact corrections.
 - [The review brief](06-research/02a-analysis-brief.md) — The exact prompt the reviewer ran against, so the review is reproducible.
 - [Four architecture questions (threading, config, graph spec, scheduler)](06-research/03-four-architecture-questions.md) — Discussion only: the priority queue as admission control and a missed fourth parallelism axis; where config should live and why redb does not speed the load; our own graph specification and mermaid export; and whether to build a scheduler.
-- [04 — JEV / TypeSafe AI ("System One") — the upstream video, reviewed for ideas](06-research/04-jev-typesafe-ai-video-review.md) — Source: "JEV / TypeSafe AI API & Rust - Let make a rust lb" — Jeremy Chone (@jchone), live 2026-09-19, 2h44m (9,863 s), https://www.youtube.com/live/pU73lYF7R1I.
 - [LAYA SEAM REVIEW + FIX PLAN — 2026-10-06](06-research/05-laya-seam-review-2026-10-06.md) — <!-- Filed 2026-10-06T14:30Z by the Hermes orchestrator (Marcelo Correa). Produced by: pi + glm-5.3:cloud (ollama-cloud), the two-lane ANALYSIS lane (read-only tool grant),
 - [Research](06-research/README.md) — Numbered research write-ups: convention and index.
 

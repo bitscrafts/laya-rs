@@ -6,7 +6,7 @@ building a worked graph example. They are recorded because the first example fai
 
 Unit of measurement: one question, one state, the `label`/`band`/`confidence` the head returned.
 All figures come from live `decide` calls against the shipped binary. Re-run with
-`scripts/check-wc-boundary.py` (thresholds) — 15/15 as of this writing.
+`scripts/live/check-wc-boundary.py` (thresholds) — 15/15 as of this writing.
 
 ---
 

@@ -143,7 +143,7 @@ caught: the canary file has to exist or not exist afterwards.
 - [x]  `cd /projects/laya-rs && cargo test -p laya-core --lib destructive_signals_see_through_flag_and_whitespace_variants 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R4
 - [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib ask_refuses_before_it_executes 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R7, by effect
 - [x]  `cd /projects/laya-rs && cargo test -p laya-mcp --lib ask_a_command_past_its_deadline_is_killed 2>&1 | grep -qE '^test result: ok\. 1 passed'`: R8
-- [x]  `cd /projects/laya-rs && python3 scripts/gate-live-corpus.py`: **live**. It drives the real `laya-mcp` `gate` over stdio with a corpus of ≥ 15 destructive commands, including every command listed in Verified Premises. It exits non-zero if **any** of them is `allow`, and it **also** exits non-zero unless `git status` reaches `allow` (the control). Measured pre-implementation: 6 destructive commands reach `allow`
+- [x]  `cd /projects/laya-rs && python3 scripts/live/gate-live-corpus.py`: **live**. It drives the real `laya-mcp` `gate` over stdio with a corpus of ≥ 15 destructive commands, including every command listed in Verified Premises. It exits non-zero if **any** of them is `allow`, and it **also** exits non-zero unless `git status` reaches `allow` (the control). Measured pre-implementation: 6 destructive commands reach `allow`
 
 **Carried re-checks** (these pass before implementation by design):
 
@@ -174,6 +174,6 @@ caught: the canary file has to exist or not exist afterwards.
 | `crates/laya-core/src/policy.rs` | `gate_allow`, `ask_deadline_secs`; deprecate `Policy::gate` in favour of `gate_verdict` | R1, R5, R8 |
 | `crates/laya-core/src/agentic.rs` | `normalise_command`, `allowlist_match`, `gate_verdict`, `ModelVerdict`, `GateVerdict`; R4 normalisation | R1–R6 |
 | `crates/laya-mcp/src/lib.rs` | `judge_command` calls `gate_verdict`; `ask_via_sidecar` reorders validation before `sh -c`, adds deadline+kill | R6–R8 |
-| `scripts/gate-live-corpus.py` | new live check, corpus + control | R1 |
+| `scripts/live/gate-live-corpus.py` | new live check, corpus + control | R1 |
 | `_docs/02-guides/INSTALL-IN-HERMES.md` | the `gate` contract: allowlist semantics | — |
 | `HANDOFF.md` | correct "THE SAFETY DEFECT THAT WAS FIXED" in place: annotate, do not erase | — |
