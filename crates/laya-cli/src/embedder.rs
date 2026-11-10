@@ -364,36 +364,8 @@ mod tests {
     // was. A gate or a graph node cannot wait two minutes on a dead backbone. These tests drive a
     // REAL socket (a hung one, a prompt one, a slow one), not a constant.
 
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use crate::test_server::serve_once;
     use std::time::{Duration, Instant};
-
-    /// A one-shot HTTP server. `delay` before answering; `None` = accept and never answer.
-    fn serve_once(delay: Option<Duration>) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        std::thread::spawn(move || {
-            let Ok((mut stream, _)) = listener.accept() else {
-                return;
-            };
-            let mut buf = [0_u8; 8192];
-            let _ = stream.read(&mut buf);
-            match delay {
-                None => std::thread::sleep(Duration::from_secs(30)), // hung: holds the socket open
-                Some(d) => {
-                    std::thread::sleep(d);
-                    let body = r#"[{"embedding":[[0.5,0.25]]}]"#;
-                    let _ = write!(
-                        stream,
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                        body.len()
-                    );
-                }
-            }
-        });
-        url
-    }
 
     #[test]
     fn a_hung_backbone_fails_within_the_timeout_it_was_given() {

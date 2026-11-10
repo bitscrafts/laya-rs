@@ -19,6 +19,8 @@ pub mod embedder;
 pub mod graph;
 pub mod ledger;
 pub mod mcp_client;
+#[cfg(test)]
+pub mod test_server;
 
 pub use decide::{DecideArgs, DecideOutput, decide};
 pub use embedder::{HttpEmbedder, parse_embedding};
